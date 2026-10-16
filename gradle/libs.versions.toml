@@ -1,0 +1,16 @@
+[versions]
+tigerbeetle = "0.17.9"
+testcontainers = "2.0.5"
+junit = "6.1.3"
+assertj = "3.27.7"
+slf4j = "2.0.20"
+
+[libraries]
+tigerbeetle-java = { module = "com.tigerbeetle:tigerbeetle-java", version.ref = "tigerbeetle" }
+testcontainers = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
+testcontainers-toxiproxy = { module = "org.testcontainers:testcontainers-toxiproxy", version.ref = "testcontainers" }
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
