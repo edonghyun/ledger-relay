@@ -1,3 +1,5 @@
+import java.time.Duration
+
 plugins {
     `java-library`
     `java-test-fixtures`
@@ -32,6 +34,8 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    // 개별 테스트 2분 timeout(아래)을 빠져나가는 매달림까지 막는 전체 상한
+    timeout = Duration.ofMinutes(15)
     systemProperty("ledgerrelay.tigerbeetle.version", libs.versions.tigerbeetle.get())
     // TB 클라이언트는 timeout이 없어 서버가 죽으면 영원히 기다린다(스펙 §1.2). 매달림을 실패로 바꾸는 안전망.
     systemProperty("junit.jupiter.execution.timeout.default", "2m")

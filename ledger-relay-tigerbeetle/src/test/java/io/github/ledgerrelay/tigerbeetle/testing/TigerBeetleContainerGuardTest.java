@@ -3,25 +3,50 @@ package io.github.ledgerrelay.tigerbeetle.testing;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.ContainerLaunchException;
-import org.testcontainers.containers.output.ToStringConsumer;
-import org.testcontainers.containers.wait.strategy.Wait;
 
 class TigerBeetleContainerGuardTest {
 
+    /** "listening on"을 찍은 뒤 지정한 시간 후 TB 크래시와 같은 로그를 남기고 exit 139로 죽는 가짜 서버. */
+    private static String crashingServer(String secondsAfterListening) {
+        return "sleep 2; echo 'info(main): 0: cluster=0: listening on fake'; sleep " + secondsAfterListening
+                + "; echo 'thread 1 panic: reached unreachable code'; exit 139";
+    }
+
     @Test
-    @DisplayName("§12 TB Docker: seccomp가 기본값이면 기동에 실패하고, 원인 io_uring 오류가 로그에 남는다")
+    @DisplayName("§12 TB Docker: seccomp가 기본값이면 기동에 실패하고, 예외 메시지에 원인 io_uring 오류가 담긴다")
     void failsWithIoUringErrorWithoutUnconfinedSeccomp() {
-        // 기동 실패 후에는 컨테이너가 정리될 수 있어 getLogs()에 기대지 않고, 출력을 흘려받아 보관한다
-        ToStringConsumer logs = new ToStringConsumer();
-        try (TigerBeetleContainer tb = new TigerBeetleContainer(false)
-                .withLogConsumer(logs)
-                .waitingFor(Wait.forLogMessage(".*listening on.*", 1).withStartupTimeout(Duration.ofSeconds(30)))) {
-            assertThatThrownBy(tb::start).isInstanceOf(ContainerLaunchException.class);
-            assertThat(logs.toUtf8String()).contains("io_uring is not available");
+        try (TigerBeetleContainer tb = new TigerBeetleContainer(false)) {
+            assertThatThrownBy(tb::start)
+                    .isInstanceOf(ContainerLaunchException.class)
+                    .hasMessageContaining("io_uring is not available");
+        }
+    }
+
+    @Test
+    @DisplayName("§12 TB 크래시: listening 직후 서버가 죽으면 start()가 실패하고, 예외 메시지에 panic 로그가 담긴다")
+    void startFailsWhenServerDiesRightAfterListening() {
+        try (TigerBeetleContainer tb = new TigerBeetleContainer(true, crashingServer("0.2"))) {
+            assertThatThrownBy(tb::start)
+                    .isInstanceOf(ContainerLaunchException.class)
+                    .hasMessageContaining("reached unreachable code");
+        }
+    }
+
+    @Test
+    @DisplayName("§12 TB 크래시: 기동 후 서버가 죽으면 assertAlive()가 즉시 실패하고 panic 로그를 보여준다 — 다음 테스트가 2분씩 매달리지 않게")
+    void assertAliveFailsAfterServerDies() throws Exception {
+        try (TigerBeetleContainer tb = new TigerBeetleContainer(true, crashingServer("3"))) {
+            tb.start();
+            tb.assertAlive();
+
+            Thread.sleep(4_000);
+
+            assertThatThrownBy(tb::assertAlive)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("reached unreachable code");
         }
     }
 

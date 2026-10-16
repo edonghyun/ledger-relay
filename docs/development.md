@@ -20,5 +20,9 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 
 ## 알려진 문제
 
-- **TB 서버 크래시 (원인 미상)**: 2026-10-16 전체 테스트 4회 중 1회, 컨테이너가 기동 직후 `thread 1 panic: reached unreachable code`(exit 139)로 종료됐다. OOM은 아니었다. 기동 직후 요청을 반복하는 재현 시도 12회에서는 재현되지 않았다.
-- TB 클라이언트에는 timeout이 없다. 서버가 죽으면 요청이 영원히 대기한다. 그래서 테스트 태스크에 `junit.jupiter.execution.timeout.default=2m`을 걸어, 매달림이 스택 트레이스와 함께 실패로 끝나게 했다. 이 실패가 나면 `docker ps -a`로 종료된 TB 컨테이너를 찾아 `docker logs`를 확인한다.
+- **TB 서버 크래시 (원인 미상)**: 2026-10-16 전체 테스트 5회 중 2회(리뷰어 실행 포함), 한 실행 안에서 세 번째로 띄운 TB 컨테이너가 기동 직후(`listening on` 뒤 2~130ms) `thread 1 panic: reached unreachable code`(exit 139)로 종료됐다. OOM은 아니었다. 새 컨테이너에 바로 요청을 보내는 단독 재현 시도 12회에서는 재현되지 않았다.
+- TB 클라이언트에는 timeout이 없어서, 서버가 죽으면 요청이 영원히 대기한다. 픽스처의 대응은 다음과 같다.
+  - `TigerBeetleContainer`는 컨테이너 로그를 항상 보관한다. 기동 실패는 로그 끝부분을 담은 `ContainerLaunchException`으로 다시 던진다.
+  - `listening on` 뒤 1초 동안 살아 있는지 확인한다. 이 구간 안에 죽으면 그 자리에서 실패한다.
+  - TB를 쓰는 테스트 클래스는 `@BeforeEach`에서 `assertAlive()`를 부른다. 서버가 도중에 죽어도 그 클래스의 남은 테스트가 2분씩 매달리지 않고 panic 로그와 함께 바로 실패한다.
+  - 안전망으로 개별 테스트에는 2분, Gradle 테스트 태스크 전체에는 15분 상한을 둔다.

@@ -14,6 +14,7 @@ import io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleContainer;
 import java.math.BigInteger;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -36,6 +37,11 @@ class TigerBeetleSemanticsTest {
     static void stop() throws Exception {
         client.close();
         TB.stop();
+    }
+
+    @BeforeEach
+    void serverIsAlive() {
+        TB.assertAlive();
     }
 
     @Test

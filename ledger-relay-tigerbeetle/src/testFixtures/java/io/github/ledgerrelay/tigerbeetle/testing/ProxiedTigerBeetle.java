@@ -64,6 +64,11 @@ public final class ProxiedTigerBeetle implements AutoCloseable {
         return new Client(UInt128.asBytes(0), new String[] {clientAddress()});
     }
 
+    /** 프록시 뒤 TB 서버가 살아 있는지 확인한다. {@link TigerBeetleContainer#assertAlive()} 참고. */
+    public void assertAlive() {
+        tigerBeetle.assertAlive();
+    }
+
     /** 프록시를 끊는다. 기존 연결도 닫힌다. */
     public void cutConnection() throws IOException {
         proxy.disable();
