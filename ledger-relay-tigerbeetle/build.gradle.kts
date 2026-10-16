@@ -33,6 +33,8 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     systemProperty("ledgerrelay.tigerbeetle.version", libs.versions.tigerbeetle.get())
+    // TB 클라이언트는 timeout이 없어 서버가 죽으면 영원히 기다린다(스펙 §1.2). 매달림을 실패로 바꾸는 안전망.
+    systemProperty("junit.jupiter.execution.timeout.default", "2m")
     testLogging {
         events("passed", "skipped", "failed")
         showStandardStreams = false
