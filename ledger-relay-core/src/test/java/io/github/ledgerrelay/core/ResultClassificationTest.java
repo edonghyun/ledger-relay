@@ -95,7 +95,7 @@ class ResultClassificationTest {
     @DisplayName("TB 결과 코드는")
     class Codes {
 
-        @ParameterizedTest(name = "{0} → {1}")
+        @ParameterizedTest(name = "{0} → {1}", quoteTextArguments = false)
         @CsvSource(textBlock = CLASSIFICATION_TABLE)
         @DisplayName("분류표에 적힌 분류로 나뉜다")
         void fallsIntoItsCategory(LedgerResultCode code, ResultCategory expected) {
@@ -124,7 +124,7 @@ class ResultClassificationTest {
     @DisplayName("분류마다")
     class Categories {
 
-        @ParameterizedTest(name = "{0} → 상태 {1}, 알림 {2}")
+        @ParameterizedTest(name = "{0} → 상태 {1}, 알림 {2}", quoteTextArguments = false)
         @CsvSource(textBlock = """
                 APPLIED,       APPLIED,  false
                 CONFLICT,      CONFLICT, true
