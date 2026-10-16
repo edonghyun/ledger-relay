@@ -8,8 +8,11 @@ public enum ResultCategory {
     CONFLICT(CommandState.CONFLICT, true),
     /** 업무 거절: 잔액, 한도, 만료, 이미 확정·해제됨 등. */
     BUSINESS(CommandState.REJECTED, false),
-    /** id_already_failed: 이전 시도가 실패했다. 원래 사유는 알 수 없다. */
-    PRIOR_FAILURE(CommandState.REJECTED, false),
+    /**
+     * id_already_failed: 응답이 유실된 이전 시도가 TB의 일시적 실패 7종(잔액·한도 2, 계좌 닫힘 2, 계좌·예약 없음 3) 중
+     * 하나로 끝났다. 어느 것인지는 알 수 없고 잘못된 요청(INVALID)일 수도 있으므로 알린다.
+     */
+    PRIOR_FAILURE(CommandState.REJECTED, true),
     /** 잘못된 요청: 앱 버그 또는 설정 오류. */
     INVALID(CommandState.REJECTED, true),
     /** v1이 쓰지 않는 기능(linked, imported)의 코드. CONFLICT로 다룬다(스펙 §4.4, P1-5). */

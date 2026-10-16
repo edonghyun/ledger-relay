@@ -46,7 +46,7 @@ class ResultClassificationTest {
             OverflowsDebits, BUSINESS
             OverflowsCredits, BUSINESS
             OverflowsTimeout, BUSINESS
-            # 거절·이전 실패: 원래 사유는 알 수 없다
+            # 거절·이전 실패: 응답이 유실된 첫 시도가 TB의 일시적 실패 7종 중 하나였다. 계좌 없음(INVALID)일 수도 있어 알린다
             IdAlreadyFailed, PRIOR_FAILURE
             # 거절·잘못된 요청: 앱 버그 또는 설정 오류
             DebitAccountNotFound, INVALID
@@ -129,7 +129,7 @@ class ResultClassificationTest {
                 APPLIED,       APPLIED,  false
                 CONFLICT,      CONFLICT, true
                 BUSINESS,      REJECTED, false
-                PRIOR_FAILURE, REJECTED, false
+                PRIOR_FAILURE, REJECTED, true
                 INVALID,       REJECTED, true
                 UNSUPPORTED,   CONFLICT, true
                 """)
