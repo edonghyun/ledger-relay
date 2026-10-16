@@ -6,6 +6,7 @@ import eu.rekawek.toxiproxy.Proxy;
 import eu.rekawek.toxiproxy.ToxiproxyClient;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.function.Function;
 import org.testcontainers.containers.Network;
 import org.testcontainers.toxiproxy.ToxiproxyContainer;
 
@@ -33,26 +34,35 @@ public final class ProxiedTigerBeetle implements AutoCloseable {
     }
 
     public static ProxiedTigerBeetle start() {
+        return start(network -> new ToxiproxyContainer(TOXIPROXY_IMAGE));
+    }
+
+    /** 테스트 전용: Toxiproxy 컨테이너 생성을 바꿔 기동 실패 경로를 검증한다. */
+    static ProxiedTigerBeetle start(Function<Network, ToxiproxyContainer> toxiproxyFactory) {
         Network network = Network.newNetwork();
         // 네트워크 별칭은 사용자 정의 네트워크에서만 유효하므로 여기서 붙인다(TigerBeetleContainer 단독 사용 시에는 없음)
         TigerBeetleContainer tigerBeetle = new TigerBeetleContainer()
                 .withNetwork(network)
                 .withNetworkAliases(TigerBeetleContainer.NETWORK_ALIAS);
-        ToxiproxyContainer toxiproxy = new ToxiproxyContainer(TOXIPROXY_IMAGE)
+        ToxiproxyContainer toxiproxy = toxiproxyFactory.apply(network)
                 .withNetwork(network)
                 .withExposedPorts(CONTROL_PORT, PROXY_PORT);
-        tigerBeetle.start();
-        toxiproxy.start();
         try {
+            tigerBeetle.start();
+            toxiproxy.start();
             ToxiproxyClient control = new ToxiproxyClient(toxiproxy.getHost(), toxiproxy.getMappedPort(CONTROL_PORT));
             Proxy proxy = control.createProxy("tigerbeetle", "0.0.0.0:" + PROXY_PORT,
                     TigerBeetleContainer.NETWORK_ALIAS + ":" + TigerBeetleContainer.PORT);
             return new ProxiedTigerBeetle(network, tigerBeetle, toxiproxy, proxy);
-        } catch (IOException e) {
+        } catch (RuntimeException | IOException e) {
+            // 어느 단계에서 실패하든 이미 띄운 것을 정리한다. 기동 전 컨테이너의 stop()은 아무 일도 하지 않는다.
             toxiproxy.stop();
             tigerBeetle.stop();
             network.close();
-            throw new UncheckedIOException("Toxiproxy 프록시 생성 실패", e);
+            if (e instanceof IOException io) {
+                throw new UncheckedIOException("Toxiproxy 프록시 생성 실패", io);
+            }
+            throw (RuntimeException) e;
         }
     }
 
