@@ -102,7 +102,8 @@ class TransitionTableTest {
             Transition next = TransitionTable.next(current, event);
 
             // then
-            assertThat(next).as("%s 상태에서 %s 사건", current, event).isEqualTo(parse(expected));
+            assertThat(next).as("%s 상태에서 %s 사건은 표에 '%s'로 적혀 있다", current, event, expected)
+                    .isEqualTo(parse(expected));
         }
 
         @Test
@@ -167,9 +168,15 @@ class TransitionTableTest {
                     }
 
                     // then
-                    assertThat(next.effects().contains(Effect.RUN_HANDLER))
-                            .as("%s + %s → %s: 핸들러 실행 여부", state, event, next.to())
-                            .isEqualTo(next.to().isFinal());
+                    if (next.to().isFinal()) {
+                        assertThat(next.effects())
+                                .as("%s + %s: 최종 상태 %s로 들어가는데 핸들러 실행이 빠졌다", state, event, next.to())
+                                .contains(Effect.RUN_HANDLER);
+                    } else {
+                        assertThat(next.effects())
+                                .as("%s + %s: 최종이 아닌 %s로 가는데 핸들러 실행이 붙었다", state, event, next.to())
+                                .doesNotContain(Effect.RUN_HANDLER);
+                    }
                 }
             }
         }
@@ -216,13 +223,16 @@ class TransitionTableTest {
                 .toList();
     }
 
-    /** 표의 기대값 표기를 {@link Transition}으로 읽는다. */
+    /**
+     * 표의 기대값 표기를 {@link Transition}으로 읽는다. 프로덕션 팩토리({@code Transition.zeroRows()} 등)를 쓰지 않고
+     * 값을 직접 만든다. 팩토리를 쓰면 팩토리가 틀렸을 때 기대값도 같이 틀려서 표가 아무것도 검사하지 못한다.
+     */
     private static Transition parse(String notation) {
         return switch (notation) {
-            case "그대로" -> Transition.unchanged();
-            case "0행" -> Transition.zeroRows();
-            case "불가" -> Transition.impossible();
-            case "해당없음" -> Transition.notApplicable();
+            case "그대로" -> new Transition(Transition.Outcome.UNCHANGED, null, Set.of());
+            case "0행" -> new Transition(Transition.Outcome.ZERO_ROWS, null, Set.of());
+            case "불가" -> new Transition(Transition.Outcome.IMPOSSIBLE, null, Set.of());
+            case "해당없음" -> new Transition(Transition.Outcome.NOT_APPLICABLE, null, Set.of());
             default -> {
                 String[] parts = notation.split("\\+");
                 Set<Effect> effects = EnumSet.noneOf(Effect.class);
@@ -235,7 +245,7 @@ class TransitionTableTest {
                         default -> throw new IllegalArgumentException("표기 오류: " + parts[i]);
                     });
                 }
-                yield Transition.moveTo(CommandState.valueOf(parts[0]), effects.toArray(Effect[]::new));
+                yield new Transition(Transition.Outcome.MOVE, CommandState.valueOf(parts[0]), effects);
             }
         };
     }

@@ -85,6 +85,19 @@ class LedgerCommandTest {
             assertThat(release).isEqualTo(new LedgerCommand("release-1", VOID, "order-42",
                     BigInteger.ZERO, BigInteger.ZERO, BigInteger.ZERO, 0, 0, 0, "hold-1", 0, 0));
         }
+        @Test
+        @DisplayName("TB 필드의 최댓값(ledger 2^32-1, code 65535, 만료 2^32-1초)은 그대로 담긴다")
+        void acceptsTheLargestTigerBeetleValues() {
+            // when
+            LedgerCommand hold = LedgerCommand.reserve("hold-1").orderingKey("order-42")
+                    .debit(1001).credit(2002).amount(500)
+                    .ledger(4_294_967_295L).code(65_535).timeoutSeconds(4_294_967_295L).build();
+
+            // then
+            assertThat(hold.ledger()).as("ledger").isEqualTo(4_294_967_295L);
+            assertThat(hold.code()).as("code").isEqualTo(65_535);
+            assertThat(hold.timeoutSeconds()).as("timeoutSeconds").isEqualTo(4_294_967_295L);
+        }
     }
 
     @Nested
@@ -140,6 +153,30 @@ class LedgerCommandTest {
                             build(() -> aPost().debit(1001).build()), "post·void는 예약의 계좌·ledger·code를 따르므로"),
                     argumentSet("확정 금액이 0이면 — TB는 0원 확정 후 나머지를 풀므로, 전액 확정을 기대한 사용자가 돈을 못 받는다",
                             build(() -> aPost().amount(0).build()), "post의 amount는 0일 수 없습니다"),
+                    argumentSet("orderingKey가 공백이면",
+                            build(() -> aTransfer().orderingKey(" ").build()), "orderingKey가 필요합니다"),
+                    argumentSet("보내는 계좌가 음수면",
+                            build(() -> aTransfer().debit(-5).build()), "debitAccountId는 1 이상 2^128-2 이하여야 합니다"),
+                    argumentSet("ledger가 2^32 이상이면",
+                            build(() -> aTransfer().ledger(1L << 32).build()), "ledger는 1 이상 2^32-1 이하여야 합니다"),
+                    argumentSet("code가 0이면",
+                            build(() -> aTransfer().code(0).build()), "code는 1 이상 65535 이하여야 합니다"),
+                    argumentSet("예약의 timeoutSeconds가 음수면",
+                            build(() -> aReserve().timeoutSeconds(-1).build()),
+                            "timeoutSeconds는 0 이상 2^32-1 이하여야 합니다"),
+                    argumentSet("확정에 timeoutSeconds를 주면",
+                            build(() -> aPost().timeoutSeconds(30).build()), "timeoutSeconds는 reserve 전용입니다"),
+                    argumentSet("확정에 받는 계좌를 주면",
+                            build(() -> aPost().credit(2002).build()), "post·void는 예약의 계좌·ledger·code를 따르므로"),
+                    argumentSet("확정에 ledger를 주면",
+                            build(() -> aPost().ledger(1).build()), "post·void는 예약의 계좌·ledger·code를 따르므로"),
+                    argumentSet("해제에 code를 주면",
+                            build(() -> aVoid().code(10).build()), "post·void는 예약의 계좌·ledger·code를 따르므로"),
+                    argumentSet("해제에 reservation이 없으면",
+                            build(() -> LedgerCommand.voidReservation("release-1").orderingKey("order-42").build()),
+                            "post·void에는 reservation이 필요합니다"),
+                    argumentSet("확정의 reservation이 공백이면",
+                            build(() -> aPost().reservation(" ").build()), "post·void에는 reservation이 필요합니다"),
                     argumentSet("해제에 금액을 주면",
                             build(() -> aVoid().amount(100).build()), "void는 amount를 받지 않습니다"));
         }

@@ -21,7 +21,7 @@ class ResultCodeGuardTest {
         Set<String> unclassified = minus(namesOf(CreateTransferStatus.values()), namesOf(LedgerResultCode.values()));
 
         // then
-        assertNoneMissing(unclassified, "core LedgerResultCode에 없는 TB 결과 코드");
+        assertEveryTigerBeetleCodeClassified(unclassified);
     }
 
     @Test
@@ -31,7 +31,7 @@ class ResultCodeGuardTest {
         Set<String> stale = minus(namesOf(LedgerResultCode.values()), namesOf(CreateTransferStatus.values()));
 
         // then
-        assertNoneMissing(stale, "TB 클라이언트에 없는 core 결과 코드");
+        assertNoStaleCode(stale);
     }
 
     private static Set<String> namesOf(Enum<?>[] values) {
@@ -44,8 +44,16 @@ class ResultCodeGuardTest {
         return rest;
     }
 
-    private static void assertNoneMissing(Set<String> missing, String meaning) {
-        assertThat(missing).as("%s가 하나도 없기를 기대했다 (스펙 §4.4 분류표와 LedgerResultCode에 추가할 것)", meaning)
+    private static void assertEveryTigerBeetleCodeClassified(Set<String> unclassified) {
+        assertThat(unclassified)
+                .as("TB에 core가 분류하지 않는 결과 코드가 있다 — 스펙 §4.4 분류표, LedgerResultCode, "
+                        + "ResultClassificationTest.CLASSIFICATION_TABLE에 추가할 것")
+                .isEmpty();
+    }
+
+    private static void assertNoStaleCode(Set<String> stale) {
+        assertThat(stale)
+                .as("TB에서 사라진 결과 코드가 core에 남아 있다 — LedgerResultCode와 분류표에서 지울 것")
                 .isEmpty();
     }
 }

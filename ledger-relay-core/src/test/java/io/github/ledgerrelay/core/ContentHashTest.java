@@ -95,6 +95,8 @@ class ContentHashTest {
                             aTransfer("c").build(), aTransfer("c").ledger(2).build()),
                     argumentSet("code가 다르면",
                             aTransfer("c").build(), aTransfer("c").code(11).build()),
+                    argumentSet("code가 다르면 (10 vs 266: 하위 8비트가 같은 값)",
+                            aTransfer("c").build(), aTransfer("c").code(266).build()),
                     argumentSet("timeoutSeconds가 다르면",
                             aReserveLikeTheTransfer("c").timeoutSeconds(30).build(),
                             aReserveLikeTheTransfer("c").timeoutSeconds(31).build()),
@@ -128,7 +130,7 @@ class ContentHashTest {
             String hash = ContentHash.of(aTransfer("pay-1").build());
 
             // then
-            assertThat(hash).isEqualTo("13ff1a83e735898e91f4e1f133b9818de72293f991856e926a0f4f8021c85b09");
+            assertPinnedHash(hash, "13ff1a83e735898e91f4e1f133b9818de72293f991856e926a0f4f8021c85b09");
         }
 
         @Test
@@ -138,7 +140,7 @@ class ContentHashTest {
             String hash = ContentHash.of(aTransfer("pay-1").userData64(-1L).userData32(-1).build());
 
             // then
-            assertThat(hash).isEqualTo("bbda13fdbd0aec09cb1ae90ab5373ec19c10aced23daabdd833020da9c1d51e8");
+            assertPinnedHash(hash, "bbda13fdbd0aec09cb1ae90ab5373ec19c10aced23daabdd833020da9c1d51e8");
         }
 
         @Test
@@ -148,7 +150,7 @@ class ContentHashTest {
             String hash = ContentHash.of(aTransfer("pay-1").orderingKey("주문-42").build());
 
             // then
-            assertThat(hash).isEqualTo("41af1a6cd0a1f072ae912dd5b1f5e53cf38dfa50931d2af9c19ce9af4ba4e424");
+            assertPinnedHash(hash, "41af1a6cd0a1f072ae912dd5b1f5e53cf38dfa50931d2af9c19ce9af4ba4e424");
         }
 
         @Test
@@ -158,7 +160,28 @@ class ContentHashTest {
             String hash = ContentHash.of(aPost().build());
 
             // then
-            assertThat(hash).isEqualTo("b7e732771a199173974ab911aa4e0ba28bc7de62ec6c39ef5fbbef97c957c476");
+            assertPinnedHash(hash, "b7e732771a199173974ab911aa4e0ba28bc7de62ec6c39ef5fbbef97c957c476");
+        }
+
+        @Test
+        @DisplayName("해제(hold-1)의 해시는 6489e328…다 — kind \"void\"를 로캘과 무관하게 소문자로 쓴다")
+        void knownVectorForAVoid() {
+            // when
+            String hash = ContentHash.of(LedgerCommand.voidReservation("release-1").orderingKey("order-42")
+                    .reservation("hold-1").build());
+
+            // then
+            assertPinnedHash(hash, "6489e32839398c0782aab2f1698f09b1cbe1e5fcbb58e2cbb7f9fe7a73176d60");
+        }
+
+        @Test
+        @DisplayName("만료 2^32-1초 예약의 해시는 cddde740…다 — timeout을 int로 자르지 않는다")
+        void knownVectorForTheLongestReserveTimeout() {
+            // when
+            String hash = ContentHash.of(aReserveLikeTheTransfer("hold-1").timeoutSeconds(4_294_967_295L).build());
+
+            // then
+            assertPinnedHash(hash, "cddde740f9d46225d1189f68c751a2e46a69640d92bff9dfbd63f1eba4f9bd63");
         }
 
         @Test
@@ -192,6 +215,14 @@ class ContentHashTest {
     /** 기준 확정: hold-1 전액 확정. */
     private static LedgerCommand.Builder aPost() {
         return LedgerCommand.post("capture-1").orderingKey("order-42").reservation("hold-1");
+    }
+
+    /** 고정 해시는 손으로 계산한 값이다. 다르다면 기대값을 고치지 말고 인코딩이 왜 바뀌었는지 본다. */
+    private static void assertPinnedHash(String actual, String pinned) {
+        assertThat(actual)
+                .as("v1 인코딩이 바뀌었다. 이미 저장된 content_hash와의 비교가 깨진다 — "
+                        + "의도한 변경이면 ContentHash.VERSION을 올리고 이전 버전 비교 방법을 정한다")
+                .isEqualTo(pinned);
     }
 
     private static void assertSameHash(LedgerCommand one, LedgerCommand other) {
