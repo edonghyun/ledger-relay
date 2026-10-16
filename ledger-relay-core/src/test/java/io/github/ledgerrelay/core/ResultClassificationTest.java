@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -92,6 +93,7 @@ class ResultClassificationTest {
             """;
 
     @Nested
+    @Order(1)
     @DisplayName("TB 결과 코드는")
     class Codes {
 
@@ -121,6 +123,7 @@ class ResultClassificationTest {
     }
 
     @Nested
+    @Order(2)
     @DisplayName("분류마다")
     class Categories {
 

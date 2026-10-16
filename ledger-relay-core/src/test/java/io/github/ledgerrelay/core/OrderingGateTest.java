@@ -8,6 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -17,6 +18,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 class OrderingGateTest {
 
     @Nested
+    @Order(1)
     @DisplayName("같은 키에 앞 명령이 없으면")
     class NoEarlierCommand {
 
@@ -58,6 +60,7 @@ class OrderingGateTest {
     }
 
     @Nested
+    @Order(2)
     @DisplayName("같은 키에 미완료인 앞 명령이 있으면")
     class UnfinishedEarlierCommand {
 
@@ -77,6 +80,7 @@ class OrderingGateTest {
     }
 
     @Nested
+    @Order(3)
     @DisplayName("같은 키의 앞 명령이 모두 최종 상태면")
     class FinishedEarlierCommands {
 
@@ -111,6 +115,7 @@ class OrderingGateTest {
     }
 
     @Nested
+    @Order(4)
     @DisplayName("예약(reserve)은")
     class Reserve {
 
@@ -129,6 +134,7 @@ class OrderingGateTest {
     }
 
     @Nested
+    @Order(5)
     @DisplayName("확정·해제가 참조한 예약이")
     class ReferencedReservation {
 
@@ -213,6 +219,7 @@ class OrderingGateTest {
     }
 
     @Nested
+    @Order(6)
     @DisplayName("정상 경로에서 나올 수 없는 입력이면")
     class Anomalies {
 
@@ -245,6 +252,7 @@ class OrderingGateTest {
     }
 
     @Nested
+    @Order(7)
     @DisplayName("게이트 결정은")
     class Decisions {
 

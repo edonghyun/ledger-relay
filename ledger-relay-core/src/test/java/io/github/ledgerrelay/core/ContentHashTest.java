@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -18,6 +19,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 class ContentHashTest {
 
     @Nested
+    @Order(1)
     @DisplayName("같은 내용이면")
     class SameContent {
 
@@ -69,6 +71,7 @@ class ContentHashTest {
     }
 
     @Nested
+    @Order(2)
     @DisplayName("내용이 하나라도 다르면")
     class DifferentContent {
 
@@ -120,6 +123,7 @@ class ContentHashTest {
     }
 
     @Nested
+    @Order(3)
     @DisplayName("해시는 DB에 저장되므로 v1 인코딩은 고정이다 — 바꾸려면 VERSION을 올린다")
     class FixedEncoding {
 

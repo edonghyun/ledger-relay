@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -91,6 +92,7 @@ class TransitionTableTest {
             """;
 
     @Nested
+    @Order(1)
     @DisplayName("전이표의 칸마다")
     class EveryCell {
 
@@ -124,6 +126,7 @@ class TransitionTableTest {
     }
 
     @Nested
+    @Order(2)
     @DisplayName("표 전체를 놓고 보면")
     class TableWideRules {
 
@@ -195,6 +198,7 @@ class TransitionTableTest {
     }
 
     @Nested
+    @Order(3)
     @DisplayName("TB 결과 분류는")
     class ResultEvents {
 
