@@ -47,6 +47,9 @@ public record LedgerCommand(
             require(debitAccountId.signum() == 0 && creditAccountId.signum() == 0 && ledger == 0 && code == 0,
                     "post·void는 예약의 계좌·ledger·code를 따르므로 debit, credit, ledger, code를 지정하지 않습니다");
             require(kind != CommandKind.VOID || amount.signum() == 0, "void는 amount를 받지 않습니다");
+            // TB는 0원 post를 "0원 확정 + 나머지 해제"로 처리한다. 그 결과는 void와 같으므로 void를 쓰게 한다.
+            require(kind != CommandKind.POST || amount.signum() > 0,
+                    "post의 amount는 0일 수 없습니다. 전액 확정은 amount를 생략하고, 묶인 돈을 풀려면 void를 씁니다");
         } else {
             require(reservationCommandId == null, "reservation은 post·void 전용입니다");
             requireAccountId("debitAccountId", debitAccountId);

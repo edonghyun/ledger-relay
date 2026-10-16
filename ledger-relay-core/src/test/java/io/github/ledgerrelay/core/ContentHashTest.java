@@ -142,6 +142,26 @@ class ContentHashTest {
         }
 
         @Test
+        @DisplayName("한글 순서 키는 UTF-8 바이트 길이로 인코딩한다: \"주문-42\"는 10바이트다")
+        void nonAsciiValuesUseUtf8ByteLength() {
+            // when
+            String hash = ContentHash.of(aTransfer("pay-1").orderingKey("주문-42").build());
+
+            // then
+            assertThat(hash).isEqualTo("41af1a6cd0a1f072ae912dd5b1f5e53cf38dfa50931d2af9c19ce9af4ba4e424");
+        }
+
+        @Test
+        @DisplayName("금액을 생략한 확정(hold-1 전액)의 해시는 b7e73277…다 — 계좌 0, AMOUNT_MAX 39자리, reservation이 들어가는 경로")
+        void knownVectorForAFullPost() {
+            // when
+            String hash = ContentHash.of(aPost().build());
+
+            // then
+            assertThat(hash).isEqualTo("b7e732771a199173974ab911aa4e0ba28bc7de62ec6c39ef5fbbef97c957c476");
+        }
+
+        @Test
         @DisplayName("해시 필드는 명령의 모든 필드(commandId 제외)와 정확히 같다 — 새 필드가 해시에서 빠지지 않게")
         void hashedFieldsMatchTheCommandRecord() {
             // given

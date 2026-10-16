@@ -138,6 +138,8 @@ class LedgerCommandTest {
                             "post·void에는 reservation이 필요합니다"),
                     argumentSet("확정에 보내는 계좌를 주면",
                             build(() -> aPost().debit(1001).build()), "post·void는 예약의 계좌·ledger·code를 따르므로"),
+                    argumentSet("확정 금액이 0이면 — TB는 0원 확정 후 나머지를 풀므로, 전액 확정을 기대한 사용자가 돈을 못 받는다",
+                            build(() -> aPost().amount(0).build()), "post의 amount는 0일 수 없습니다"),
                     argumentSet("해제에 금액을 주면",
                             build(() -> aVoid().amount(100).build()), "void는 amount를 받지 않습니다"));
         }

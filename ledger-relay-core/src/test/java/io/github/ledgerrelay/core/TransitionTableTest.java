@@ -155,6 +155,18 @@ class TransitionTableTest {
                 }
             }
         }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(ResultCategory.class)
+        @DisplayName("분류표(§4.4)가 정한 최종 상태와 전이표(§4.3)가 보내는 상태가 같다 — 두 표가 따로 고쳐져 어긋나지 않게")
+        void classificationAndTransitionAgreeOnTheFinalState(ResultCategory category) {
+            // when
+            Transition next = TransitionTable.next(CommandState.CLAIMED, CommandEvent.of(category));
+
+            // then
+            assertThat(next.to()).as("%s 결과를 받은 처리 중 명령이 끝나는 상태", category)
+                    .isEqualTo(category.finalState());
+        }
     }
 
     @Nested
