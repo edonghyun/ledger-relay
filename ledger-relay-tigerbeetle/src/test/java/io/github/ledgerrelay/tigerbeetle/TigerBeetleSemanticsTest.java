@@ -1,41 +1,47 @@
 package io.github.ledgerrelay.tigerbeetle;
 
-import static io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleTestData.createAccounts;
-import static io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleTestData.lookupAccount;
-import static io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleTestData.singleStatus;
-import static io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleTestData.transfer;
-import static org.assertj.core.api.Assertions.assertThat;
+import static com.tigerbeetle.CreateTransferStatus.DebitAccountNotFound;
+import static com.tigerbeetle.CreateTransferStatus.ExceedsCredits;
+import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertAlreadyRecorded;
+import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertConflictOnAmount;
+import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertCreated;
+import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertMovedExactly;
+import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertNothingMoved;
+import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertRejectedBecauseIdAlreadyFailed;
+import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertRejectedFor;
+import static io.github.ledgerrelay.tigerbeetle.testing.Transfer.transfer;
 
-import com.tigerbeetle.AccountFlags;
-import com.tigerbeetle.Client;
 import com.tigerbeetle.CreateTransferStatus;
 import com.tigerbeetle.UInt128;
+import io.github.ledgerrelay.tigerbeetle.testing.Account;
 import io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleContainer;
-import java.math.BigInteger;
+import io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleTestLedger;
+import io.github.ledgerrelay.tigerbeetle.testing.Transfer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-/**
- * TB 0.17.9의 결과 의미 특성화. 근거: docs.tigerbeetle.com/reference/requests/create_transfers
- * (exists, exists_with_different_*, id_already_failed, transient errors).
- */
+/** 근거: docs.tigerbeetle.com/reference/requests/create_transfers (exists, exists_with_different_*, id_already_failed). */
+@DisplayName("TigerBeetle 0.17.9 결과 규칙 — 스펙 §4.4 분류표의 근거")
 class TigerBeetleSemanticsTest {
 
     static final TigerBeetleContainer TB = new TigerBeetleContainer();
-    static Client client;
+    static TigerBeetleTestLedger ledger;
 
     @BeforeAll
     static void start() {
         TB.start();
-        client = TB.newClient();
+        ledger = new TigerBeetleTestLedger(TB.newClient());
     }
 
     @AfterAll
-    static void stop() throws Exception {
-        client.close();
+    static void stop() {
+        if (ledger != null) {
+            ledger.close();
+        }
         TB.stop();
     }
 
@@ -44,73 +50,117 @@ class TigerBeetleSemanticsTest {
         TB.assertAlive();
     }
 
-    @Test
-    @DisplayName("§4.4 적용됨: 같은 ID·같은 본문을 다시 보내면 Exists이고 잔액은 한 번만 반영된다")
-    void identicalResubmissionIsExists() throws Exception {
-        byte[][] a = createAccounts(client, AccountFlags.NONE, AccountFlags.NONE);
-        byte[] id = UInt128.id();
+    @Nested
+    @DisplayName("500원 결제가 이미 기록된 상태에서")
+    class AfterAPaymentIsRecorded {
 
-        assertThat(singleStatus(client.createTransfers(transfer(id, a[0], a[1], 500))))
-                .isEqualTo(CreateTransferStatus.Created);
-        assertThat(singleStatus(client.createTransfers(transfer(id, a[0], a[1], 500))))
-                .isEqualTo(CreateTransferStatus.Exists);
-        assertThat(lookupAccount(client, a[0]).getDebitsPosted()).isEqualTo(BigInteger.valueOf(500));
+        Account payer;
+        Account payee;
+        Transfer payment;
+
+        @BeforeEach
+        void givenARecordedPayment() {
+            payer = ledger.openAccount("구매자");
+            payee = ledger.openAccount("가맹점");
+            payment = ledger.recorded(transfer(500).from(payer).to(payee));
+        }
+
+        @Test
+        @DisplayName("같은 결제를 다시 보내면 이미 기록된 것으로 인정되고, 돈은 한 번만 움직인다")
+        void resendingTheSamePayment() {
+            // when
+            CreateTransferStatus result = ledger.submit(payment);
+
+            // then
+            assertAlreadyRecorded(result);
+            assertMovedExactly(ledger, payer, payee, 500);
+        }
+
+        @Test
+        @DisplayName("같은 ID에 금액만 바꿔 보내면 내용 충돌로 거부되고, 처음 금액만 남는다 (G7)")
+        void resendingWithADifferentAmount() {
+            // when
+            CreateTransferStatus result = ledger.submit(payment.withAmount(501));
+
+            // then
+            assertConflictOnAmount(result);
+            assertMovedExactly(ledger, payer, payee, 500);
+        }
     }
 
-    @Test
-    @DisplayName("§4.4 충돌·G7: 같은 ID에 금액만 다르게 보내면 ExistsWithDifferentAmount이고 성공으로 볼 수 없다")
-    void sameIdDifferentAmountIsConflict() throws Exception {
-        byte[][] a = createAccounts(client, AccountFlags.NONE, AccountFlags.NONE);
-        byte[] id = UInt128.id();
+    @Nested
+    @DisplayName("잔액이 부족한 지갑에서 결제하면")
+    class PayingFromAnEmptyWallet {
 
-        assertThat(singleStatus(client.createTransfers(transfer(id, a[0], a[1], 500))))
-                .isEqualTo(CreateTransferStatus.Created);
+        Account wallet;
+        Account merchant;
+        Transfer payment;
 
-        assertThat(singleStatus(client.createTransfers(transfer(id, a[0], a[1], 501))))
-                .isEqualTo(CreateTransferStatus.ExistsWithDifferentAmount);
-        assertThat(lookupAccount(client, a[0]).getDebitsPosted()).isEqualTo(BigInteger.valueOf(500));
+        @BeforeEach
+        void givenAnEmptyWallet() {
+            wallet = ledger.openAccountThatCannotOverdraw("지갑");
+            merchant = ledger.openAccount("가맹점");
+            payment = transfer(100).from(wallet).to(merchant);
+        }
+
+        @Test
+        @DisplayName("잔액 부족으로 거부되고, 돈은 움직이지 않는다")
+        void isRejectedForInsufficientFunds() {
+            // when
+            CreateTransferStatus result = ledger.submit(payment);
+
+            // then
+            assertRejectedFor(result, ExceedsCredits);
+            assertNothingMoved(ledger, wallet);
+        }
+
+        @Test
+        @DisplayName("같은 결제를 다시 보내면 이 ID는 이미 실패한 것으로 거부된다")
+        void resendingTheFailedPayment() {
+            // given
+            ledger.rejected(payment, ExceedsCredits);
+
+            // when
+            CreateTransferStatus result = ledger.submit(payment);
+
+            // then
+            assertRejectedBecauseIdAlreadyFailed(result);
+        }
+
+        @Test
+        @DisplayName("충전한 뒤에도 같은 ID는 실패로 남고, 새 ID로 보내야 결제된다 (D7: 재시도는 새 명령)")
+        void onlyANewIdSucceedsAfterTopUp() {
+            // given: 결제가 한 번 실패했고, 그 뒤 100원을 충전했다
+            ledger.rejected(payment, ExceedsCredits);
+            ledger.deposit(wallet, 100);
+
+            // when
+            CreateTransferStatus sameId = ledger.submit(payment);
+            CreateTransferStatus newId = ledger.submit(payment.withNewId());
+
+            // then
+            assertRejectedBecauseIdAlreadyFailed(sameId);
+            assertCreated(newId);
+            assertMovedExactly(ledger, wallet, merchant, 100);
+        }
     }
 
-    @Test
-    @DisplayName("§4.4 이전 실패: 잔액 부족(ExceedsCredits)으로 실패한 ID는 다시 보내도 IdAlreadyFailed다")
-    void transientFailureIsStickyToTheId() throws Exception {
-        byte[][] a = createAccounts(client, AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS, AccountFlags.NONE);
-        byte[] id = UInt128.id();
+    @Nested
+    @DisplayName("존재하지 않는 계좌에서 출금하면 (P4)")
+    class PayingFromAnUnknownAccount {
 
-        assertThat(singleStatus(client.createTransfers(transfer(id, a[0], a[1], 100))))
-                .isEqualTo(CreateTransferStatus.ExceedsCredits);
-        assertThat(singleStatus(client.createTransfers(transfer(id, a[0], a[1], 100))))
-                .isEqualTo(CreateTransferStatus.IdAlreadyFailed);
-    }
+        @Test
+        @DisplayName("잘못된 요청으로 거부된다")
+        void isRejectedAsUnknownAccount() {
+            // given
+            Account unknown = new Account("원장에 없는 계좌", UInt128.id());
+            Account merchant = ledger.openAccount("가맹점");
 
-    @Test
-    @DisplayName("§2 명령=이체 ID 1개(D7): 실패한 ID는 충전 뒤에도 IdAlreadyFailed, 새 ID는 그때 상태로 판정되어 Created")
-    void onlyANewIdSeesTheNewState() throws Exception {
-        byte[][] a = createAccounts(client,
-                AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS, AccountFlags.NONE, AccountFlags.NONE);
-        byte[] constrained = a[0];
-        byte[] merchant = a[1];
-        byte[] funding = a[2];
-        byte[] firstTry = UInt128.id();
+            // when
+            CreateTransferStatus result = ledger.submit(transfer(1).from(unknown).to(merchant));
 
-        assertThat(singleStatus(client.createTransfers(transfer(firstTry, constrained, merchant, 100))))
-                .isEqualTo(CreateTransferStatus.ExceedsCredits);
-
-        assertThat(singleStatus(client.createTransfers(transfer(UInt128.id(), funding, constrained, 100))))
-                .isEqualTo(CreateTransferStatus.Created);
-
-        assertThat(singleStatus(client.createTransfers(transfer(firstTry, constrained, merchant, 100))))
-                .isEqualTo(CreateTransferStatus.IdAlreadyFailed);
-        assertThat(singleStatus(client.createTransfers(transfer(UInt128.id(), constrained, merchant, 100))))
-                .isEqualTo(CreateTransferStatus.Created);
-    }
-
-    @Test
-    @DisplayName("§4.4 잘못된 요청(P4): 없는 계좌로 보내면 DebitAccountNotFound다")
-    void unknownAccountIsReported() throws Exception {
-        byte[][] a = createAccounts(client, AccountFlags.NONE);
-
-        assertThat(singleStatus(client.createTransfers(transfer(UInt128.id(), UInt128.id(), a[0], 1))))
-                .isEqualTo(CreateTransferStatus.DebitAccountNotFound);
+            // then
+            assertRejectedFor(result, DebitAccountNotFound);
+        }
     }
 }

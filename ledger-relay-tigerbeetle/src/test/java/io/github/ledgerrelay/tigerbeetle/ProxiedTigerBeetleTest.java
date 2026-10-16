@@ -1,30 +1,31 @@
 package io.github.ledgerrelay.tigerbeetle;
 
-import static io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleTestData.createAccounts;
-import static io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleTestData.lookupAccount;
-import static io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleTestData.singleStatus;
-import static io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleTestData.transfer;
-import static org.assertj.core.api.Assertions.assertThat;
+import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertCreated;
+import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertMovedExactly;
+import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertStillWaitingAfter;
+import static io.github.ledgerrelay.tigerbeetle.testing.Transfer.transfer;
 
-import com.tigerbeetle.AccountFlags;
-import com.tigerbeetle.Client;
-import com.tigerbeetle.CreateTransferResultBatch;
 import com.tigerbeetle.CreateTransferStatus;
-import com.tigerbeetle.UInt128;
+import io.github.ledgerrelay.tigerbeetle.testing.Account;
+import io.github.ledgerrelay.tigerbeetle.testing.PendingTransfer;
 import io.github.ledgerrelay.tigerbeetle.testing.ProxiedTigerBeetle;
-import java.math.BigInteger;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
+import io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleTestLedger;
+import java.time.Duration;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+@DisplayName("Toxiproxy 뒤의 TigerBeetle — 스펙 §1.2·§8.2")
 class ProxiedTigerBeetleTest {
 
     static ProxiedTigerBeetle tb;
+    TigerBeetleTestLedger ledger;
+    Account payer;
+    Account payee;
 
     @BeforeAll
     static void start() {
@@ -33,46 +34,59 @@ class ProxiedTigerBeetleTest {
 
     @AfterAll
     static void stop() {
-        tb.close();
-    }
-
-    @AfterEach
-    void alwaysRestore() throws Exception {
-        tb.restoreConnection();
-    }
-
-    @BeforeEach
-    void serverIsAlive() {
-        tb.assertAlive();
-    }
-
-    @Test
-    @DisplayName("§8.2 TB 실연동: Toxiproxy를 경유한 이체도 Created로 기록된다")
-    void transferThroughProxy() throws Exception {
-        try (Client client = tb.newClient()) {
-            byte[][] a = createAccounts(client, AccountFlags.NONE, AccountFlags.NONE);
-
-            assertThat(singleStatus(client.createTransfers(transfer(UInt128.id(), a[0], a[1], 7))))
-                    .isEqualTo(CreateTransferStatus.Created);
+        if (tb != null) {
+            tb.close();
         }
     }
 
+    @BeforeEach
+    void givenTwoAccountsBehindTheProxy() {
+        tb.assertAlive();
+        ledger = new TigerBeetleTestLedger(tb.newClient());
+        payer = ledger.openAccount("구매자");
+        payee = ledger.openAccount("가맹점");
+    }
+
+    @AfterEach
+    void restoreAndDisconnect() throws Exception {
+        tb.restoreConnection();
+        ledger.close();
+    }
+
     @Test
-    @DisplayName("§1.2 TB 클라이언트는 timeout이 없다: 연결이 끊긴 동안 요청은 실패하지 않고 대기하며, 복구되면 같은 요청이 한 번만 기록된다")
-    void requestWaitsWhileCutAndCompletesOnceAfterRestore() throws Exception {
-        try (Client client = tb.newClient()) {
-            byte[][] a = createAccounts(client, AccountFlags.NONE, AccountFlags.NONE);
+    @DisplayName("연결이 정상이면 프록시를 거친 이체도 새로 기록된다")
+    void transferThroughProxy() {
+        // when
+        CreateTransferStatus result = ledger.submit(transfer(7).from(payer).to(payee));
 
+        // then
+        assertCreated(result);
+    }
+
+    @Nested
+    @DisplayName("연결이 끊긴 동안 보낸 이체는 (TB 클라이언트에는 timeout이 없다)")
+    class SentWhileDisconnected {
+
+        PendingTransfer pending;
+
+        @BeforeEach
+        void givenATransferSentWhileDisconnected() throws Exception {
             tb.cutConnection();
-            CompletableFuture<CreateTransferResultBatch> pending =
-                    client.createTransfersAsync(transfer(UInt128.id(), a[0], a[1], 42));
+            pending = ledger.submitInBackground(transfer(42).from(payer).to(payee));
+        }
 
-            Thread.sleep(3_000); // 결정적 관찰 창: 끊긴 동안에는 응답도 오류도 오지 않아야 한다
-            assertThat(pending).isNotDone();
+        @Test
+        @DisplayName("오류 없이 대기하다가, 연결이 복구되면 정확히 한 번 기록된다")
+        void waitsThenIsRecordedOnceAfterRestore() throws Exception {
+            // then: 끊긴 동안에는 응답도 오류도 없다
+            assertStillWaitingAfter(pending, Duration.ofSeconds(3));
 
+            // when: 연결을 복구하면
             tb.restoreConnection();
-            assertThat(singleStatus(pending.get(60, TimeUnit.SECONDS))).isEqualTo(CreateTransferStatus.Created);
-            assertThat(lookupAccount(client, a[0]).getDebitsPosted()).isEqualTo(BigInteger.valueOf(42));
+
+            // then
+            assertCreated(pending.awaitResult(Duration.ofSeconds(60)));
+            assertMovedExactly(ledger, payer, payee, 42);
         }
     }
 }
