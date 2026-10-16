@@ -34,8 +34,9 @@ public final class OrderingGate {
                 .filter(q -> q.commandId().equals(reservationId))
                 .findFirst();
         if (reservation.isEmpty()) {
-            // 접수 때 참조 검사(§5.1)를 통과했으니 존재했던 예약이다. 보관 정책으로 지워졌으면 TB가 판정한다(P1-8).
-            return GateDecision.OPEN;
+            // 접수 때 참조 검사(§5.1)를 통과했고, 보관 정책은 미완료 post·void가 참조하는 예약을 지우지 않는다(2단계).
+            // 그런데도 없다면 버그다. TB에 보내면 같은 TB ID의 엉뚱한 예약을 확정할 수 있으므로 멈추고 알린다.
+            return GateDecision.HALT;
         }
         CommandState state = reservation.get().state();
         if (state == CommandState.APPLIED) {
@@ -45,7 +46,7 @@ public final class OrderingGate {
             return GateDecision.SKIP;
         }
         // 예약이 미완료인데 위의 earlierUnfinished에 걸리지 않았다면 예약 seq가 후보보다 크거나 같다.
-        // 정상 경로에서는 나올 수 없는 입력이므로 제출하지 않는다.
-        return GateDecision.CLOSED;
+        // 접수 검사가 막았어야 하는 순서다. 조용히 기다리면 키가 영원히 멈추므로 멈추고 알린다.
+        return GateDecision.HALT;
     }
 }
