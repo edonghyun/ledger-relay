@@ -5,6 +5,7 @@ import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertM
 import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertNothingMoved;
 import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertStillWaitingAfter;
 import static io.github.ledgerrelay.tigerbeetle.testing.Transfer.transfer;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
@@ -66,6 +67,35 @@ class TigerBeetleTestLedgerTest {
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageStartingWith("given 준비 실패")
                     .hasMessageContaining("Created");
+        }
+    }
+
+    @Nested
+    @DisplayName("나중에 여는 계좌는")
+    class AccountsOpenedLater {
+
+        @Test
+        @DisplayName("open: 열기 전에는 원장에 없고, 열면 그 ID 그대로 조회된다")
+        void openUsesTheSameId() {
+            Account later = Account.notOpened("나중에 열 계좌");
+            assertThatThrownBy(() -> ledger.balanceOf(later))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("원장에 없습니다");
+
+            ledger.open(later);
+
+            assertThat(ledger.balanceOf(later).isUntouched()).isTrue();
+        }
+
+        @Test
+        @DisplayName("open: 이미 열린 계좌를 다시 열면 준비 단계에서 멈춘다")
+        void openStopsWhenTheAccountAlreadyExists() {
+            Account opened = ledger.openAccount("이미 연 계좌");
+
+            assertThatThrownBy(() -> ledger.open(opened))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageStartingWith("given 준비 실패")
+                    .hasMessageContaining("이미 연 계좌");
         }
     }
 

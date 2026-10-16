@@ -9,7 +9,6 @@ import com.tigerbeetle.CreateTransferResultBatch;
 import com.tigerbeetle.CreateTransferStatus;
 import com.tigerbeetle.IdBatch;
 import com.tigerbeetle.TransferBatch;
-import com.tigerbeetle.UInt128;
 import java.math.BigInteger;
 
 /**
@@ -31,12 +30,17 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
     }
 
     public Account openAccount(String name) {
-        return open(name, AccountFlags.NONE);
+        return open(Account.notOpened(name), AccountFlags.NONE);
     }
 
     /** 잔액보다 많이 출금할 수 없는 계좌(지갑). 새 계좌의 잔액은 0이다. */
     public Account openAccountThatCannotOverdraw(String name) {
-        return open(name, AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS);
+        return open(Account.notOpened(name), AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS);
+    }
+
+    /** given: 아직 열지 않은 계좌({@link Account#notOpened})를 그 ID 그대로 연다. */
+    public Account open(Account account) {
+        return open(account, AccountFlags.NONE);
     }
 
     /** 테스트 바깥의 입금 계좌에서 {@code amount}를 넣어 준다. */
@@ -114,11 +118,10 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
         return status;
     }
 
-    private Account open(String name, int flags) {
+    private Account open(Account account, int flags) {
         AccountBatch batch = new AccountBatch(1);
-        byte[] id = UInt128.id();
         batch.add();
-        batch.setId(id);
+        batch.setId(account.id());
         batch.setLedger(LEDGER);
         batch.setCode(CODE);
         batch.setFlags(flags);
@@ -126,14 +129,14 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
             CreateAccountResultBatch results = client.createAccounts(batch);
             while (results.next()) {
                 if (results.getStatus() != CreateAccountStatus.Created) {
-                    throw new IllegalStateException("given 준비 실패: " + name + " 계좌를 열지 못했습니다 — " + results.getStatus());
+                    throw new IllegalStateException("given 준비 실패: " + account + " 계좌를 열지 못했습니다 — " + results.getStatus());
                 }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(e);
         }
-        return new Account(name, id);
+        return account;
     }
 
     private static TransferBatch batchOf(Transfer transfer) {
@@ -143,8 +146,11 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
         batch.setDebitAccountId(transfer.from().id());
         batch.setCreditAccountId(transfer.to().id());
         batch.setAmount(BigInteger.valueOf(transfer.amount()));
-        batch.setLedger(LEDGER);
-        batch.setCode(CODE);
+        batch.setLedger(transfer.ledger());
+        batch.setCode(transfer.code());
+        batch.setUserData128(transfer.userData128());
+        batch.setUserData64(transfer.userData64());
+        batch.setUserData32(transfer.userData32());
         return batch;
     }
 

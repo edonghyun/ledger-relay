@@ -5,9 +5,12 @@ import static com.tigerbeetle.CreateTransferStatus.ExceedsCredits;
 import static com.tigerbeetle.CreateTransferStatus.ExceedsDebits;
 import static com.tigerbeetle.CreateTransferStatus.Exists;
 import static com.tigerbeetle.CreateTransferStatus.ExistsWithDifferentAmount;
+import static com.tigerbeetle.CreateTransferStatus.ExistsWithDifferentCode;
+import static com.tigerbeetle.CreateTransferStatus.ExistsWithDifferentCreditAccountId;
 import static com.tigerbeetle.CreateTransferStatus.IdAlreadyFailed;
 import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertAlreadyRecorded;
 import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertConflictOnAmount;
+import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertContentConflict;
 import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertCreated;
 import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertRejectedBecauseIdAlreadyFailed;
 import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertRejectedFor;
@@ -30,6 +33,7 @@ class LedgerAssertionsTest {
             assertCreated(Created);
             assertAlreadyRecorded(Exists);
             assertConflictOnAmount(ExistsWithDifferentAmount);
+            assertContentConflict(ExistsWithDifferentCode, ExistsWithDifferentCode);
             assertRejectedBecauseIdAlreadyFailed(IdAlreadyFailed);
             assertRejectedFor(ExceedsCredits, ExceedsCredits);
         }
@@ -50,6 +54,28 @@ class LedgerAssertionsTest {
                     .isInstanceOf(AssertionError.class)
                     .hasMessageContaining("ExceedsCredits")
                     .hasMessageContaining("실제 결과는 ExceedsDebits");
+        }
+    }
+
+    @Nested
+    @DisplayName("내용 충돌을 확인하는 assertContentConflict는")
+    class ContentConflict {
+
+        @Test
+        @DisplayName("다른 필드의 충돌이면 기대한 필드와 실제 코드를 담아 실패한다")
+        void failsOnAConflictOnAnotherField() {
+            assertThatThrownBy(() -> assertContentConflict(ExistsWithDifferentAmount, ExistsWithDifferentCreditAccountId))
+                    .isInstanceOf(AssertionError.class)
+                    .hasMessageContaining("같은 ID인데 내용이 달라 충돌로 거부되기(ExistsWithDifferentCreditAccountId)")
+                    .hasMessageContaining("실제 결과는 ExistsWithDifferentAmount");
+        }
+
+        @Test
+        @DisplayName("기대값으로 내용 충돌이 아닌 코드를 넘기면 잘못 쓴 것으로 보고 멈춘다")
+        void refusesANonConflictCodeAsExpectation() {
+            assertThatThrownBy(() -> assertContentConflict(Exists, Exists))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Exists는 내용 충돌 코드(ExistsWithDifferent…)가 아닙니다");
         }
     }
 }

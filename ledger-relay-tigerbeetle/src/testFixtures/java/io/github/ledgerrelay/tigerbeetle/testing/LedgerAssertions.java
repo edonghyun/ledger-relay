@@ -29,6 +29,14 @@ public final class LedgerAssertions {
         expect(result, ExistsWithDifferentAmount, "같은 ID인데 금액이 달라 내용 충돌로 거부되기");
     }
 
+    /** {@code conflict}는 어느 필드가 달랐는지를 뜻하는 {@code ExistsWithDifferent…} 코드다. */
+    public static void assertContentConflict(CreateTransferStatus result, CreateTransferStatus conflict) {
+        if (!conflict.name().startsWith("ExistsWithDifferent")) {
+            throw new IllegalArgumentException(conflict + "는 내용 충돌 코드(ExistsWithDifferent…)가 아닙니다");
+        }
+        expect(result, conflict, "같은 ID인데 내용이 달라 충돌로 거부되기");
+    }
+
     public static void assertRejectedBecauseIdAlreadyFailed(CreateTransferStatus result) {
         expect(result, IdAlreadyFailed, "이 ID가 이미 실패했으므로 다시 판정되지 않고 거부되기");
     }

@@ -71,6 +71,8 @@ class AfterAPaymentIsRecorded {
 | `ledger.deposit(wallet, 100)` | 입금 |
 | `transfer(500).from(payer).to(payee)` | 이체 한 건(새 ID). 이 단계에서는 아직 보내지 않는다 |
 | `payment.withAmount(501)` / `payment.withNewId()` | 같은 ID에 금액만 바꾼 것 / 같은 내용에 새 ID를 붙인 것 |
+| `payment.withCreditAccount(other)` 등 `with…` | 같은 ID에 그 필드만 바꾼 것 (`withDebitAccount`, `withLedger`, `withCode`, `withUserData128/64/32`) |
+| `Account.notOpened("계좌")` / `ledger.open(account)` | 아직 원장에 없는 계좌 / 그 계좌를 같은 ID 그대로 연다(이미 있으면 "given 준비 실패") |
 | `ledger.recorded(t)` | **전제**: 이 이체가 이미 기록되어 있다 |
 | `ledger.rejected(t, ExceedsCredits)` | **전제**: 이 이체가 이 사유로 거부된 적이 있다 |
 
@@ -91,6 +93,7 @@ class AfterAPaymentIsRecorded {
 | `assertCreated(result)` | 새로 기록됨 (`Created`) |
 | `assertAlreadyRecorded(result)` | 같은 이체가 이미 있어서 그것으로 인정됨 (`Exists`) |
 | `assertConflictOnAmount(result)` | 같은 ID인데 금액이 달라서 거부됨 (`ExistsWithDifferentAmount`) |
+| `assertContentConflict(result, ExistsWithDifferentX)` | 같은 ID인데 그 필드가 달라서 거부됨. 기대값이 `ExistsWithDifferent…`가 아니면 잘못 쓴 것으로 멈춘다 |
 | `assertRejectedBecauseIdAlreadyFailed(result)` | 이 ID는 이미 실패했으므로 다시 판정하지 않음 (`IdAlreadyFailed`) |
 | `assertRejectedFor(result, reason)` | 이 사유로 거부됨 |
 | `assertMovedExactly(ledger, from, to, amount)` | from에서 정확히 amount가 나가고, to에 정확히 amount가 들어옴 |
