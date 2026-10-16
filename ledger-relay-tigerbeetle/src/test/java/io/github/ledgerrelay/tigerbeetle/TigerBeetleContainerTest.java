@@ -12,7 +12,9 @@ import com.tigerbeetle.Client;
 import com.tigerbeetle.CreateTransferStatus;
 import com.tigerbeetle.UInt128;
 import io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleContainer;
+import java.io.InputStream;
 import java.math.BigInteger;
+import java.util.Properties;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -62,9 +64,15 @@ class TigerBeetleContainerTest {
     }
 
     @Test
-    @DisplayName("§12 버전 고정: 이미지 태그는 버전 카탈로그의 tigerbeetle 값과 같다")
-    void imageTagComesFromVersionCatalog() {
-        assertThat(TB.getDockerImageName())
-                .isEqualTo("ghcr.io/tigerbeetle/tigerbeetle:" + System.getProperty("ledgerrelay.tigerbeetle.version"));
+    @DisplayName("§12 버전 고정: 이미지 태그는 클래스패스에 실린 tigerbeetle-java jar의 버전과 같다 — 버전 키가 갈라져도 잡아냄")
+    void imageTagMatchesClientJarVersion() throws Exception {
+        Properties pom = new Properties();
+        try (InputStream in = Client.class.getResourceAsStream(
+                "/META-INF/maven/com.tigerbeetle/tigerbeetle-java/pom.properties")) {
+            assertThat(in).as("tigerbeetle-java jar의 pom.properties").isNotNull();
+            pom.load(in);
+        }
+
+        assertThat(TB.getDockerImageName()).isEqualTo("ghcr.io/tigerbeetle/tigerbeetle:" + pom.getProperty("version"));
     }
 }
