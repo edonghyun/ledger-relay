@@ -28,7 +28,7 @@ class TransitionTableTest {
             # PENDING
             PENDING, CLAIM_WITH_GATE_OPEN,               CLAIMED+토큰
             PENDING, CLAIM_WITH_GATE_CLOSED,             그대로
-            PENDING, CLAIM_WITH_RESERVATION_NOT_APPLIED, SKIPPED+핸들러
+            PENDING, RESERVATION_NOT_APPLIED,            불가
             PENDING, TB_APPLIED,                         불가
             PENDING, TB_REJECTED,                        불가
             PENDING, TB_CONFLICT,                        불가
@@ -36,10 +36,10 @@ class TransitionTableTest {
             PENDING, HANDLER_FAILED,                     불가
             PENDING, LEASE_EXPIRED,                      해당없음
             PENDING, STALE_TOKEN_WRITE,                  0행
-            # CLAIMED: claim은 lease가 만료되기 전이면 불가
+            # CLAIMED: claim은 lease가 만료되기 전이면 불가. 건너뜀은 claim한 뒤에 일어난다
             CLAIMED, CLAIM_WITH_GATE_OPEN,               불가
             CLAIMED, CLAIM_WITH_GATE_CLOSED,             불가
-            CLAIMED, CLAIM_WITH_RESERVATION_NOT_APPLIED, 불가
+            CLAIMED, RESERVATION_NOT_APPLIED,            SKIPPED+핸들러
             CLAIMED, TB_APPLIED,                         APPLIED+핸들러
             CLAIMED, TB_REJECTED,                        REJECTED+핸들러
             CLAIMED, TB_CONFLICT,                        CONFLICT+핸들러
@@ -50,7 +50,7 @@ class TransitionTableTest {
             # 최종 상태 4개는 같은 줄을 갖는다
             APPLIED, CLAIM_WITH_GATE_OPEN,               불가
             APPLIED, CLAIM_WITH_GATE_CLOSED,             불가
-            APPLIED, CLAIM_WITH_RESERVATION_NOT_APPLIED, 불가
+            APPLIED, RESERVATION_NOT_APPLIED,            0행
             APPLIED, TB_APPLIED,                         0행
             APPLIED, TB_REJECTED,                        0행
             APPLIED, TB_CONFLICT,                        0행
@@ -60,7 +60,7 @@ class TransitionTableTest {
             APPLIED, STALE_TOKEN_WRITE,                  0행
             REJECTED, CLAIM_WITH_GATE_OPEN,               불가
             REJECTED, CLAIM_WITH_GATE_CLOSED,             불가
-            REJECTED, CLAIM_WITH_RESERVATION_NOT_APPLIED, 불가
+            REJECTED, RESERVATION_NOT_APPLIED,            0행
             REJECTED, TB_APPLIED,                         0행
             REJECTED, TB_REJECTED,                        0행
             REJECTED, TB_CONFLICT,                        0행
@@ -70,7 +70,7 @@ class TransitionTableTest {
             REJECTED, STALE_TOKEN_WRITE,                  0행
             CONFLICT, CLAIM_WITH_GATE_OPEN,               불가
             CONFLICT, CLAIM_WITH_GATE_CLOSED,             불가
-            CONFLICT, CLAIM_WITH_RESERVATION_NOT_APPLIED, 불가
+            CONFLICT, RESERVATION_NOT_APPLIED,            0행
             CONFLICT, TB_APPLIED,                         0행
             CONFLICT, TB_REJECTED,                        0행
             CONFLICT, TB_CONFLICT,                        0행
@@ -80,7 +80,7 @@ class TransitionTableTest {
             CONFLICT, STALE_TOKEN_WRITE,                  0행
             SKIPPED, CLAIM_WITH_GATE_OPEN,               불가
             SKIPPED, CLAIM_WITH_GATE_CLOSED,             불가
-            SKIPPED, CLAIM_WITH_RESERVATION_NOT_APPLIED, 불가
+            SKIPPED, RESERVATION_NOT_APPLIED,            0행
             SKIPPED, TB_APPLIED,                         0행
             SKIPPED, TB_REJECTED,                        0행
             SKIPPED, TB_CONFLICT,                        0행
@@ -134,6 +134,24 @@ class TransitionTableTest {
                 assertThat(TransitionTable.next(finalState, event).outcome())
                         .as("%s 상태에서 %s 사건", finalState, event)
                         .isNotEqualTo(Transition.Outcome.MOVE);
+            }
+        }
+
+        @Test
+        @DisplayName("접수된 명령은 claim으로만 움직이고, claim은 늘 lease 토큰을 올린다 — 건너뛰는 명령도 fencing 아래에서 끝나게")
+        void pendingCommandsMoveOnlyByAClaimThatIncrementsTheToken() {
+            for (CommandEvent event : CommandEvent.values()) {
+                // when
+                Transition next = TransitionTable.next(CommandState.PENDING, event);
+                if (next.outcome() != Transition.Outcome.MOVE) {
+                    continue;
+                }
+
+                // then
+                assertThat(next)
+                        .as("PENDING + %s: 처리 중(CLAIMED)으로 가며 토큰을 올리기를 기대했다", event)
+                        .isEqualTo(new Transition(Transition.Outcome.MOVE, CommandState.CLAIMED,
+                                Set.of(Effect.INCREMENT_LEASE_TOKEN)));
             }
         }
 

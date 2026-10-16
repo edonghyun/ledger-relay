@@ -1,13 +1,13 @@
 package io.github.ledgerrelay.core;
 
-/** 전이표(스펙 §4.3)의 사건. claim은 게이트 결정(§5.2)에 따라 셋으로 나뉜다. */
+/** 전이표(스펙 §4.3)의 사건. claim은 게이트 결정(§5.2)에 따라 열림·닫힘으로 나뉘고, 건너뜀은 claim 뒤의 사건이다. */
 public enum CommandEvent {
     /** claim: 게이트가 열렸다. */
     CLAIM_WITH_GATE_OPEN,
     /** claim: 같은 키의 앞 명령이 미완료라 게이트가 닫혔다. */
     CLAIM_WITH_GATE_CLOSED,
-    /** claim: post·void가 참조한 예약이 APPLIED가 아닌 최종 상태다. */
-    CLAIM_WITH_RESERVATION_NOT_APPLIED,
+    /** claim한 post·void의 참조 예약이 APPLIED가 아닌 최종 상태로 끝났다. TB에 보내지 않고 건너뛴다. */
+    RESERVATION_NOT_APPLIED,
     /** TB 성공(created, exists). */
     TB_APPLIED,
     /** TB 확정 실패(업무 거절, 이전 실패, 잘못된 요청). */

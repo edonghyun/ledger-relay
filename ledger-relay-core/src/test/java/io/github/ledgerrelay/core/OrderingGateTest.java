@@ -149,7 +149,7 @@ class OrderingGateTest {
         @CsvSource(textBlock = """
                 OPEN,   CLAIM_WITH_GATE_OPEN
                 CLOSED, CLAIM_WITH_GATE_CLOSED
-                SKIP,   CLAIM_WITH_RESERVATION_NOT_APPLIED
+                SKIP,   CLAIM_WITH_GATE_OPEN
                 """)
         @DisplayName("전이표의 claim 사건 셋 중 하나가 된다 (§5.2 → §4.3)")
         void becomesAClaimEvent(GateDecision decision, CommandEvent expected) {
