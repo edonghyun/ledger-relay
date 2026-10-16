@@ -114,6 +114,18 @@ class AfterAPaymentIsRecorded {
 - **한 파일에서만 쓰는 말**: 그 테스트 파일 위쪽의 private 메서드.
 - **어휘 자체도 테스트한다.** assert 메서드와 전제 메서드가 틀린 입력에서 제대로 실패하는지 확인하는 테스트를 둔다(`LedgerAssertionsTest`, `TigerBeetleTestLedgerTest`). 검증 도구가 틀리면 모든 테스트가 거짓말을 하기 때문이다.
 
+## 6-1. 표를 그대로 옮긴 테스트 (core)
+
+스펙의 표(§4.3 전이표, §4.4 분류표)는 테스트 안에 **표 모양 그대로** 둔다.
+
+- 표는 `static final String` text block 상수로 두고 `@CsvSource(textBlock = 상수)`로 읽는다. `#` 줄은 표 안의 소제목이다.
+- `@ParameterizedTest`에는 `quoteTextArguments = false`를 붙인다. JUnit 6은 글자 인자를 따옴표로 감싸서 `"PENDING" + "TB_APPLIED"`처럼 보이게 하기 때문이다.
+- 기대값은 사람이 읽는 표기로 쓴다. 예: `CLAIMED+토큰`, `0행`, `불가`. 표기를 객체로 바꾸는 `parse`는 그 테스트 파일 안에 둔다.
+- 표마다 **가드 테스트**를 하나 둔다. 같은 상수를 읽어서 enum의 모든 값(또는 모든 조합)을 정확히 한 번씩 담는지 확인한다. 가드는 처음부터 통과하므로, 표의 한 줄을 지워서 실패하는지 확인한 뒤 되돌린다.
+- 표의 칸을 하나씩 보는 테스트와 별도로, 표 전체에 걸친 규칙(G5: 최종 상태는 움직이지 않는다, G6: 핸들러는 최종 상태로 들어갈 때만)을 한 번 더 확인한다. 표를 고치다 실수하면 칸 테스트는 표와 함께 틀리지만, 이 규칙 테스트는 남는다.
+
+core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다. 예: `assertSubmits`, `assertWaits`, `assertSkips`, `assertRejectedAsInvalid`, `assertSameHash`.
+
 ## 7. 리팩터링 규칙
 
 - 같은 준비나 확인이 **두세 번 반복되고 같은 의미**일 때 이름을 붙여 뽑는다. 생김새만 비슷하다고 묶지 않는다.
