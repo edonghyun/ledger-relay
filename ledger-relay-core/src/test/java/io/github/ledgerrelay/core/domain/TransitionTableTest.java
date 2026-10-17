@@ -22,7 +22,7 @@ class TransitionTableTest {
 
     /**
      * 스펙 §4.3 전이표를 칸 하나에 한 줄로 옮긴 것. 기대값 표기는 이렇다.
-     * 상태 이름(+토큰 +핸들러 +backoff +결과보존) = 그 상태로 이동하며 해당 효과를 낸다.
+     * 상태 이름(+토큰 +핸들러 +backoff +결과보존 +제출기록 +실패집계) = 그 상태로 이동하며 해당 효과를 낸다.
      * 그대로 = 게이트가 닫혀 아무 일도 없다. 0행 = fenced UPDATE가 0행을 갱신한다.
      * 불가 = 모듈이 이 사건을 만들면 버그다. 해당없음 = 이 상태에서는 생길 수 없는 사건이다.
      */
@@ -30,6 +30,7 @@ class TransitionTableTest {
             # PENDING
             PENDING, CLAIM_WITH_GATE_OPEN,               CLAIMED+토큰
             PENDING, CLAIM_WITH_GATE_CLOSED,             그대로
+            PENDING, SUBMITTING,                         불가
             PENDING, RESERVATION_NOT_APPLIED,            불가
             PENDING, TB_APPLIED,                         불가
             PENDING, TB_REJECTED,                        불가
@@ -41,17 +42,19 @@ class TransitionTableTest {
             # CLAIMED: claim은 lease가 만료되기 전이면 불가. 건너뜀은 claim한 뒤에 일어난다
             CLAIMED, CLAIM_WITH_GATE_OPEN,               불가
             CLAIMED, CLAIM_WITH_GATE_CLOSED,             불가
+            CLAIMED, SUBMITTING,                         CLAIMED+제출기록
             CLAIMED, RESERVATION_NOT_APPLIED,            SKIPPED+핸들러
             CLAIMED, TB_APPLIED,                         APPLIED+핸들러
             CLAIMED, TB_REJECTED,                        REJECTED+핸들러
             CLAIMED, TB_CONFLICT,                        CONFLICT+핸들러
             CLAIMED, NO_REPLY_OR_ERROR,                  PENDING+backoff
-            CLAIMED, HANDLER_FAILED,                     PENDING+backoff+결과보존
+            CLAIMED, HANDLER_FAILED,                     PENDING+backoff+결과보존+실패집계
             CLAIMED, LEASE_EXPIRED,                      CLAIMED+토큰
             CLAIMED, STALE_TOKEN_WRITE,                  0행
             # 최종 상태 4개는 같은 줄을 갖는다
             APPLIED, CLAIM_WITH_GATE_OPEN,               불가
             APPLIED, CLAIM_WITH_GATE_CLOSED,             불가
+            APPLIED, SUBMITTING,                         0행
             APPLIED, RESERVATION_NOT_APPLIED,            0행
             APPLIED, TB_APPLIED,                         0행
             APPLIED, TB_REJECTED,                        0행
@@ -62,6 +65,7 @@ class TransitionTableTest {
             APPLIED, STALE_TOKEN_WRITE,                  0행
             REJECTED, CLAIM_WITH_GATE_OPEN,               불가
             REJECTED, CLAIM_WITH_GATE_CLOSED,             불가
+            REJECTED, SUBMITTING,                         0행
             REJECTED, RESERVATION_NOT_APPLIED,            0행
             REJECTED, TB_APPLIED,                         0행
             REJECTED, TB_REJECTED,                        0행
@@ -72,6 +76,7 @@ class TransitionTableTest {
             REJECTED, STALE_TOKEN_WRITE,                  0행
             CONFLICT, CLAIM_WITH_GATE_OPEN,               불가
             CONFLICT, CLAIM_WITH_GATE_CLOSED,             불가
+            CONFLICT, SUBMITTING,                         0행
             CONFLICT, RESERVATION_NOT_APPLIED,            0행
             CONFLICT, TB_APPLIED,                         0행
             CONFLICT, TB_REJECTED,                        0행
@@ -82,6 +87,7 @@ class TransitionTableTest {
             CONFLICT, STALE_TOKEN_WRITE,                  0행
             SKIPPED, CLAIM_WITH_GATE_OPEN,               불가
             SKIPPED, CLAIM_WITH_GATE_CLOSED,             불가
+            SKIPPED, SUBMITTING,                         0행
             SKIPPED, RESERVATION_NOT_APPLIED,            0행
             SKIPPED, TB_APPLIED,                         0행
             SKIPPED, TB_REJECTED,                        0행
@@ -247,6 +253,8 @@ class TransitionTableTest {
                         case "핸들러" -> Effect.RUN_HANDLER;
                         case "backoff" -> Effect.BACKOFF;
                         case "결과보존" -> Effect.KEEP_KNOWN_RESULT;
+                        case "제출기록" -> Effect.RECORD_SUBMISSION;
+                        case "실패집계" -> Effect.COUNT_HANDLER_FAILURE;
                         default -> throw new IllegalArgumentException("표기 오류: " + parts[i]);
                     });
                 }

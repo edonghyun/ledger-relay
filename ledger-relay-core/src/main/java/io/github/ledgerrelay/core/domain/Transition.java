@@ -26,7 +26,11 @@ public record Transition(Outcome outcome, StoredState to, Set<Effect> effects) {
         /** next_attempt_at = now() + backoff. */
         BACKOFF,
         /** TB 결과를 known_result로 남겨 다음 claim이 TB를 건너뛰게 한다(§5.4). */
-        KEEP_KNOWN_RESULT
+        KEEP_KNOWN_RESULT,
+        /** submit_count += 1. 처음이면 first_submitted_at = now(). */
+        RECORD_SUBMISSION,
+        /** handler_failures += 1(§5.4). 막힌 키를 지표로 드러내는 근거다. */
+        COUNT_HANDLER_FAILURE
     }
 
     public Transition {

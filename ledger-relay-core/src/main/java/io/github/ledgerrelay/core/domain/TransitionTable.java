@@ -1,8 +1,10 @@
 package io.github.ledgerrelay.core.domain;
 
 import static io.github.ledgerrelay.core.domain.Transition.Effect.BACKOFF;
+import static io.github.ledgerrelay.core.domain.Transition.Effect.COUNT_HANDLER_FAILURE;
 import static io.github.ledgerrelay.core.domain.Transition.Effect.INCREMENT_LEASE_TOKEN;
 import static io.github.ledgerrelay.core.domain.Transition.Effect.KEEP_KNOWN_RESULT;
+import static io.github.ledgerrelay.core.domain.Transition.Effect.RECORD_SUBMISSION;
 import static io.github.ledgerrelay.core.domain.Transition.Effect.RUN_HANDLER;
 
 /**
@@ -27,8 +29,8 @@ public final class TransitionTable {
             case CLAIM_WITH_GATE_OPEN -> Transition.moveTo(StoredState.CLAIMED, INCREMENT_LEASE_TOKEN);
             case CLAIM_WITH_GATE_CLOSED -> Transition.unchanged();
             // 건너뜀도 claim한 뒤에 일어난다. 그래야 lease 토큰으로 fencing되고, 핸들러 실패가 CLAIMED 칸을 탄다.
-            case RESERVATION_NOT_APPLIED, TB_APPLIED, TB_REJECTED, TB_CONFLICT, NO_REPLY_OR_ERROR, HANDLER_FAILED ->
-                    Transition.impossible();
+            case SUBMITTING, RESERVATION_NOT_APPLIED, TB_APPLIED, TB_REJECTED, TB_CONFLICT, NO_REPLY_OR_ERROR,
+                    HANDLER_FAILED -> Transition.impossible();
             case LEASE_EXPIRED -> Transition.notApplicable();
             case STALE_TOKEN_WRITE -> Transition.zeroRows();
         };
@@ -38,12 +40,13 @@ public final class TransitionTable {
         return switch (event) {
             // lease가 살아 있는 동안 다시 claim하는 것은 불가. 만료 뒤 재claim은 LEASE_EXPIRED다.
             case CLAIM_WITH_GATE_OPEN, CLAIM_WITH_GATE_CLOSED -> Transition.impossible();
+            case SUBMITTING -> Transition.moveTo(StoredState.CLAIMED, RECORD_SUBMISSION);
             case RESERVATION_NOT_APPLIED -> Transition.moveTo(StoredState.SKIPPED, RUN_HANDLER);
             case TB_APPLIED -> Transition.moveTo(StoredState.APPLIED, RUN_HANDLER);
             case TB_REJECTED -> Transition.moveTo(StoredState.REJECTED, RUN_HANDLER);
             case TB_CONFLICT -> Transition.moveTo(StoredState.CONFLICT, RUN_HANDLER);
             case NO_REPLY_OR_ERROR -> Transition.moveTo(StoredState.PENDING, BACKOFF);
-            case HANDLER_FAILED -> Transition.moveTo(StoredState.PENDING, BACKOFF, KEEP_KNOWN_RESULT);
+            case HANDLER_FAILED -> Transition.moveTo(StoredState.PENDING, BACKOFF, KEEP_KNOWN_RESULT, COUNT_HANDLER_FAILURE);
             case LEASE_EXPIRED -> Transition.moveTo(StoredState.CLAIMED, INCREMENT_LEASE_TOKEN);
             case STALE_TOKEN_WRITE -> Transition.zeroRows();
         };
@@ -52,8 +55,8 @@ public final class TransitionTable {
     private static Transition fromFinal(CommandEvent event) {
         return switch (event) {
             case CLAIM_WITH_GATE_OPEN, CLAIM_WITH_GATE_CLOSED -> Transition.impossible();
-            case RESERVATION_NOT_APPLIED, TB_APPLIED, TB_REJECTED, TB_CONFLICT, NO_REPLY_OR_ERROR, STALE_TOKEN_WRITE ->
-                    Transition.zeroRows();
+            case SUBMITTING, RESERVATION_NOT_APPLIED, TB_APPLIED, TB_REJECTED, TB_CONFLICT, NO_REPLY_OR_ERROR,
+                    STALE_TOKEN_WRITE -> Transition.zeroRows();
             case HANDLER_FAILED, LEASE_EXPIRED -> Transition.notApplicable();
         };
     }

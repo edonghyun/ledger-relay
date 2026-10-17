@@ -8,6 +8,11 @@ public enum CommandEvent {
     CLAIM_WITH_GATE_OPEN,
     /** claim: 같은 키의 앞 명령이 미완료라 게이트가 닫혔다. */
     CLAIM_WITH_GATE_CLOSED,
+    /**
+     * TB에 보내기 직전에 제출을 기록한다(submit_count += 1, 처음이면 first_submitted_at). 보내기 전에 남기므로
+     * 응답이 유실돼도 "보낸 적이 있다"가 남는다(§4.2 처리 중). known_result가 있으면 보내지 않으므로 이 사건도 없다.
+     */
+    SUBMITTING,
     /** claim한 post·void의 참조 예약이 APPLIED가 아닌 최종 상태로 끝났다. TB에 보내지 않고 건너뛴다. */
     RESERVATION_NOT_APPLIED,
     /** TB 성공(created, exists). */
