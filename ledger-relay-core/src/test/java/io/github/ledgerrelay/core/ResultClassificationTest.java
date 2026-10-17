@@ -39,14 +39,12 @@ class ResultClassificationTest {
             PendingTransferExpired, BUSINESS
             PendingTransferAlreadyPosted, BUSINESS
             PendingTransferAlreadyVoided, BUSINESS
-            ExceedsPendingTransferAmount, BUSINESS
             OverflowsDebitsPending, BUSINESS
             OverflowsCreditsPending, BUSINESS
             OverflowsDebitsPosted, BUSINESS
             OverflowsCreditsPosted, BUSINESS
             OverflowsDebits, BUSINESS
             OverflowsCredits, BUSINESS
-            OverflowsTimeout, BUSINESS
             # 거절·이전 실패: 응답이 유실된 첫 시도가 TB의 일시적 실패 7종 중 하나였다. 계좌 없음(INVALID)일 수도 있어 알린다
             IdAlreadyFailed, PRIOR_FAILURE
             # 거절·잘못된 요청: 앱 버그 또는 설정 오류
@@ -79,6 +77,10 @@ class ResultClassificationTest {
             ReservedFlag, INVALID
             FlagsAreMutuallyExclusive, INVALID
             TimestampMustBeZero, INVALID
+            # 예약 금액은 바뀌지 않아 앱이 미리 안다. 결정적이고 ID를 소진하지 않는다 — ReservationSemanticsTest 장 2·3
+            ExceedsPendingTransferAmount, INVALID
+            # timestamp + timeout이 2^63ns(2262년)를 넘을 때만 나온다. timeout 최대 2^32초(136년)라 2126년 전에는 버그·시계 이상이다
+            OverflowsTimeout, INVALID
             # v1 해당 없음: linked chain과 imported 이벤트
             LinkedEventFailed, UNSUPPORTED
             LinkedEventChainOpen, UNSUPPORTED

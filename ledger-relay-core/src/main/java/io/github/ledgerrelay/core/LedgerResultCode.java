@@ -117,9 +117,8 @@ public enum LedgerResultCode {
 
             case ExceedsCredits, ExceedsDebits, DebitAccountAlreadyClosed, CreditAccountAlreadyClosed,
                  PendingTransferExpired, PendingTransferAlreadyPosted, PendingTransferAlreadyVoided,
-                 ExceedsPendingTransferAmount, OverflowsDebitsPending, OverflowsCreditsPending,
-                 OverflowsDebitsPosted, OverflowsCreditsPosted, OverflowsDebits, OverflowsCredits,
-                 OverflowsTimeout -> ResultCategory.BUSINESS;
+                 OverflowsDebitsPending, OverflowsCreditsPending, OverflowsDebitsPosted, OverflowsCreditsPosted,
+                 OverflowsDebits, OverflowsCredits -> ResultCategory.BUSINESS;
 
             case IdAlreadyFailed -> ResultCategory.PRIOR_FAILURE;
 
@@ -132,7 +131,9 @@ public enum LedgerResultCode {
                  PendingTransferHasDifferentCreditAccountId, PendingTransferHasDifferentLedger,
                  PendingTransferHasDifferentCode, PendingTransferHasDifferentAmount,
                  TimeoutReservedForPendingTransfer, ClosingTransferMustBePending, ReservedFlag,
-                 FlagsAreMutuallyExclusive, TimestampMustBeZero -> ResultCategory.INVALID;
+                 FlagsAreMutuallyExclusive, TimestampMustBeZero,
+                 // 예약 금액은 바뀌지 않아 앱이 미리 안다. 2126년 전의 timeout 넘침은 버그나 시계 이상이다
+                 ExceedsPendingTransferAmount, OverflowsTimeout -> ResultCategory.INVALID;
 
             case LinkedEventFailed, LinkedEventChainOpen, ImportedEventExpected, ImportedEventNotExpected,
                  ImportedEventTimestampOutOfRange, ImportedEventTimestampMustNotAdvance,
