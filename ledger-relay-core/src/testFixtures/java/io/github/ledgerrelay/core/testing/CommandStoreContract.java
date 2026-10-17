@@ -146,6 +146,24 @@ public abstract class CommandStoreContract {
         }
 
         @Test
+        @DisplayName("부호 없는 최댓값도 그대로 남는다 — 금액 2^128-1, user_data_64 2^64-1, ledger·user_data_32 2^32-1, code 65535")
+        void unsignedMaximaRoundTrip() {
+            // given
+            BigInteger u128Max = BigInteger.TWO.pow(128).subtract(BigInteger.ONE);
+            TransferBody widest = new TransferBody(CommandKind.RESERVE, u128Max.subtract(BigInteger.ONE),
+                    u128Max.subtract(BigInteger.TWO), u128Max, 4294967295L, 65535, 4294967295L, Optional.empty(),
+                    -1L, -1);
+
+            // when
+            inserted(new NewCommand("hold-max", "order-1", 1, Optional.empty(), u128Max.subtract(BigInteger.TEN),
+                    "hash-of-hold-max", widest));
+
+            // then
+            assertThat(record("hold-max").body()).as("다시 읽은 이체 본문").isEqualTo(widest);
+            assertThat(record("hold-max").transferId()).as("다시 읽은 이체 ID").isEqualTo(u128Max.subtract(BigInteger.TEN));
+        }
+
+        @Test
         @DisplayName("같은 트랜잭션에서는 방금 넣은 행으로 표시되고, 커밋한 뒤에는 그렇지 않다 — P2b-2")
         void aRowIsMarkedAsAcceptedInThisTransactionUntilCommit() {
             // when
