@@ -33,8 +33,15 @@ public record Transition(Outcome outcome, StoredState to, Set<Effect> effects) {
         COUNT_HANDLER_FAILURE
     }
 
+    /** 이동만 목적 상태와 효과를 갖는다. 나머지 결과는 둘 다 없다. */
     public Transition {
         effects = Set.copyOf(effects);
+        if (outcome == Outcome.MOVE && to == null) {
+            throw new IllegalArgumentException("이동(MOVE)에는 목적 상태가 필요하다");
+        }
+        if (outcome != Outcome.MOVE && (to != null || !effects.isEmpty())) {
+            throw new IllegalArgumentException(outcome + "에는 목적 상태와 효과가 없어야 한다: " + to + ", " + effects);
+        }
     }
 
     public static Transition moveTo(StoredState to, Effect... effects) {
