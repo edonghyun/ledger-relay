@@ -3,6 +3,7 @@ package io.github.ledgerrelay.core.testing;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import io.github.ledgerrelay.core.CommandKind;
 import io.github.ledgerrelay.core.LedgerResultCode;
@@ -37,6 +38,8 @@ public abstract class CommandStoreContract {
 
     protected static final Duration LEASE = Duration.ofSeconds(30);
     protected static final Duration BACKOFF = Duration.ofSeconds(5);
+    /** "막혀 있다"를 보는 고정 관찰 시간(P2b-4, docs/testing.md §8) */
+    protected static final Duration BLOCKED = Duration.ofMillis(300);
 
     protected StorageUnderTest storage;
     protected CommandStore store;
@@ -576,6 +579,98 @@ public abstract class CommandStoreContract {
             // then
             assertThat(changed).as("반영 여부").isTrue();
             assertThat(record("pay-1").completedAt()).as("포기한 뒤의 완료 시각").isPresent();
+        }
+    }
+
+    @Nested
+    @Order(7)
+    @DisplayName("다른 트랜잭션이 행을 잡고 있으면 — O1, R12, G4, G7")
+    class WhileAnotherTransactionHoldsRows {
+
+        @BeforeEach
+        void givenAStoreWithRowLocks() {
+            assumeTrue(storage.supportsRowLocks(), "행 잠금이 없는 저장소: 동시성 장을 건너뛴다(P2b-3)");
+        }
+
+        @Test
+        @DisplayName("맨 앞 명령이 잡혀 있으면 그 키에서는 아무것도 후보가 아니다 — 뒤 명령이 먼저 나가지 않게(G4)")
+        void aLockedHeadHidesItsWholeKey() {
+            // given: 키 order-1에 pay-1(1), pay-2(2). 다른 트랜잭션이 pay-1을 후보로 잠갔다
+            inserted(newTransfer("pay-1", "order-1", 1));
+            inserted(newTransfer("pay-2", "order-1", 2));
+            try (OtherTransaction<List<DueCommand>> worker1 = OtherTransaction.start(storage.transactions(),
+                    () -> store.lockDue(10))) {
+                worker1.awaitWork();
+
+                // then
+                assertNothingDue();
+            }
+        }
+
+        @Test
+        @DisplayName("참조한 예약 행이 잡혀 있어도 확정 후보는 예약의 상태를 싣는다 — 예약이 없다고 멈추지 않게(F10)")
+        void aLockedReservationIsStillReported() {
+            // given: hold-1은 적용으로 끝났고, 다른 트랜잭션이 hold-1 행을 쓰는 중이라 잠겨 있다
+            inserted(newReserve("hold-1", "order-1", 1));
+            inserted(newPost("capture-1", "order-1", 2, "hold-1"));
+            finished("hold-1", appliedRow(0));
+            long hold1 = record("hold-1").rowId();
+            try (OtherTransaction<Boolean> writer = OtherTransaction.start(storage.transactions(),
+                    () -> store.compareAndSet(new RowChange(hold1, StoredState.APPLIED, 0, appliedRow(0),
+                            new RowChange.Stamp.Completion())))) {
+                writer.awaitWork();
+
+                // when
+                List<DueCommand> due = inTx(() -> store.lockDue(10));
+
+                // then
+                assertThat(due).as("후보 수").hasSize(1);
+                assertThat(due.get(0).reservation()).as("잠긴 예약을 읽은 결과")
+                        .contains(new QueuedCommand("hold-1", 1, StoredState.APPLIED));
+            }
+        }
+
+        @Test
+        @DisplayName("같은 키의 순번을 받은 트랜잭션이 커밋할 때까지 다음 순번은 기다린다 — seq 순서가 커밋 순서와 같게(R12)")
+        void theKeyLockHoldsUntilCommit() {
+            // given: 첫 접수가 order-1의 순번 1을 받고 아직 커밋하지 않았다
+            try (OtherTransaction<Long> first = OtherTransaction.start(storage.transactions(),
+                    () -> store.nextSeq("order-1"));
+                 OtherTransaction<Long> second = startAfter(first, () -> store.nextSeq("order-1"))) {
+
+                // then: 두 번째는 첫 번째가 커밋할 때까지 막히고, 그 뒤 2를 받는다
+                second.assertStillWorkingAfter(BLOCKED);
+                first.commit();
+                assertThat(second.awaitWork()).as("두 번째 접수가 받은 순번").isEqualTo(2);
+            }
+        }
+
+        @Test
+        @DisplayName("같은 commandId가 동시에 들어오면 늦은 쪽은 먼저 커밋된 행을 돌려받고, 그 트랜잭션은 계속 쓸 수 있다(G7)")
+        void aConcurrentDuplicateLeavesTheAppTransactionUsable() {
+            // given: 첫 접수가 pay-1을 넣고 아직 커밋하지 않았다
+            try (OtherTransaction<Optional<CommandRecord>> first = OtherTransaction.start(storage.transactions(),
+                    () -> store.insertIfAbsent(newTransfer("pay-1", "order-1", 1)));
+                 OtherTransaction<String> second = startAfter(first, () -> {
+                     Optional<CommandRecord> existing = store.insertIfAbsent(newTransfer("pay-1", "order-2", 1));
+                     long nextOnAnotherKey = store.nextSeq("order-3"); // 트랜잭션이 살아 있어야 성공한다
+                     return existing.map(CommandRecord::orderingKey).orElse("-") + "/" + nextOnAnotherKey;
+                 })) {
+
+                // when
+                second.assertStillWorkingAfter(BLOCKED);
+                first.commit();
+
+                // then
+                assertThat(second.awaitWork()).as("늦은 쪽이 돌려받은 행의 순서 키 / 이어서 받은 순번")
+                        .isEqualTo("order-1/1");
+            }
+        }
+
+        /** 앞 트랜잭션이 일을 마친 뒤(잠금을 잡은 뒤) 다음 트랜잭션을 시작한다. */
+        private <T> OtherTransaction<T> startAfter(OtherTransaction<?> earlier, Supplier<T> work) {
+            earlier.awaitWork();
+            return OtherTransaction.start(storage.transactions(), work);
         }
     }
 

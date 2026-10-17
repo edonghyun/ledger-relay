@@ -16,4 +16,12 @@ public interface StorageUnderTest {
 
     /** 트랜잭션 밖에서 {@link Transactions#requireActive()}를 부르면 나는 예외 타입(P2a-13). */
     Class<? extends RuntimeException> outsideTransactionError();
+
+    /**
+     * 트랜잭션끼리 행 단위로 잠그는가. 메모리 저장소는 모든 트랜잭션을 잠금 하나로 줄 세우므로 false이고, 그래서
+     * 동시성 장을 건너뛴다(P2b-3).
+     */
+    default boolean supportsRowLocks() {
+        return false;
+    }
 }
