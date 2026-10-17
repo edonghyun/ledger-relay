@@ -1179,6 +1179,29 @@ public abstract class LedgerRelayContract {
     }
 
     @Nested
+    @Order(21)
+    @DisplayName("데이터가 어긋난 행이 claim 후보가 되면 — F29")
+    class AMalformedRowIsACandidate {
+
+        @Test
+        @DisplayName("그 행만 멈춤으로 알리고, 다른 키의 명령은 그대로 잡힌다 — 한 행의 이상이 릴레이 전체를 멈추지 않게")
+        void aMalformedRowIsHaltedAndOtherKeysKeepFlowing() {
+            // given: 참조 예약이 비어 있는 확정 행(접수 검사로는 만들 수 없다)과, 다른 키의 정상 이체
+            acceptedPastTheChecks(new NewCommand("capture-1", "order-1", 1, Optional.empty(), BigInteger.valueOf(101),
+                    "hash-of-capture-1", new TransferBody(CommandKind.POST, BigInteger.ZERO, BigInteger.ZERO,
+                            BigInteger.valueOf(500), 0, 0, 0, Optional.empty(), 0, 0)));
+            submit(transfer("pay-2", "order-2", 500));
+
+            // when
+            ClaimBatch batch = relay.claim(10, LEASE);
+
+            // then
+            assertClaimed(batch, "pay-2");
+            assertHalted(batch, "capture-1");
+        }
+    }
+
+    @Nested
     @Order(20)
     @DisplayName("잡은 명령의 행이 지워지고 같은 commandId가 다시 접수되면 — G5")
     class TheRowWasReplaced {

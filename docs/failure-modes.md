@@ -217,6 +217,20 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: 순번을 받은 뒤 같은 commandId를 먼저 찾는다. 있으면 접수증이나 충돌로 끝내고 참조 검사는 하지 않는다(스펙 §5.1 단계 3·4, P2d-2). 경쟁 경로(`insertIfAbsent`가 다른 트랜잭션의 행을 돌려줌)는 그대로 해시를 비교한다.
 - **확인**: 바꾸기 전에 두 테스트가 `ReservationNotFoundException`으로 실패했다.
 
+### F29. 데이터가 어긋난 행 하나가 claim 트랜잭션 전체를 던져 릴레이가 멈춘다 (전체 리뷰에서 발견)
+
+- **깨지는 것**: claim은 후보마다 게이트와 상태 기계를 같은 트랜잭션 안에서 돌린다. 한 후보의 데이터가 규칙과 어긋나면 그 판단이 예외를 던진다. 예를 들어 참조 예약이 비어 있는 확정 행(DB 직접 수정)이 있으면 `Optional.orElseThrow`가 던진다. 그러면 claim 전체가 롤백되고 워커는 매 바퀴 같은 예외로 끝나, 모든 키가 멈춘다. "그 키만 막힌다"(§3)에 어긋난다.
+- **재현**: `LedgerRelayContract` › 데이터가 어긋난 행이 claim 후보가 되면 › `aMalformedRowIsHaltedAndOtherKeysKeepFlowing`. 다른 키의 pay-2는 잡히고 이상한 행은 멈춘 명령으로 실린다.
+- **구조**: `CommandLifecycle.claim`이 후보 하나의 판단 예외를 잡아 그 행을 HALTED로 주차한다. 판단은 순수 Java라 PG 트랜잭션은 멀쩡하다. 주차도 못 하면 그 후보를 건너뛴다. 운영자는 멈춘 명령 목록(03b)으로 찾는다. 이런 행을 애초에 막는 DB CHECK는 F31에 있다.
+- **확인**: 넣기 전에는 claim이 `NoSuchElementException`으로 끝나 테스트가 실패했다.
+
+### F30. 긴 commandId·순서 키가 접수를 SQL 오류로 깬다 (전체 리뷰에서 발견)
+
+- **깨지는 것**: `command_id`와 `ordering_key`는 b-tree 인덱스가 걸린 `text`다. PG는 약 2.7KB를 넘는 인덱스 항목을 거부한다. 앱이 그보다 긴 ID를 보내면 `nextSeq`의 upsert가 "index row size exceeds maximum"으로 끝나고 앱 트랜잭션 전체가 중단된다. F20과 같은 종류다.
+- **재현**: `LedgerCommandTest` › 규칙을 어긴 명령을 만들면 › "commandId가 UTF-8 513바이트면", "순서 키가 한글 171자(513바이트)면". 512바이트는 담긴다(`aCommandIdOf512BytesIsAccepted`). `isAcceptableId`도 513바이트면 false다.
+- **구조**: `LedgerCommand.MAX_ID_BYTES = 512`다. commandId, orderingKey, reservationCommandId에 적용하고, `isAcceptableId`도 같은 상한을 본다.
+- **확인**: 넣기 전에 세 테스트가 실패했다.
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |

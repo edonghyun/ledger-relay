@@ -1,6 +1,7 @@
 package io.github.ledgerrelay.core;
 
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -33,6 +34,8 @@ public record LedgerCommand(
     public static final BigInteger AMOUNT_MAX = UINT128_MAX;
     static final long UINT32_MAX = 0xFFFF_FFFFL;
     static final int UINT16_MAX = 0xFFFF;
+    /** ID 문자열의 UTF-8 길이 상한. PG b-tree 인덱스 항목 한계(약 2.7KB)보다 넉넉히 작다(F30). */
+    public static final int MAX_ID_BYTES = 512;
 
     public LedgerCommand {
         Objects.requireNonNull(kind, "kind");
@@ -101,14 +104,19 @@ public record LedgerCommand(
      */
     private static void requireWellFormed(String field, String value) {
         require(isWellFormed(value), field + "에 U+0000이나 짝 없는 서로게이트를 쓸 수 없습니다");
+        require(fitsTheIndex(value), field + "는 UTF-8 " + MAX_ID_BYTES + "바이트 이하여야 합니다");
+    }
+
+    private static boolean fitsTheIndex(String value) {
+        return value.getBytes(StandardCharsets.UTF_8).length <= MAX_ID_BYTES;
     }
 
     /**
-     * 이 문자열이 commandId로 접수될 수 있는가. 아니면 그 id로 접수된 명령은 있을 수 없다. 서비스는 조회·포기 전에 이것으로
+     * 이 문자열이 commandId로 접수될 수 있는가(공백 아님, U+0000·짝 없는 서로게이트 없음, UTF-8 512바이트 이하). 아니면 그 id로 접수된 명령은 있을 수 없다. 서비스는 조회·포기 전에 이것으로
      * 걸러 DB에 보내지 않는다. PG에서 U+0000은 앱 트랜잭션을 깨고, 짝 없는 서로게이트는 '?'로 바뀌어 다른 명령과 맞는다(F20).
      */
     public static boolean isAcceptableId(String commandId) {
-        return commandId != null && !commandId.isBlank() && isWellFormed(commandId);
+        return commandId != null && !commandId.isBlank() && isWellFormed(commandId) && fitsTheIndex(commandId);
     }
 
     private static boolean isWellFormed(String value) {

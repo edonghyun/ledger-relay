@@ -89,6 +89,16 @@ class LedgerCommandTest {
                     BigInteger.ZERO, BigInteger.ZERO, BigInteger.ZERO, 0, 0, 0, "hold-1", 0, 0));
         }
         @Test
+        @DisplayName("UTF-8 512바이트의 commandId는 담긴다 — 상한 바로 아래")
+        void aCommandIdOf512BytesIsAccepted() {
+            // when
+            LedgerCommand payment = aTransfer("a".repeat(512)).build();
+
+            // then
+            assertThat(payment.commandId()).hasSize(512);
+        }
+
+        @Test
         @DisplayName("짝이 맞는 서로게이트(이모지)는 순서 키에 그대로 담긴다")
         void aTransferWithAPairedSurrogateIsAccepted() {
             // when
@@ -200,6 +210,12 @@ class LedgerCommandTest {
                     argumentSet("확정의 reservation에 U+0000이 있으면",
                             (ThrowingCallable) () -> aPost().reservation("hold\u00001").build(),
                             "reservationCommandId에 U+0000이나 짝 없는 서로게이트를 쓸 수 없습니다"),
+                    argumentSet("commandId가 UTF-8 513바이트면 — PG 인덱스 항목 한계에 닿기 전에 막는다",
+                            (ThrowingCallable) () -> aTransfer("a".repeat(513)).build(),
+                            "commandId는 UTF-8 512바이트 이하여야 합니다"),
+                    argumentSet("순서 키가 한글 171자(513바이트)면",
+                            (ThrowingCallable) () -> aTransfer("pay-1").orderingKey("가".repeat(171)).build(),
+                            "orderingKey는 UTF-8 512바이트 이하여야 합니다"),
                     argumentSet("보내는 계좌가 null이면",
                             (ThrowingCallable) () -> aTransfer("pay-1").debit((BigInteger) null).build(),
                             "debitAccountId가 필요합니다"),
@@ -217,6 +233,12 @@ class LedgerCommandTest {
     @Order(3)
     @DisplayName("문자열이 commandId로 접수될 수 있는지 물으면 — 조회·포기가 DB에 보내기 전에 쓴다 (F20)")
     class AcceptableIds {
+
+        @Test
+        @DisplayName("UTF-8 513바이트면 접수될 수 없다")
+        void anIdOver512BytesIsNotAcceptable() {
+            assertThat(LedgerCommand.isAcceptableId("가".repeat(171))).as("513바이트 id를 접수할 수 있는가").isFalse();
+        }
 
         @ParameterizedTest(name = "{0} → {1}", quoteTextArguments = false)
         @CsvSource(delimiter = '|', nullValues = "null", textBlock = """
