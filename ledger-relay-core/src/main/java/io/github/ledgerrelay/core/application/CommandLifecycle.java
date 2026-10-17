@@ -91,6 +91,7 @@ public final class CommandLifecycle implements LedgerRelay {
         return transactions.inTransaction(() -> {
             List<ClaimedCommand> claimed = new ArrayList<>();
             List<String> halted = new ArrayList<>();
+            List<ClaimBatch.Problem> problems = new ArrayList<>();
             for (DueCommand due : store.lockDue(limit)) {
                 CommandRecord candidate = due.command();
                 // lockDue가 처리 중 명령을 내는 것은 lease가 끝났을 때뿐이다
@@ -103,13 +104,17 @@ public final class CommandLifecycle implements LedgerRelay {
                     result = CommandStateMachine.apply(candidate.row(), new Step.Claim(gate, leaseExpired));
                 } catch (RuntimeException malformed) {
                     // 행의 데이터가 규칙과 어긋났다(DB 직접 수정, 저장소 버그). 판단은 순수 Java라 트랜잭션은 멀쩡하다.
-                    // 그 행만 멈춰 그 키만 막고, 다른 후보는 계속 판단한다(F29). 멈추게도 못 하면 건너뛴다
+                    // 그 행만 멈춰 그 키만 막고, 다른 후보는 계속 판단한다(F29). 멈추게도 못 하면 건너뛴다. 어느 쪽이든
+                    // 이유를 실어 알린다
                     gate = GateDecision.HALT;
                     try {
                         result = CommandStateMachine.apply(candidate.row(), new Step.Claim(gate, leaseExpired));
                     } catch (RuntimeException unparkable) {
+                        malformed.addSuppressed(unparkable);
+                        problems.add(new ClaimBatch.Problem(candidate.commandId(), malformed, false));
                         continue;
                     }
+                    problems.add(new ClaimBatch.Problem(candidate.commandId(), malformed, true));
                 }
                 if (!(result instanceof StepResult.Moved moved)) {
                     continue;
@@ -127,7 +132,7 @@ public final class CommandLifecycle implements LedgerRelay {
                     claimed.add(claimedOf(candidate, moved.row(), gate == GateDecision.SKIP));
                 }
             }
-            return new ClaimBatch(claimed, halted);
+            return new ClaimBatch(claimed, halted, problems);
         });
     }
 

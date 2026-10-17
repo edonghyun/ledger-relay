@@ -14,6 +14,13 @@ public interface WorkerEvents {
     default void halted(String commandId) {
     }
 
+    /**
+     * claim 후보 하나의 판단이 예외를 던졌다(F29). 그 행은 멈췄거나, 멈추게도 못 해 건너뛰었다. 다른 후보는 계속 처리됐다.
+     * {@code cause}에 무엇이 어긋났는지가 있다.
+     */
+    default void malformedCandidate(String commandId, RuntimeException cause) {
+    }
+
     /** 쓰기가 0행이었다. 다른 워커가 가져갔거나 이미 끝났다(G5, stale_write_rejected). */
     default void fenced(String commandId) {
     }

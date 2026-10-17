@@ -47,6 +47,7 @@ public final class RelayWorker {
         try {
             ClaimBatch batch = lifecycle.claim(settings.batchSize(), settings.lease());
             batch.halted().forEach(events::halted);
+            batch.problems().forEach(problem -> events.malformedCandidate(problem.commandId(), problem.cause()));
             if (batch.claimed().isEmpty()) {
                 return CycleReport.IDLE;
             }

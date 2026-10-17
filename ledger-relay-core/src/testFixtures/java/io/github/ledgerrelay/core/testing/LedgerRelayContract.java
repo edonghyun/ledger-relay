@@ -1200,6 +1200,8 @@ public abstract class LedgerRelayContract {
             // then
             assertClaimed(batch, "pay-2");
             assertHalted(batch, "capture-1");
+            assertThat(batch.problems()).as("문제가 있던 후보의 이유").singleElement()
+                    .satisfies(problem -> assertThat(problem.halted()).as("멈춤으로 세웠는가").isTrue());
         }
     }
 

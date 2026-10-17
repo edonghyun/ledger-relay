@@ -19,6 +19,11 @@ public final class RecordingWorkerEvents implements WorkerEvents {
     }
 
     @Override
+    public synchronized void malformedCandidate(String commandId, RuntimeException cause) {
+        events.add("malformedCandidate:" + commandId);
+    }
+
+    @Override
     public synchronized void fenced(String commandId) {
         events.add("fenced:" + commandId);
     }
