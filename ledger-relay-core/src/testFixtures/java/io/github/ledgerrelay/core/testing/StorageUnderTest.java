@@ -24,4 +24,12 @@ public interface StorageUnderTest {
     default boolean supportsRowLocks() {
         return false;
     }
+
+    /**
+     * {@link #elapse(Duration)} 사이에 시계가 멈춰 있는가. 메모리 저장소는 수동 시계라 true다. PostgreSQL의 {@code now()}는
+     * 트랜잭션마다 실제 시간으로 흐르므로 false이고, 그래서 "바로 그 시각" 경계 테스트를 건너뛴다.
+     */
+    default boolean clockStandsStill() {
+        return true;
+    }
 }

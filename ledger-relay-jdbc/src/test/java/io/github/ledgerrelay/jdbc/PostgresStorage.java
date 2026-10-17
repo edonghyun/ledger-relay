@@ -88,6 +88,12 @@ final class PostgresStorage implements StorageUnderTest {
         return true;
     }
 
+    /** PG {@code now()}는 트랜잭션마다 실제 시간으로 흐른다 */
+    @Override
+    public boolean clockStandsStill() {
+        return false;
+    }
+
     DataSource dataSource() {
         return dataSource;
     }
