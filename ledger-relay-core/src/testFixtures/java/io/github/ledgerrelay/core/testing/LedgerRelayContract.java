@@ -1,5 +1,8 @@
 package io.github.ledgerrelay.core.testing;
 
+import static io.github.ledgerrelay.core.LedgerResultCode.Created;
+import static io.github.ledgerrelay.core.LedgerResultCode.ExceedsCredits;
+import static io.github.ledgerrelay.core.LedgerResultCode.ExistsWithDifferentAmount;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -9,10 +12,15 @@ import io.github.ledgerrelay.core.CommandReceipt;
 import io.github.ledgerrelay.core.CommandStatus.State;
 import io.github.ledgerrelay.core.CommandStatus;
 import io.github.ledgerrelay.core.LedgerCommand;
+import io.github.ledgerrelay.core.LedgerResultCode;
+import io.github.ledgerrelay.core.Rejection;
 import io.github.ledgerrelay.core.ReservationNotFoundException;
+import io.github.ledgerrelay.core.ResultCategory;
+import io.github.ledgerrelay.core.application.Backoff;
 import io.github.ledgerrelay.core.application.ClaimBatch;
 import io.github.ledgerrelay.core.application.ClaimedCommand;
 import io.github.ledgerrelay.core.application.CommandLifecycle;
+import io.github.ledgerrelay.core.application.WriteResult;
 import io.github.ledgerrelay.core.spi.Submission;
 import io.github.ledgerrelay.core.spi.TransferBody;
 import java.math.BigInteger;
@@ -34,6 +42,7 @@ import org.junit.jupiter.api.Test;
 public abstract class LedgerRelayContract {
 
     protected static final Duration LEASE = Duration.ofSeconds(30);
+    protected static final Duration BACKOFF = Duration.ofSeconds(5);
 
     protected final RecordingHandler handler = new RecordingHandler();
     protected StorageUnderTest storage;
@@ -45,7 +54,8 @@ public abstract class LedgerRelayContract {
     @BeforeEach
     protected void givenAnEmptyRelay() {
         storage = createStorage();
-        relay = new CommandLifecycle(storage.store(), storage.transactions(), new SequentialTransferIds(), handler);
+        relay = new CommandLifecycle(storage.store(), storage.transactions(), new SequentialTransferIds(), handler,
+                new Backoff(BACKOFF, BACKOFF));
     }
 
     @Nested
@@ -328,6 +338,358 @@ public abstract class LedgerRelayContract {
         }
     }
 
+    @Nested
+    @Order(5)
+    @DisplayName("잡은 명령에 결과를 쓰면 — §5.3")
+    class WritingResults {
+
+        ClaimedCommand pay1;
+
+        @BeforeEach
+        void givenPay1IsClaimed() {
+            submit(transfer("pay-1", "order-1", 500));
+            pay1 = claimOnly("pay-1");
+        }
+
+        @Test
+        @DisplayName("성공(Created)을 쓰면 적용됨이 되고, 핸들러가 적용됨을 한 번 받는다")
+        void successApplies() {
+            // when
+            WriteResult result = relay.complete(pay1, Created);
+
+            // then
+            assertWritten(result);
+            assertQueryState("pay-1", State.APPLIED);
+            assertHandlerRanOnceFor("pay-1", State.APPLIED);
+        }
+
+        @Test
+        @DisplayName("핸들러가 받은 조회 결과에는 완료 시각이 있다 — 핸들러는 끝난 명령을 본다")
+        void theHandlerSeesTheCompletionTime() {
+            // when
+            relay.complete(pay1, Created);
+
+            // then
+            assertThat(handler.completedFor("pay-1").get(0).completedAt()).as("핸들러가 받은 완료 시각").isPresent();
+        }
+
+        @Test
+        @DisplayName("잔액 부족을 쓰면 거절됨이 되고, 사유는 업무 거절(ExceedsCredits)이다")
+        void aBusinessRejectionRejects() {
+            // when
+            relay.complete(pay1, ExceedsCredits);
+
+            // then
+            assertQueryState("pay-1", State.REJECTED);
+            assertRejection("pay-1", ResultCategory.BUSINESS, ExceedsCredits);
+        }
+
+        @Test
+        @DisplayName("내용 충돌을 쓰면 충돌이 되고, 사유가 남는다")
+        void aContentConflictConflicts() {
+            // when
+            relay.complete(pay1, ExistsWithDifferentAmount);
+
+            // then
+            assertQueryState("pay-1", State.CONFLICT);
+            assertRejection("pay-1", ResultCategory.CONFLICT, ExistsWithDifferentAmount);
+        }
+
+        @Test
+        @DisplayName("TB에 보내기 전에 제출을 기록하면 처리 중으로 조회된다")
+        void recordingASubmissionShowsInProgress() {
+            // when
+            WriteResult result = relay.markSubmitted(pay1);
+
+            // then
+            assertWritten(result);
+            assertQueryState("pay-1", State.IN_PROGRESS);
+        }
+
+        @Test
+        @DisplayName("응답이 없어 되돌리면 backoff가 지나기 전에는 잡히지 않는다")
+        void aReleasedCommandWaitsForItsBackoff() {
+            // given
+            assertWritten(relay.release(pay1));
+            storage.elapse(BACKOFF.minusSeconds(1));
+
+            // when
+            ClaimBatch batch = relay.claim(10, LEASE);
+
+            // then
+            assertNothingClaimed(batch);
+        }
+
+        @Test
+        @DisplayName("되돌린 명령은 backoff가 지나면 같은 이체 ID로 다시 잡힌다 — 미확정은 같은 ID 재제출로만 푼다")
+        void aReleasedCommandIsClaimedAgainWithTheSameTransferId() {
+            // given
+            relay.markSubmitted(pay1);
+            relay.release(pay1);
+            storage.elapse(BACKOFF);
+
+            // when
+            ClaimedCommand again = claimOnly("pay-1");
+
+            // then
+            assertThat(again.submission().transferId()).as("다시 잡은 명령의 이체 ID").isEqualTo(BigInteger.ONE);
+            assertThat(again.leaseToken()).as("다시 잡은 claim의 토큰").isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("한 번 보낸 뒤 되돌린 명령은 처리 중으로 조회된다 — 미확정이 접수됨으로 돌아가지 않는다")
+        void aSubmittedThenReleasedCommandStaysInProgress() {
+            // when
+            relay.markSubmitted(pay1);
+            relay.release(pay1);
+
+            // then
+            assertQueryState("pay-1", State.IN_PROGRESS);
+        }
+    }
+
+    @Nested
+    @Order(6)
+    @DisplayName("lease가 끝나 다른 워커가 잡은 뒤 앞 워커가 쓰면 — G5, E3")
+    class LateWorker {
+
+        ClaimedCommand byWorker1;
+        ClaimedCommand byWorker2;
+
+        @BeforeEach
+        void givenWorker2TookOverPay1() {
+            submit(transfer("pay-1", "order-1", 500));
+            byWorker1 = claimOnly("pay-1");
+            storage.elapse(LEASE.plusSeconds(1));
+            byWorker2 = claimOnly("pay-1");
+        }
+
+        @Test
+        @DisplayName("앞 워커의 결과 쓰기는 0행이고, 핸들러는 실행되지 않으며, 명령은 처리 중 그대로다")
+        void theLateResultIsFenced() {
+            // when
+            WriteResult result = relay.complete(byWorker1, Created);
+
+            // then
+            assertFenced(result);
+            assertHandlerNeverRanFor("pay-1");
+            assertQueryState("pay-1", State.ACCEPTED);
+        }
+
+        @Test
+        @DisplayName("앞 워커의 제출 기록도 0행이다")
+        void theLateSubmissionIsFenced() {
+            // when
+            WriteResult result = relay.markSubmitted(byWorker1);
+
+            // then
+            assertFenced(result);
+            assertQueryState("pay-1", State.ACCEPTED);
+        }
+
+        @Test
+        @DisplayName("새 워커의 결과는 반영되고, 핸들러는 한 번만 실행된다")
+        void theCurrentWorkerWins() {
+            // given
+            relay.complete(byWorker1, Created);
+
+            // when
+            WriteResult result = relay.complete(byWorker2, Created);
+
+            // then
+            assertWritten(result);
+            assertHandlerRanOnceFor("pay-1", State.APPLIED);
+        }
+
+        @Test
+        @DisplayName("이미 끝난 명령에 같은 토큰으로 다시 써도 0행이고, 핸들러는 다시 실행되지 않는다")
+        void aFinishedCommandIgnoresRepeatedWrites() {
+            // given
+            relay.complete(byWorker2, Created);
+
+            // when
+            WriteResult result = relay.complete(byWorker2, Created);
+
+            // then
+            assertFenced(result);
+            assertHandlerRanOnceFor("pay-1", State.APPLIED);
+        }
+
+        @Test
+        @DisplayName("없는 명령에 쓰면 0행이다")
+        void anUnknownCommandIsFenced() {
+            // given
+            ClaimedCommand ghost = new ClaimedCommand(byWorker2.rowId() + 1000, "never-accepted", "order-1",
+                    byWorker2.leaseToken(), false, Optional.empty(), byWorker2.submission());
+
+            // then
+            assertFenced(relay.complete(ghost, Created));
+        }
+    }
+
+    @Nested
+    @Order(7)
+    @DisplayName("결과 반영 핸들러가 실패하면 — §5.4, G6")
+    class HandlerFails {
+
+        ClaimedCommand pay1;
+
+        @BeforeEach
+        void givenTheHandlerWillFailOnce() {
+            submit(transfer("pay-1", "order-1", 500));
+            pay1 = claimOnly("pay-1");
+            relay.markSubmitted(pay1);
+            handler.failNextCalls(1);
+        }
+
+        @Test
+        @DisplayName("핸들러 실패가 결과로 돌아오고, 결과 쓰기는 취소되어 명령은 처리 중으로 남는다")
+        void theResultIsRolledBackWithTheHandler() {
+            // when
+            WriteResult result = relay.complete(pay1, ExceedsCredits);
+
+            // then
+            assertHandlerFailed(result);
+            assertQueryState("pay-1", State.IN_PROGRESS);
+            assertThat(status("pay-1").rejection()).as("취소된 결과의 거절 사유").isEmpty();
+            assertHandlerNeverRanFor("pay-1");
+        }
+
+        @Test
+        @DisplayName("backoff가 지나기 전에는 다시 잡히지 않는다")
+        void theFailedCommandWaitsForItsBackoff() {
+            // given
+            relay.complete(pay1, ExceedsCredits);
+            storage.elapse(BACKOFF.minusSeconds(1));
+
+            // then
+            assertNothingClaimed(relay.claim(10, LEASE));
+        }
+
+        @Test
+        @DisplayName("backoff 뒤 다시 잡히면 받았던 TB 결과를 싣고 온다 — TB에 다시 보내지 않게")
+        void theKnownResultComesBackWithTheNextClaim() {
+            // given
+            relay.complete(pay1, ExceedsCredits);
+            storage.elapse(BACKOFF);
+
+            // when
+            ClaimedCommand again = claimOnly("pay-1");
+
+            // then
+            assertThat(again.knownResult()).as("다시 잡은 명령이 싣고 온 결과").contains(ExceedsCredits);
+        }
+
+        @Test
+        @DisplayName("다시 잡아 같은 결과로 끝내면 핸들러가 한 번 실행되고 거절됨으로 끝난다")
+        void retryingTheHandlerFinishesTheCommand() {
+            // given
+            relay.complete(pay1, ExceedsCredits);
+            storage.elapse(BACKOFF);
+            ClaimedCommand again = claimOnly("pay-1");
+
+            // when
+            WriteResult result = relay.complete(again, again.knownResult().orElseThrow());
+
+            // then
+            assertWritten(result);
+            assertQueryState("pay-1", State.REJECTED);
+            assertHandlerRanOnceFor("pay-1", State.REJECTED);
+        }
+    }
+
+    @Nested
+    @Order(8)
+    @DisplayName("같은 키의 앞 명령이 끝나면 — G4")
+    class AfterTheEarlierCommandFinishes {
+
+        @Test
+        @DisplayName("뒤 명령이 잡힌다")
+        void theNextCommandIsClaimed() {
+            // given
+            submit(transfer("pay-1", "order-1", 500));
+            submit(transfer("pay-2", "order-1", 300));
+            finished("pay-1", Created);
+
+            // when
+            ClaimBatch batch = relay.claim(10, LEASE);
+
+            // then
+            assertClaimed(batch, "pay-2");
+        }
+
+        @Test
+        @DisplayName("예약이 적용됐으면 확정은 예약의 이체 ID를 pending ID로 싣고 TB로 간다")
+        void aPostOfAnAppliedReservationGoesToTigerBeetle() {
+            // given
+            submit(reserve("hold-1", "order-1", 500));
+            submit(post("capture-1", "order-1", "hold-1"));
+            finished("hold-1", Created);
+
+            // when
+            ClaimedCommand capture = claimOnly("capture-1");
+
+            // then
+            assertThat(capture.skip()).as("건너뛸 대상인가").isFalse();
+            assertThat(capture.submission().body().pendingTransferId()).as("확정이 가리키는 예약 이체 ID")
+                    .contains(BigInteger.ONE);
+        }
+
+        @Test
+        @DisplayName("예약이 거절됐으면 확정은 건너뛸 대상으로 잡힌다")
+        void aPostOfARejectedReservationIsClaimedToBeSkipped() {
+            // given
+            submit(reserve("hold-1", "order-1", 500));
+            submit(post("capture-1", "order-1", "hold-1"));
+            finished("hold-1", ExceedsCredits);
+
+            // when
+            ClaimedCommand capture = claimOnly("capture-1");
+
+            // then
+            assertThat(capture.skip()).as("건너뛸 대상인가").isTrue();
+        }
+
+        @Test
+        @DisplayName("건너뛰면 건너뜀으로 끝나고, 사유 없이 핸들러가 한 번 실행된다")
+        void skippingFinishesWithoutAReason() {
+            // given
+            submit(reserve("hold-1", "order-1", 500));
+            submit(post("capture-1", "order-1", "hold-1"));
+            finished("hold-1", ExceedsCredits);
+            ClaimedCommand capture = claimOnly("capture-1");
+
+            // when
+            WriteResult result = relay.skip(capture);
+
+            // then
+            assertWritten(result);
+            assertQueryState("capture-1", State.SKIPPED);
+            assertThat(status("capture-1").rejection()).as("건너뜀의 거절 사유").isEmpty();
+            assertHandlerRanOnceFor("capture-1", State.SKIPPED);
+        }
+
+        @Test
+        @DisplayName("건너뜀의 핸들러가 실패하면 backoff 뒤 다시 건너뛸 대상으로 잡힌다 — 아는 결과 없이")
+        void aFailedSkipIsSkippedAgain() {
+            // given
+            submit(reserve("hold-1", "order-1", 500));
+            submit(post("capture-1", "order-1", "hold-1"));
+            finished("hold-1", ExceedsCredits);
+            ClaimedCommand capture = claimOnly("capture-1");
+            handler.failNextCalls(1);
+            assertHandlerFailed(relay.skip(capture));
+            storage.elapse(BACKOFF);
+
+            // when
+            ClaimedCommand again = claimOnly("capture-1");
+
+            // then
+            assertThat(again.skip()).as("다시 건너뛸 대상인가").isTrue();
+            assertThat(again.knownResult()).as("건너뜀이 남긴 결과").isEmpty();
+        }
+    }
+
     // ── 명령을 만드는 말: 금액과 키는 숨기지 않는다 ──────────────────────
 
     protected static LedgerCommand transfer(String commandId, String orderingKey, long amount) {
@@ -398,6 +760,43 @@ public abstract class LedgerRelayContract {
 
     private static List<String> idsOf(ClaimBatch batch) {
         return batch.claimed().stream().map(ClaimedCommand::commandId).toList();
+    }
+
+    /** 전제: 이 명령이 이 TB 결과로 끝났다. */
+    protected void finished(String commandId, LedgerResultCode code) {
+        ClaimedCommand claimed = claimOnly(commandId);
+        if (!(relay.complete(claimed, code) instanceof WriteResult.Written)) {
+            throw new IllegalStateException("given 준비 실패: " + commandId + "를 " + code + "로 끝내지 못했다");
+        }
+    }
+
+    protected static void assertWritten(WriteResult result) {
+        assertThat(result).as("쓰기가 반영되기를 기대했다").isEqualTo(new WriteResult.Written());
+    }
+
+    protected static void assertFenced(WriteResult result) {
+        assertThat(result).as("쓰기가 0행으로 막히기를 기대했다").isEqualTo(new WriteResult.Fenced());
+    }
+
+    protected static void assertHandlerFailed(WriteResult result) {
+        assertThat(result).as("핸들러 실패가 돌아오기를 기대했다").isInstanceOf(WriteResult.HandlerFailed.class);
+        assertThat(((WriteResult.HandlerFailed) result).cause()).as("핸들러가 던진 예외")
+                .isInstanceOf(RecordingHandler.HandlerFailure.class);
+    }
+
+    protected void assertHandlerRanOnceFor(String commandId, State state) {
+        assertThat(handler.completedFor(commandId).stream().map(CommandStatus::state).toList())
+                .as("%s에 대해 끝까지 실행된 핸들러 호출이 받은 상태", commandId)
+                .containsExactly(state);
+    }
+
+    protected void assertHandlerNeverRanFor(String commandId) {
+        assertThat(handler.completedFor(commandId)).as("%s에 대해 끝까지 실행된 핸들러 호출", commandId).isEmpty();
+    }
+
+    protected void assertRejection(String commandId, ResultCategory category, LedgerResultCode code) {
+        assertThat(status(commandId).rejection()).as("%s의 거절 사유", commandId)
+                .contains(new Rejection(category, code));
     }
 
     /** 앱 트랜잭션이 일부러 실패한다. */

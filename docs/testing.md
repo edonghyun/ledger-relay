@@ -127,6 +127,31 @@ class AfterAPaymentIsRecorded {
 
 core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다. 예: `assertSubmits`, `assertWaits`, `assertSkips`, `assertRejectedAsInvalid`, `assertSameHash`.
 
+## 6-2. 계약 테스트 (core testFixtures)
+
+헥사고날 구조라서 계약이 두 벌이다. 저장소 구현마다 `StorageUnderTest` 하나를 만들고, 두 계약을 각각 상속한 테스트를 둔다. 메모리 저장소와 PostgreSQL 저장소가 같은 장을 읽는다.
+
+- `CommandStoreContract`: 저장소 포트의 의미. 넣기, 찾기, 순번, 잠그고 읽기, 조건부 쓰기, 트랜잭션. 행은 손으로 만든다. 상태 기계를 거치지 않으며, 저장소가 판단하지 않는다는 것을 보여 준다.
+- `LedgerRelayContract`: 서비스 `CommandLifecycle`의 행동. 접수, 참조 검사, G1, claim과 게이트, 결과, 늦은 워커, 핸들러 실패, 순서.
+
+| 쓰는 말 | 뜻 |
+|---|---|
+| `newTransfer("pay-1", "order-1", 1)`, `newReserve(…)`, `newPost("capture-1", "order-1", 2, "hold-1")` | (저장소 계약) 넣을 행. 이체 ID는 100+순번, 해시는 `hash-of-<id>` |
+| `inserted(row)` / `claimed(id, token)` / `finished(id, row)` / `released(id)` | (저장소 계약) **전제**: 행이 들어감 / 처리 중이 됨 / 끝남 / 되돌아감 |
+| `assertDue(ids…)` / `assertDueWithLimit(n, ids…)` / `assertNothingDue()` | (저장소 계약) claim 후보가 정확히 이것(접수 순서) / 없음 |
+| `transfer("pay-1", "order-1", 500)`, `reserve(…)`, `post("capture-1", "order-1", "hold-1")`, `voidOf(…)` | (서비스 계약) 명령. 키와 금액을 숨기지 않는다 |
+| `submit(command)` | (서비스 계약) 앱처럼 트랜잭션 안에서 접수한다 |
+| `claimOnly("pay-1")` | **전제**: 이 명령 하나만 잡힌다. 아니면 "given 준비 실패" |
+| `finished("hold-1", ExceedsCredits)` | (서비스 계약) **전제**: 이 명령이 이 TB 결과로 끝났다 |
+| `storage.elapse(LEASE.plusSeconds(1))` | 저장소 시계를 돌린다(lease 만료, backoff 경과). sleep하지 않는다 |
+| `handler.failNextCalls(1)` | 다음 핸들러 호출이 기록 전에 던진다 |
+| `assertQueryState(id, State.X)` | 조회 상태(§4.2) |
+| `assertClaimed(batch, ids…)` / `assertNothingClaimed(batch)` | 정확히 이 명령들이 접수 순서로 잡힘 / 아무것도 안 잡힘 |
+| `assertWritten(r)` / `assertFenced(r)` / `assertHandlerFailed(r)` | 쓰기가 반영됨 / 0행으로 막힘 / 핸들러가 던져 취소됨 |
+| `assertHandlerRanOnceFor(id, State.X)` / `assertHandlerNeverRanFor(id)` | 핸들러가 끝까지 한 번 실행됨 / 한 번도 끝까지 실행되지 않음 |
+| `assertRejection(id, category, code)` | 거절·충돌 사유 |
+| `assertRejectedAsConflict(…)` / `assertRejectedAsMissingReservation(…)` | 접수가 내용 충돌 / 참조 예약 없음으로 거부됨 |
+
 ## 7. 리팩터링 규칙
 
 - 같은 준비나 확인이 **두세 번 반복되고 같은 의미**일 때 이름을 붙여 뽑는다. 생김새만 비슷하다고 묶지 않는다.
