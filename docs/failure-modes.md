@@ -203,6 +203,13 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **재현 테스트**: `TigerBeetleContainerGuardTest` › `startRetriesWhenTheServerDiesRightAfterListening`(한 번 죽고 다음엔 사는 가짜 서버), `startFailsWhenServerDiesRightAfterListening`(매번 죽으면 "3번 시도"와 panic 로그로 실패).
 - **확인**: 시도 횟수를 1로 줄이는 대조군에서 두 테스트가 실패했다. 완화를 넣은 뒤 tigerbeetle 모듈을 5번 돌려 실패 0이었다. 다만 그 5번은 실제 TB의 재시도도 0번이었다(자연 발생 없음). 그래서 실제 panic에 대한 효과는 아직 관찰하지 못했다.
 
+### F27. 이미 TB에 보낸 멈춘 명령을 운영자가 "보내지 않음"으로 포기한다 (전체 리뷰에서 발견)
+
+- **깨지는 것**: HALTED는 접수 상태(PENDING)에서만 들어간다. 그런데 접수 상태에는 한 번 보냈다가 되돌린 명령(submit_count > 0)과 TB 결과를 받았는데 핸들러가 실패한 명령(known_result)도 있다. 이런 명령의 참조 예약 행이 사라지면 다음 claim에서 멈춘다. 운영자가 `abandonHalted`로 포기하면 PG는 SKIPPED(ABANDONED_BY_OPERATOR)가 되고, 핸들러는 "적용 안 됨"을 받는다. TB에서는 이미 확정됐을 수 있으므로 돈과 업무 상태가 어긋난다.
+- **재현**: `LedgerRelayContract` › 이미 TB에 보낸 뒤 멈춘 명령을 포기하려 하면 › `aReleasedCommandIsRefused`, `aCommandWithAKnownResultIsRefused`(메모리, PG DataSource, PG JPA).
+- **구조**: `CommandLifecycle.abandonHalted`는 `submitCount > 0`이거나 `knownResult`가 있으면 `IllegalStateException`("이미 TB에 보낸 적이 있어 포기할 수 없습니다")으로 거부한다. 이런 명령은 TB에서 이체를 확인한 뒤 사람이 정리한다. 운영자 공개 포트(03b)가 이 거부를 그대로 드러낸다.
+- **확인**: 넣기 전에 여섯 테스트가 "예외가 없다"로 실패했다.
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |

@@ -156,7 +156,7 @@ public final class CommandLifecycle implements LedgerRelay {
      * 같은 트랜잭션에서 핸들러가 '운영자 포기' 사유를 받는다. 핸들러가 실패하면 멈춘 그대로 남는다. 트랜잭션 밖에서 부른다.
      *
      * @throws IllegalArgumentException 접수한 적 없는 명령
-     * @throws IllegalStateException    멈춘 명령이 아니다
+     * @throws IllegalStateException    멈춘 명령이 아니거나, 이미 TB에 보낸 적이 있다(F27)
      */
     public WriteResult abandonHalted(String commandId) {
         requireOutsideTransaction();
@@ -170,6 +170,12 @@ public final class CommandLifecycle implements LedgerRelay {
                 if (current.row().state() != StoredState.HALTED) {
                     throw new IllegalStateException("멈춘(HALTED) 명령만 포기할 수 있습니다: " + commandId + "는 "
                             + current.row().state());
+                }
+                // 포기는 "TB에 한 번도 가지 않았다"는 뜻이다(SkipReason.ABANDONED_BY_OPERATOR). 보낸 적이 있으면 TB에서
+                // 이미 확정됐을 수 있어, 포기하면 돈은 움직였는데 PG와 핸들러는 적용 안 됨으로 남는다(F27)
+                if (current.row().submitCount() > 0 || current.row().knownResult().isPresent()) {
+                    throw new IllegalStateException("이미 TB에 보낸 적이 있어 포기할 수 없습니다: " + commandId
+                            + ". TB에서 이체를 확인한 뒤 수동으로 정리하세요");
                 }
                 StepResult.Moved moved = (StepResult.Moved) CommandStateMachine.apply(current.row(), new Step.Abandon());
                 return land(current, StoredState.HALTED, current.row().leaseToken(), moved);

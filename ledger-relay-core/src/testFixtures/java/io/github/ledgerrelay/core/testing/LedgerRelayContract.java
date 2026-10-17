@@ -1134,6 +1134,69 @@ public abstract class LedgerRelayContract {
     }
 
     @Nested
+    @Order(17)
+    @DisplayName("이미 TB에 보낸 뒤 멈춘 명령을 포기하려 하면 — F27")
+    class AbandoningAHaltedCommandThatWasSent {
+
+        @BeforeEach
+        void givenHold1IsApplied() {
+            submit(reserve("hold-1", "order-1", 500));
+            relay.complete(claimOnly("hold-1"), Created);
+            submit(post("capture-1", "order-1", "hold-1"));
+        }
+
+        @Test
+        @DisplayName("한 번 보내고 되돌린 확정이면 거부되고, 멈춘 그대로이며 핸들러는 실행되지 않는다 — TB에서는 확정됐을 수 있다")
+        void aReleasedCommandIsRefused() {
+            // given: capture-1을 보냈다가 되돌렸고, 그 뒤 참조 예약 행이 사라져 멈췄다
+            ClaimedCommand capture = claimOnly("capture-1");
+            relay.markSubmitted(capture);
+            relay.release(capture);
+            haltedAfterItsReservationIsGone("capture-1");
+
+            // when
+            ThrowingCallable abandoning = () -> relay.abandonHalted("capture-1");
+
+            // then
+            assertRefusedAsAlreadySent(abandoning);
+            assertQueryState("capture-1", State.HALTED);
+            assertHandlerNeverRanFor("capture-1");
+        }
+
+        @Test
+        @DisplayName("TB 결과를 알고 있는 확정이면 거부된다 — 핸들러만 실패했고 TB에는 기록됐다")
+        void aCommandWithAKnownResultIsRefused() {
+            // given: capture-1이 TB에 기록됐지만 핸들러가 실패했고, 그 뒤 참조 예약 행이 사라져 멈췄다
+            handler.failNextCalls(1);
+            ClaimedCommand capture = claimOnly("capture-1");
+            relay.markSubmitted(capture);
+            relay.complete(capture, Created);
+            haltedAfterItsReservationIsGone("capture-1");
+
+            // when
+            ThrowingCallable abandoning = () -> relay.abandonHalted("capture-1");
+
+            // then
+            assertRefusedAsAlreadySent(abandoning);
+            assertQueryState("capture-1", State.HALTED);
+        }
+
+        private void haltedAfterItsReservationIsGone(String commandId) {
+            storage.deleteCommand("hold-1");
+            storage.elapse(BACKOFF.multipliedBy(4));
+            ClaimBatch batch = relay.claim(10, LEASE);
+            if (!batch.halted().contains(commandId)) {
+                throw new IllegalStateException("given 준비 실패: " + commandId + "가 멈추지 않았다: " + batch);
+            }
+        }
+
+        private void assertRefusedAsAlreadySent(ThrowingCallable abandoning) {
+            assertThatThrownBy(abandoning).as("이미 TB에 보낸 명령의 포기가 거부되기")
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("이미 TB에 보낸 적이 있어");
+        }
+    }
+
+    @Nested
     @Order(16)
     @DisplayName("같은 앱 트랜잭션에서 예약을 접수하고 이어서 그 예약을 참조하면 — §5.1-3, P2b-1")
     class ReferencingAReservationOfTheSameTransaction {

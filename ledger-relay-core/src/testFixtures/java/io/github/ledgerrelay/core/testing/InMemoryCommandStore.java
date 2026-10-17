@@ -69,6 +69,20 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
         return lock.isHeldByCurrentThread();
     }
 
+    /** 테스트 전용: 행 하나를 지운다(보관 작업 흉내). 트랜잭션 밖에서 부른다. */
+    public void delete(String commandId) {
+        lock.lock();
+        try {
+            Long rowId = rowIdByCommandId.remove(commandId);
+            if (rowId == null) {
+                throw new IllegalStateException("given 준비 실패: 지울 " + commandId + "가 없다");
+            }
+            rows.remove(rowId);
+        } finally {
+            lock.unlock();
+        }
+    }
+
     @Override
     public long nextSeq(String orderingKey) {
         requireTransaction();

@@ -23,6 +23,11 @@ public record InMemoryStorage(InMemoryCommandStore memory, ManualClock clock) im
     }
 
     @Override
+    public void deleteCommand(String commandId) {
+        memory.delete(commandId);
+    }
+
+    @Override
     public void elapse(Duration duration) {
         clock.advance(duration);
     }

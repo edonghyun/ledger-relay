@@ -14,6 +14,11 @@ public interface StorageUnderTest {
     /** 저장소의 시계를 앞으로 돌린다(lease 만료, backoff 경과). PG 구현은 시각 컬럼을 그만큼 당긴다. */
     void elapse(Duration duration);
 
+    /**
+     * 테스트 전용: 명령 행 하나를 지운다. 보관 작업이나 DB 직접 수정으로 행이 사라진 상황을 만든다. 트랜잭션 밖에서 부른다.
+     */
+    void deleteCommand(String commandId);
+
     /** 트랜잭션 밖에서 {@link Transactions#requireActive()}를 부르면 나는 예외 타입(P2a-13). */
     Class<? extends RuntimeException> outsideTransactionError();
 

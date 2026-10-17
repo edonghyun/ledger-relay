@@ -117,6 +117,14 @@ final class PostgresStorage implements StorageUnderTest {
     }
 
     @Override
+    public void deleteCommand(String commandId) {
+        int deleted = sql().sql("DELETE FROM ledger_command WHERE command_id = :id").param("id", commandId).update();
+        if (deleted != 1) {
+            throw new IllegalStateException("given 준비 실패: 지울 " + commandId + "가 없다");
+        }
+    }
+
+    @Override
     public void elapse(Duration duration) {
         sql().sql("""
                 UPDATE ledger_command
