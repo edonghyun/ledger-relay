@@ -110,6 +110,34 @@ class HigherIsolationSubmitTest {
         }
     }
 
+    @Nested
+    @Order(3)
+    @DisplayName("두 앱 트랜잭션이 같은 commandId를 다른 순서 키로 겹쳐 접수하면")
+    class SubmittingTheSameCommandOnAnotherKey {
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(AppIsolation.class)
+        @DisplayName("순번 단계에서 막히지 않아 중복 검사(ON CONFLICT)까지 가고, 늦은 쪽은 재시도할 수 있는 실패로 끝나며 행은 하나다")
+        void aDuplicateOnAnotherKeyEndsInOneRowOrARetryableFailure(AppIsolation isolation) {
+            // given: 첫 앱 트랜잭션이 order-1에 pay-1을 접수하고 아직 커밋하지 않았다
+            Transactions app = appTransactions(isolation);
+            try (OtherTransaction<CommandReceipt> first = OtherTransaction.start(app,
+                    () -> relay.submit(transfer("pay-1", "order-1")));
+                 OtherTransaction<CommandReceipt> second = startAfter(first, app,
+                         () -> relay.submit(transfer("pay-1", "order-2")))) {
+
+                // when: 둘째는 commandId 유일 인덱스에서 첫째의 커밋을 기다린다
+                second.assertStillWorkingAfter(BLOCKED);
+                first.commit();
+
+                // then
+                assertEndedInARetryableFailure(second);
+                assertRowsOfKey("order-1", "pay-1:1");
+                assertRowsOfKey("order-2");
+            }
+        }
+    }
+
     private static LedgerCommand transfer(String commandId, String orderingKey) {
         return LedgerCommand.transfer(commandId).orderingKey(orderingKey)
                 .debit(1).credit(2).amount(500).ledger(1).code(1).build();
