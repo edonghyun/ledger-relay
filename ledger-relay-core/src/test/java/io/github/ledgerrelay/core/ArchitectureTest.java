@@ -19,9 +19,13 @@ import org.junit.jupiter.api.Test;
 @DisplayName("헥사고날 경계 — 의존은 안쪽으로만 향한다 (스펙 §7)")
 class ArchitectureTest {
 
-    /** main 소스셋의 클래스만 본다. 테스트와 testFixtures는 경계 밖이다. */
+    /**
+     * main 소스셋의 클래스만 본다. 테스트와 testFixtures는 경계 밖이다. testFixtures를 켜면 Gradle이 main을
+     * 폴더 대신 jar로 테스트 클래스패스에 올리므로 둘 다 받는다.
+     */
     static final JavaClasses MAIN = new ClassFileImporter()
-            .withImportOption(location -> location.contains("/classes/java/main/"))
+            .withImportOption(location -> location.contains("/classes/java/main/")
+                    || (location.contains("/build/libs/ledger-relay-core-") && !location.contains("test-fixtures")))
             .importPackages("io.github.ledgerrelay.core");
 
     static final String PUBLIC = "io.github.ledgerrelay.core";
@@ -50,6 +54,14 @@ class ArchitectureTest {
     void coreUsesOnlyTheJdk() {
         classes().that().resideInAPackage("io.github.ledgerrelay.core..")
                 .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "io.github.ledgerrelay.core..")
+                .check(MAIN);
+    }
+
+    @Test
+    @DisplayName("포트는 서비스를 모른다 — 어댑터가 서비스 구현에 묶이지 않게")
+    void portsDoNotKnowTheService() {
+        noClasses().that().resideInAPackage(SPI)
+                .should().dependOnClassesThat().resideInAPackage(APPLICATION)
                 .check(MAIN);
     }
 }
