@@ -872,6 +872,50 @@ public abstract class LedgerRelayContract {
             assertQueryState("pay-1", State.ACCEPTED);
             assertHandlerNeverRanFor("pay-1");
         }
+
+        @Test
+        @DisplayName("제출 기록은 거부되고, 처리 중이 되지 않는다")
+        void markingSubmittedInsideATransactionIsRefused() {
+            // given
+            submit(transfer("pay-1", "order-1", 500));
+            ClaimedCommand pay1 = claimOnly("pay-1");
+
+            // when
+            ThrowingCallable markingInside = () -> storage.transactions().inTransaction(() -> relay.markSubmitted(pay1));
+
+            // then
+            assertRefusedAsAWorkerStepInsideATransaction(markingInside);
+            assertQueryState("pay-1", State.ACCEPTED);
+        }
+
+        @Test
+        @DisplayName("되돌리기는 거부된다")
+        void releasingInsideATransactionIsRefused() {
+            // given
+            submit(transfer("pay-1", "order-1", 500));
+            ClaimedCommand pay1 = claimOnly("pay-1");
+
+            // when
+            ThrowingCallable releasingInside = () -> storage.transactions().inTransaction(() -> relay.release(pay1));
+
+            // then
+            assertRefusedAsAWorkerStepInsideATransaction(releasingInside);
+        }
+
+        @Test
+        @DisplayName("건너뛰기는 거부되고, 핸들러가 실행되지 않는다 — 건너뛰기도 핸들러를 부르므로 G6이 같다")
+        void skippingInsideATransactionIsRefused() {
+            // given
+            submit(transfer("pay-1", "order-1", 500));
+            ClaimedCommand pay1 = claimOnly("pay-1");
+
+            // when
+            ThrowingCallable skippingInside = () -> storage.transactions().inTransaction(() -> relay.skip(pay1));
+
+            // then
+            assertRefusedAsAWorkerStepInsideATransaction(skippingInside);
+            assertHandlerNeverRanFor("pay-1");
+        }
     }
 
     @Nested
@@ -1130,6 +1174,33 @@ public abstract class LedgerRelayContract {
 
             // then
             assertRefusedAsAWorkerStepInsideATransaction(abandoningInside);
+        }
+    }
+
+    @Nested
+    @Order(19)
+    @DisplayName("보낸 명령을 되돌리기를 거듭하면 — §5.3-4, backoff")
+    class ReleasingAgainAndAgain {
+
+        @Test
+        @DisplayName("두 번째 되돌림 뒤에는 대기가 두 배가 되어, 처음 대기만큼 지나서는 다시 잡히지 않는다")
+        void theWaitGrowsWithEachRelease() {
+            // given: 보내고 되돌리기를 두 번 했다(첫 대기 BACKOFF, 둘째 대기 2×BACKOFF)
+            submit(transfer("pay-1", "order-1", 500));
+            ClaimedCommand first = claimOnly("pay-1");
+            relay.markSubmitted(first);
+            relay.release(first);
+            storage.elapse(BACKOFF);
+            ClaimedCommand second = claimOnly("pay-1");
+            relay.markSubmitted(second);
+            relay.release(second);
+
+            // when
+            storage.elapse(BACKOFF);
+            ClaimBatch batch = relay.claim(10, LEASE);
+
+            // then
+            assertNothingClaimed(batch);
         }
     }
 
