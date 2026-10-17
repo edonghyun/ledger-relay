@@ -327,7 +327,7 @@ public abstract class CommandStoreContract {
             // given
             inserted(newTransfer("pay-1", "order-1", 1));
             claimed("pay-1", 1);
-            storage.elapse(LEASE.minusSeconds(1));
+            storage.elapse(LEASE.dividedBy(2));
 
             // then
             assertNothingDue();
@@ -369,7 +369,7 @@ public abstract class CommandStoreContract {
             inserted(newTransfer("pay-1", "order-1", 1));
             claimed("pay-1", 1);
             released("pay-1");
-            storage.elapse(BACKOFF.minusSeconds(1));
+            storage.elapse(BACKOFF.dividedBy(2));
 
             // then
             assertNothingDue();

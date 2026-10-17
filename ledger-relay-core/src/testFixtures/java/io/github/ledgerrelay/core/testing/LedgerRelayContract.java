@@ -366,7 +366,7 @@ public abstract class LedgerRelayContract {
             // given
             submit(transfer("pay-1", "order-1", 500));
             claimOnly("pay-1");
-            storage.elapse(LEASE.minusSeconds(1));
+            storage.elapse(LEASE.dividedBy(2));
 
             // when
             ClaimBatch batch = relay.claim(10, LEASE);
@@ -482,7 +482,7 @@ public abstract class LedgerRelayContract {
         void aReleasedCommandWaitsForItsBackoff() {
             // given
             assertWritten(relay.release(pay1));
-            storage.elapse(BACKOFF.minusSeconds(1));
+            storage.elapse(BACKOFF.dividedBy(2));
 
             // when
             ClaimBatch batch = relay.claim(10, LEASE);
@@ -631,7 +631,7 @@ public abstract class LedgerRelayContract {
         void theFailedCommandWaitsForItsBackoff() {
             // given
             relay.complete(pay1, ExceedsCredits);
-            storage.elapse(BACKOFF.minusSeconds(1));
+            storage.elapse(BACKOFF.dividedBy(2));
 
             // then
             assertNothingClaimed(relay.claim(10, LEASE));
@@ -662,9 +662,10 @@ public abstract class LedgerRelayContract {
             assertHandlerFailed(relay.complete(again, ExceedsCredits));
 
             // when
-            storage.elapse(BACKOFF.multipliedBy(2).minusSeconds(1));
+            // PG의 now()는 흐르므로 경계에 붙이지 않고 대기의 절반씩 지나 본다
+            storage.elapse(BACKOFF);
             ClaimBatch tooEarly = relay.claim(10, LEASE);
-            storage.elapse(Duration.ofSeconds(1));
+            storage.elapse(BACKOFF);
             ClaimBatch onTime = relay.claim(10, LEASE);
 
             // then
@@ -1174,6 +1175,33 @@ public abstract class LedgerRelayContract {
 
             // then
             assertRefusedAsAWorkerStepInsideATransaction(abandoningInside);
+        }
+    }
+
+    @Nested
+    @Order(20)
+    @DisplayName("잡은 명령의 행이 지워지고 같은 commandId가 다시 접수되면 — G5")
+    class TheRowWasReplaced {
+
+        @Test
+        @DisplayName("앞서 잡은 쪽이 쓰면 0행이다 — 같은 토큰을 가진 새 행에 쓰지 않는다")
+        void aWriteForTheOldRowIsFencedEvenIfTheNewRowHasTheSameToken() {
+            // given: pay-1을 토큰 1로 잡은 뒤 행이 지워졌고, 다시 접수된 pay-1도 토큰 1로 잡혔다
+            submit(transfer("pay-1", "order-1", 500));
+            ClaimedCommand old = claimOnly("pay-1");
+            storage.deleteCommand("pay-1");
+            submit(transfer("pay-1", "order-1", 500));
+            ClaimedCommand renewed = claimOnly("pay-1");
+            if (renewed.leaseToken() != old.leaseToken() || renewed.rowId() == old.rowId()) {
+                throw new IllegalStateException("given 준비 실패: 같은 토큰의 새 행이 아니다: " + old + " / " + renewed);
+            }
+
+            // when
+            WriteResult result = relay.complete(old, Created);
+
+            // then
+            assertFenced(result);
+            assertHandlerNeverRanFor("pay-1");
         }
     }
 
