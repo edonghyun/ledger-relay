@@ -119,7 +119,10 @@ public final class CommandLifecycle implements LedgerRelay {
         return transactions.inTransaction(() -> write(claimed, new Step.MarkSubmitted(claimed.leaseToken())));
     }
 
-    /** TB 결과로 끝내고, 같은 트랜잭션에서 핸들러를 실행한다(G6). 트랜잭션 밖에서 부른다. */
+    /**
+     * TB 결과로 끝내고, 같은 트랜잭션에서 핸들러를 실행한다(G6). 트랜잭션 밖에서 부른다.
+     * 핸들러가 Error를 던지면 받은 결과를 새 트랜잭션에 남긴 뒤 그 Error를 그대로 던진다.
+     */
     public WriteResult complete(ClaimedCommand claimed, LedgerResultCode code) {
         requireOutsideTransaction();
         return finish(claimed, new Step.Complete(claimed.leaseToken(), code), Optional.of(code));
@@ -146,7 +149,12 @@ public final class CommandLifecycle implements LedgerRelay {
             return transactions.inTransaction(() -> write(claimed, step));
         } catch (HandlerFailedSignal failed) {
             transactions.inTransaction(() -> write(claimed, new Step.HandlerFailed(claimed.leaseToken(), result)));
-            return new WriteResult.HandlerFailed(failed.handlerError());
+            // Error(메모리 부족 등)는 삼키지 않는다. 그래도 받은 결과는 위에서 남겼으므로, 다시 TB에 보내
+            // 원래 사유를 IdAlreadyFailed로 잃지 않는다(§5.4)
+            if (failed.getCause() instanceof Error error) {
+                throw error;
+            }
+            return new WriteResult.HandlerFailed((RuntimeException) failed.getCause());
         }
     }
 
@@ -172,7 +180,7 @@ public final class CommandLifecycle implements LedgerRelay {
             CommandStatus outcome = statusOf(store.find(claimed.commandId()).orElseThrow());
             try {
                 handler.onCompleted(outcome);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException | Error e) {
                 throw new HandlerFailedSignal(e);
             }
         }
@@ -212,12 +220,8 @@ public final class CommandLifecycle implements LedgerRelay {
     /** 핸들러가 던졌다는 신호. 트랜잭션 밖으로 나가 롤백을 일으킨 뒤 {@link #finish}가 받는다. */
     private static final class HandlerFailedSignal extends RuntimeException {
 
-        HandlerFailedSignal(RuntimeException handlerError) {
+        HandlerFailedSignal(Throwable handlerError) {
             super(handlerError);
-        }
-
-        RuntimeException handlerError() {
-            return (RuntimeException) getCause();
         }
     }
 

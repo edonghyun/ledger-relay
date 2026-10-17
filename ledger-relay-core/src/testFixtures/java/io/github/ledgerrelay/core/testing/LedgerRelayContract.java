@@ -5,6 +5,7 @@ import static io.github.ledgerrelay.core.LedgerResultCode.ExceedsCredits;
 import static io.github.ledgerrelay.core.LedgerResultCode.ExistsWithDifferentAmount;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import io.github.ledgerrelay.core.CommandConflictException;
 import io.github.ledgerrelay.core.CommandKind;
@@ -655,6 +656,59 @@ public abstract class LedgerRelayContract {
 
     @Nested
     @Order(9)
+    @DisplayName("결과 반영 핸들러가 Error를 던지면 — §5.4, G6")
+    class HandlerCrashes {
+
+        ClaimedCommand pay1;
+
+        @BeforeEach
+        void givenTheHandlerWillCrashOnce() {
+            submit(transfer("pay-1", "order-1", 500));
+            pay1 = claimOnly("pay-1");
+            relay.markSubmitted(pay1);
+            handler.crashNextCall();
+        }
+
+        @Test
+        @DisplayName("Error는 삼키지 않고 그대로 던진다 — JVM 수준 문제를 숨기지 않는다")
+        void theErrorIsRethrown() {
+            // when
+            ThrowingCallable completing = () -> relay.complete(pay1, ExceedsCredits);
+
+            // then
+            assertThatThrownBy(completing)
+                    .as("핸들러가 던진 Error가 그대로 나오기를 기대했다")
+                    .isInstanceOf(RecordingHandler.HandlerCrash.class);
+        }
+
+        @Test
+        @DisplayName("결과 쓰기는 취소되어, 핸들러 효과 없이 끝난 것으로 남지 않는다")
+        void theResultIsRolledBack() {
+            // when
+            catchThrowable(() -> relay.complete(pay1, ExceedsCredits));
+
+            // then
+            assertQueryState("pay-1", State.IN_PROGRESS);
+            assertHandlerNeverRanFor("pay-1");
+        }
+
+        @Test
+        @DisplayName("받은 TB 결과는 남아 backoff 뒤 다시 잡힐 때 싣고 온다 — TB에 다시 보내 원래 사유를 잃지 않게")
+        void theKnownResultIsKept() {
+            // given
+            catchThrowable(() -> relay.complete(pay1, ExceedsCredits));
+            storage.elapse(BACKOFF);
+
+            // when
+            ClaimedCommand again = claimOnly("pay-1");
+
+            // then
+            assertThat(again.knownResult()).as("다시 잡은 명령이 싣고 온 결과").contains(ExceedsCredits);
+        }
+    }
+
+    @Nested
+    @Order(10)
     @DisplayName("같은 키의 앞 명령이 끝나면 — G4")
     class AfterTheEarlierCommandFinishes {
 
@@ -746,7 +800,7 @@ public abstract class LedgerRelayContract {
     }
 
     @Nested
-    @Order(10)
+    @Order(11)
     @DisplayName("워커 단계를 앱 트랜잭션 안에서 부르면 — G6")
     class WorkerStepsInsideATransaction {
 

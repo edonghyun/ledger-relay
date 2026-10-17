@@ -147,6 +147,7 @@ core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다
 | `finished("hold-1", ExceedsCredits)` | (서비스 계약) **전제**: 이 명령이 이 TB 결과로 끝났다 |
 | `storage.elapse(LEASE.plusSeconds(1))` | 저장소 시계를 돌린다(lease 만료, backoff 경과). sleep하지 않는다 |
 | `handler.failNextCalls(1)` | 다음 핸들러 호출이 기록 전에 던진다 |
+| `handler.crashNextCall()` | 다음 핸들러 호출이 기록 전에 `Error`를 던진다(JVM 수준 실패 흉내) |
 | `assertQueryState(id, State.X)` | 조회 상태(§4.2) |
 | `assertClaimed(batch, ids…)` / `assertNothingClaimed(batch)` | 정확히 이 명령들이 접수 순서로 잡힘 / 아무것도 안 잡힘 |
 | `assertWritten(r)` / `assertFenced(r)` / `assertHandlerFailed(r)` | 쓰기가 반영됨 / 0행으로 막힘 / 핸들러가 던져 취소됨 |
