@@ -88,6 +88,16 @@ class LedgerCommandTest {
                     BigInteger.ZERO, BigInteger.ZERO, BigInteger.ZERO, 0, 0, 0, "hold-1", 0, 0));
         }
         @Test
+        @DisplayName("짝이 맞는 서로게이트(이모지)는 순서 키에 그대로 담긴다")
+        void aTransferWithAPairedSurrogateIsAccepted() {
+            // when
+            LedgerCommand payment = aTransfer("pay-1").orderingKey("주문-😀").build();
+
+            // then
+            assertThat(payment.orderingKey()).isEqualTo("주문-😀");
+        }
+
+        @Test
         @DisplayName("TB 필드의 최댓값(ledger 2^32-1, code 65535, 만료 2^32-1초)은 그대로 담긴다")
         void acceptsTheLargestTigerBeetleValues() {
             // when
@@ -179,7 +189,26 @@ class LedgerCommandTest {
                     argumentSet("확정의 reservation이 공백이면",
                             (ThrowingCallable) () -> aPost().reservation(" ").build(), "post·void에는 reservation이 필요합니다"),
                     argumentSet("해제에 금액을 주면",
-                            (ThrowingCallable) () -> aVoid().amount(100).build(), "void는 amount를 받지 않습니다"));
+                            (ThrowingCallable) () -> aVoid().amount(100).build(), "void는 amount를 받지 않습니다"),
+                    argumentSet("commandId에 U+0000이 있으면 — PG text가 받지 않아 접수가 SQL 오류로 앱 트랜잭션을 깬다",
+                            (ThrowingCallable) () -> aTransfer("pay\u00001").build(),
+                            "commandId에 U+0000이나 짝 없는 서로게이트를 쓸 수 없습니다"),
+                    argumentSet("순서 키에 짝 없는 서로게이트가 있으면 — UTF-8로 바꿀 때 '?'가 되어 해시가 충돌한다",
+                            (ThrowingCallable) () -> aTransfer("pay-1").orderingKey("order-\uD800").build(),
+                            "orderingKey에 U+0000이나 짝 없는 서로게이트를 쓸 수 없습니다"),
+                    argumentSet("확정의 reservation에 U+0000이 있으면",
+                            (ThrowingCallable) () -> aPost().reservation("hold\u00001").build(),
+                            "reservationCommandId에 U+0000이나 짝 없는 서로게이트를 쓸 수 없습니다"),
+                    argumentSet("보내는 계좌가 null이면",
+                            (ThrowingCallable) () -> aTransfer("pay-1").debit((BigInteger) null).build(),
+                            "debitAccountId가 필요합니다"),
+                    argumentSet("받는 계좌가 null이면",
+                            (ThrowingCallable) () -> aTransfer("pay-1").credit((BigInteger) null).build(),
+                            "creditAccountId가 필요합니다"),
+                    argumentSet("확정이 자기 자신을 reservation으로 적으면",
+                            (ThrowingCallable) () -> LedgerCommand.post("capture-1").orderingKey("order-42")
+                                    .reservation("capture-1").build(),
+                            "post·void는 자기 자신을 reservation으로 참조할 수 없습니다"));
         }
     }
 

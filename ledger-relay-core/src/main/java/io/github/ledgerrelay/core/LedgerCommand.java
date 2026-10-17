@@ -36,10 +36,15 @@ public record LedgerCommand(
 
     public LedgerCommand {
         Objects.requireNonNull(kind, "kind");
-        Objects.requireNonNull(debitAccountId, "debitAccountId");
-        Objects.requireNonNull(creditAccountId, "creditAccountId");
+        require(debitAccountId != null, "debitAccountId가 필요합니다");
+        require(creditAccountId != null, "creditAccountId가 필요합니다");
         require(commandId != null && !commandId.isBlank(), "commandId가 필요합니다");
         require(orderingKey != null && !orderingKey.isBlank(), "orderingKey가 필요합니다");
+        requireWellFormed("commandId", commandId);
+        requireWellFormed("orderingKey", orderingKey);
+        if (reservationCommandId != null) {
+            requireWellFormed("reservationCommandId", reservationCommandId);
+        }
         require(amount != null, "amount가 필요합니다");
         require(amount.signum() >= 0 && amount.compareTo(UINT128_MAX) <= 0, "amount는 0 이상 2^128-1 이하여야 합니다");
         require(timeoutSeconds >= 0 && timeoutSeconds <= UINT32_MAX, "timeoutSeconds는 0 이상 2^32-1 이하여야 합니다");
@@ -47,6 +52,7 @@ public record LedgerCommand(
         if (kind.referencesReservation()) {
             require(reservationCommandId != null && !reservationCommandId.isBlank(),
                     "post·void에는 reservation이 필요합니다");
+            require(!reservationCommandId.equals(commandId), "post·void는 자기 자신을 reservation으로 참조할 수 없습니다");
             require(debitAccountId.signum() == 0 && creditAccountId.signum() == 0 && ledger == 0 && code == 0,
                     "post·void는 예약의 계좌·ledger·code를 따르므로 debit, credit, ledger, code를 지정하지 않습니다");
             require(kind != CommandKind.VOID || amount.signum() == 0, "void는 amount를 받지 않습니다");
@@ -87,6 +93,20 @@ public record LedgerCommand(
     private static void requireAccountId(String field, BigInteger id) {
         require(id.signum() != 0, field + "가 필요합니다");
         require(id.signum() > 0 && id.compareTo(UINT128_MAX) < 0, field + "는 1 이상 2^128-2 이하여야 합니다");
+    }
+
+    /**
+     * PG {@code text}는 U+0000을 받지 않아 접수가 SQL 오류로 앱 트랜잭션을 깬다. 짝 없는 서로게이트는 UTF-8로 바꿀 때
+     * '?'가 되어 다른 값과 해시가 같아진다(docs/failure-modes.md F20).
+     */
+    private static void requireWellFormed(String field, String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            boolean lone = Character.isHighSurrogate(c)
+                    ? i + 1 >= value.length() || !Character.isLowSurrogate(value.charAt(++i))
+                    : Character.isLowSurrogate(c);
+            require(c != '\u0000' && !lone, field + "에 U+0000이나 짝 없는 서로게이트를 쓸 수 없습니다");
+        }
     }
 
     private static void require(boolean satisfied, String reason) {

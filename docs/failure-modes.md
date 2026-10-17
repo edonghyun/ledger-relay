@@ -145,6 +145,13 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: 부분 인덱스 `ledger_command_due ON (id) WHERE state IN ('PENDING','CLAIMED')`.
 - **확인**: 인덱스 전에는 걸러 낸 행이 200,000, 실행 21.8ms였다. 인덱스 뒤에는 테스트가 통과한다(리뷰어 측정: 100만 건에서 151ms → 0.047ms).
 
+### F20. U+0000이 든 문자열이 접수를 SQL 오류로 깨고, 짝 없는 서로게이트가 해시를 충돌시킨다 (1단계 리뷰 M-2)
+
+- **깨지는 것**: PG `text`는 0x00 바이트를 받지 않는다. commandId·순서 키·reservation에 U+0000이 있으면 접수의 INSERT가 SQL 오류로 끝나고, PG에서는 그 앱 트랜잭션 전체가 중단된다. 짝 없는 서로게이트(예: `\uD800`)는 `getBytes(UTF_8)`에서 `?`로 바뀐다. 그래서 `"order-\uD800"`과 `"order-?"`의 내용 해시가 같아져, 다른 명령이 같은 내용으로 인정될 수 있다(G7).
+- **재현**: `LedgerCommandTest` › 규칙을 어긴 명령을 만들면 › "commandId에 U+0000이 있으면", "순서 키에 짝 없는 서로게이트가 있으면", "확정의 reservation에 U+0000이 있으면". 짝이 맞는 서로게이트(이모지)는 `aTransferWithAPairedSurrogateIsAccepted`가 허용함을 확인한다.
+- **구조**: `LedgerCommand` 생성자의 `requireWellFormed`가 세 문자열 필드를 검사하고 `InvalidCommandException`으로 거부한다. 판단이 core에 있으므로 저장소는 이런 값을 받지 않는다.
+- **확인**: 검사를 넣기 전에 세 행이 "예외가 없다"로 실패했다.
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |

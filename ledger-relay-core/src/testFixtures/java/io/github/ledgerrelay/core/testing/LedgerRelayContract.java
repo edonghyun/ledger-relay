@@ -12,6 +12,7 @@ import io.github.ledgerrelay.core.CommandKind;
 import io.github.ledgerrelay.core.CommandReceipt;
 import io.github.ledgerrelay.core.CommandStatus.State;
 import io.github.ledgerrelay.core.CommandStatus;
+import io.github.ledgerrelay.core.InvalidCommandException;
 import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.LedgerResultCode;
 import io.github.ledgerrelay.core.Rejection;
@@ -204,13 +205,16 @@ public abstract class LedgerRelayContract {
         }
 
         @Test
-        @DisplayName("자기 자신을 참조하면 거부된다")
+        @DisplayName("자기 자신을 참조하면 명령을 만들 수 없어 접수까지 가지 않는다 (P2c-9)")
         void aCommandCannotReferenceItself() {
             // when
             ThrowingCallable referencingItself = () -> submit(post("capture-1", "order-1", "capture-1"));
 
             // then
-            assertRejectedAsMissingReservation(referencingItself, "capture-1");
+            assertThatThrownBy(referencingItself)
+                    .as("자기 자신을 참조한 확정이 만들어지지 않기(InvalidCommandException)")
+                    .isInstanceOf(InvalidCommandException.class)
+                    .hasMessageContaining("자기 자신을 reservation으로 참조할 수 없습니다");
         }
     }
 
