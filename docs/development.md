@@ -30,6 +30,10 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 - `JpaTransactionManager`에 같은 DataSource를 알려 주고(`setDataSource`), JPA dialect는 `HibernateJpaDialect`(Spring이 Hibernate에 쓰는 기본)를 바꾸지 않는다. 이 dialect가 JDBC 커넥션을 트랜잭션에 노출해야 `JdbcClient`가 같은 트랜잭션에 합류한다(F16).
 - `DefaultJpaDialect`는 격리 수준 지정을 거부한다(`InvalidIsolationLevelException`). 워커 단계는 READ COMMITTED를 명시하므로(P2b-16) 이 dialect에서는 시작하지 못한다. `JtaTransactionManager`도 `allowCustomIsolationLevels=true`가 아니면 같다.
 
+### DB를 옮길 때
+
+- 덤프·복원이나 다른 클러스터로 옮긴 DB에서는 옮겨 온 행의 `accepted_xact`가 새 클러스터의 트랜잭션 ID와 우연히 같을 수 있다. 그러면 이미 커밋된 예약이 "같은 트랜잭션에서 접수한 예약"으로 보여 정상 확정이 거부된다(O7). 복원 직후, 워커를 켜기 전에 `UPDATE ledger_command SET accepted_xact = '0'`을 실행한다.
+
 ## 알려진 문제
 
 - **TB 서버 크래시 (원인 미상)**: 2026-10-16 전체 테스트 5회 중 2회(리뷰어 실행 포함), 한 실행 안에서 세 번째로 띄운 TB 컨테이너가 기동 직후(`listening on` 뒤 2~130ms) `thread 1 panic: reached unreachable code`(exit 139)로 종료됐다. OOM은 아니었다. 새 컨테이너에 바로 요청을 보내는 단독 재현 시도 12회에서는 재현되지 않았다.

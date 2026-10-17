@@ -17,6 +17,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * REPEATABLE READ여도 다른 워커와 부딪히면 직렬화 실패로 터지지 않고 기다려야 한다. 합류할 때는 앱의 격리 수준을 그대로
  * 둔다(Spring은 합류 시 격리 수준을 바꾸지 않는다). 높은 수준의 앱 트랜잭션에서는 동시 접수가 직렬화 실패로 끝날 수
  * 있으며 재시도는 앱이 한다(P2b-17).
+ *
+ * <p>JTA 트랜잭션 매니저는 기본적으로 격리 수준 지정을 거부한다. {@code JtaTransactionManager.setAllowCustomIsolationLevels(true)}가
+ * 없으면 워커 트랜잭션이 시작하지 못한다. JPA의 {@code DefaultJpaDialect}도 같다(docs/development.md).
  */
 public final class JdbcTransactions implements Transactions {
 

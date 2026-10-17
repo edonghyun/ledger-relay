@@ -160,6 +160,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 | O3 | TB 응답이 유실된 명령(미확정)을 같은 이체 ID로만 다시 보내는가 | 3~4단계 |
 | O4 | TB 컨테이너가 기동 중 `panic: reached unreachable code`로 가끔 죽는다. main에서도 재현된다 | 조사 필요(테스트 환경) |
 | O5 | 멈춘 명령을 목록으로 볼 방법이 없다. 알림을 놓치면 `abandonHalted`에 넘길 commandId를 SQL로 찾아야 한다 | 3단계. 멈춘 명령 조회 |
+| O7 | 덤프·복원이나 다른 클러스터로 옮긴 DB에서는 옮겨 온 `accepted_xact`가 새 트랜잭션 ID와 우연히 같아져, 이미 커밋된 예약을 참조한 정상 확정이 `ReservationNotFoundException`으로 거부될 수 있다. 재현 테스트는 두지 않았다. 클러스터 이전을 재현하는 비용이 절차 한 줄보다 크다 | 이전 절차: 복원 직후 `UPDATE ledger_command SET accepted_xact = '0'`(docs/development.md) |
 
 ## 3. 데드레터큐를 쓰지 않는 이유
 
