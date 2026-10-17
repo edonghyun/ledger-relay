@@ -31,6 +31,10 @@ dependencies {
     testImplementation(libs.postgresql)
     testImplementation(libs.hikaricp)
     testImplementation(libs.testcontainers.postgresql)
+    // 앱이 JPA 트랜잭션 매니저를 쓰는 경우(R16)
+    testImplementation(libs.spring.orm)
+    testImplementation(libs.spring.context)
+    testImplementation(libs.hibernate.core)
     testRuntimeOnly(libs.junit.platform.launcher)
     testRuntimeOnly(libs.slf4j.simple)
 }

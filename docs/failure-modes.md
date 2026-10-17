@@ -117,6 +117,13 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: `INSERT … ON CONFLICT (command_id) DO NOTHING RETURNING id`. 넣지 못했으면 같은 트랜잭션에서 기존 행을 읽는다(P2b-9). 에러를 내지 않으므로 트랜잭션이 산다.
 - **확인**: 대조군으로 `ON CONFLICT`를 지우고 `DuplicateKeyException`을 잡게 하면 이 테스트와 `aSecondInsertReturnsTheFirstRow`가 `current transaction is aborted`로 실패한다.
 
+### F16. JPA 트랜잭션에서 접수가 따로 커밋된다 (G1, R16)
+
+- **깨지는 것**: 앱이 `JpaTransactionManager`를 쓰는데 그 트랜잭션이 JDBC 커넥션을 노출하지 않으면, `JdbcClient`는 DataSource에서 별도 커넥션을 받아 auto-commit으로 쓴다. 트랜잭션은 활성으로 보이므로(`requireActive` 통과) 아무 경고도 없다. 앱이 롤백해도 명령은 남는다. 주문은 없는데 원장 이체가 나간다.
+- **재현**: `JpaLedgerRelayTest` › 앱이 JPA로 주문을 저장하는 트랜잭션에서 접수하면 › `anAppEntityAndItsCommandRollBackTogether`. 상속한 서비스 계약 67건도 JPA 매니저 위에서 돈다.
+- **구조**: `JpaTransactionManager`에 같은 DataSource를 주고(`setDataSource`), `HibernateJpaDialect`가 JDBC 커넥션을 노출한다(P2b-13).
+- **확인**: 격리 수준은 받아들이지만 커넥션을 노출하지 않는 dialect로 바꾼 대조군에서 12건이 실패한다. 이 테스트("롤백된 명령"이 남아 있다)와 계약의 롤백 관련 장 11건(G1, G6, P2b-1)이다. 처음에 계획한 대조군 `DefaultJpaDialect`는 격리 수준 지정을 거부해서(P2b-16) 69건 전부가 트랜잭션 시작에서 실패했다. 이 실패는 합류 문제를 보여 주지 않으므로 대조군으로 쓰지 않았다.
+
 ### F17. 워커가 커넥션 풀의 기본 격리 수준을 따라가 직렬화 실패로 터진다
 
 - **깨지는 것**: 앱이 커넥션 풀 기본값을 REPEATABLE READ로 두면, 워커 단계(claim, 결과 쓰기)도 그 수준으로 열린다. 그러면 다른 워커와 같은 행을 건드릴 때 기다리지 않고 직렬화 실패(40001)로 끝난다. 워커는 이 실패를 예상하지 않으므로, 결과를 쓰지 못한 명령이 lease 만료까지 묶인다.
@@ -131,6 +138,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 | O2 | 워커가 어느 지점에서 죽어도 중복 없이 복구되는가(kill -9) | 4단계 E1 |
 | O3 | TB 응답이 유실된 명령(미확정)을 같은 이체 ID로만 다시 보내는가 | 3~4단계 |
 | O4 | TB 컨테이너가 기동 중 `panic: reached unreachable code`로 가끔 죽는다. main에서도 재현된다 | 조사 필요(테스트 환경) |
+| O6 | 커넥션을 노출하지 않는 JPA dialect에서 접수가 앱 트랜잭션에 합류하지 못해도 접수는 알아채지 못한다(F16의 대조군 상황). 워커 단계는 격리 수준 지정에서 실패해 드러나지만 접수는 조용히 따로 커밋된다. 접수할 때 JDBC 커넥션이 트랜잭션에 묶여 있는지 확인하면 막을 수 있다 | 3단계 자동 설정에서 검사하거나 접수 시 확인 |
 | O5 | 멈춘 명령을 목록으로 볼 방법이 없다. 알림을 놓치면 `abandonHalted`에 넘길 commandId를 SQL로 찾아야 한다 | 3단계. 멈춘 명령 조회 |
 
 ## 3. 데드레터큐를 쓰지 않는 이유

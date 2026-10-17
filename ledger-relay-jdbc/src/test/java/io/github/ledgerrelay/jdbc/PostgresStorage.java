@@ -11,9 +11,18 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.orm.jpa.JpaDialect;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
+import org.springframework.orm.jpa.SharedEntityManagerCreator;
+import org.springframework.orm.jpa.persistenceunit.PersistenceManagedTypes;
+import org.springframework.orm.jpa.vendor.HibernateJpaDialect;
+import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -30,6 +39,8 @@ final class PostgresStorage implements StorageUnderTest {
 
     private static final PostgreSQLContainer CONTAINER = startContainer();
     private static final Map<String, HikariDataSource> POOLS = new ConcurrentHashMap<>();
+
+    private static volatile EntityManagerFactory jpa;
 
     private final DataSource dataSource;
     private final PlatformTransactionManager transactionManager;
@@ -57,6 +68,42 @@ final class PostgresStorage implements StorageUnderTest {
         PostgresStorage storage = new PostgresStorage(dataSource, new DataSourceTransactionManager(dataSource));
         storage.clear();
         return storage;
+    }
+
+    /**
+     * 앱이 JPA 트랜잭션 매니저를 쓰는 경우(R16, P2b-13). 같은 DataSource 위의 Hibernate와 {@link JpaTransactionManager}다.
+     * 매니저가 DataSource를 알고 {@code HibernateJpaDialect}가 JDBC 커넥션을 노출해야 {@code JdbcClient}가 같은 트랜잭션에
+     * 합류한다. 앱 테이블 {@code orders}와 엔터티 하나를 둔다.
+     */
+    static PostgresStorage withJpaTransactions() {
+        return withJpaTransactions(new HibernateJpaDialect());
+    }
+
+    /** 대조군용: 매니저의 JPA dialect를 바꾼다. */
+    static PostgresStorage withJpaTransactions(JpaDialect dialect) {
+        DataSource dataSource = pool(SERVER_DEFAULT);
+        JpaTransactionManager manager = new JpaTransactionManager(entityManagerFactory(dataSource));
+        manager.setDataSource(dataSource);
+        manager.setJpaDialect(dialect);
+        PostgresStorage storage = new PostgresStorage(dataSource, manager);
+        storage.clear();
+        storage.sql().sql("TRUNCATE orders").update();
+        return storage;
+    }
+
+    /** 대조군: 격리 수준은 받아들이지만 JDBC 커넥션을 노출하지 않는 dialect */
+    static final class NonExposingJpaDialect extends org.springframework.orm.jpa.DefaultJpaDialect {
+        @Override
+        public Object beginTransaction(EntityManager entityManager,
+                org.springframework.transaction.TransactionDefinition definition) {
+            entityManager.getTransaction().begin();
+            return null;
+        }
+    }
+
+    /** 앱 코드가 쓰는 EntityManager: 지금 트랜잭션의 것을 쓴다. */
+    EntityManager sharedEntityManager() {
+        return SharedEntityManagerCreator.createSharedEntityManager(entityManagerFactory(dataSource));
     }
 
     @Override
@@ -108,6 +155,20 @@ final class PostgresStorage implements StorageUnderTest {
 
     void clear() {
         sql().sql("TRUNCATE ledger_command, ledger_ordering_key RESTART IDENTITY").update();
+    }
+
+    private static synchronized EntityManagerFactory entityManagerFactory(DataSource dataSource) {
+        if (jpa == null) {
+            JdbcClient.create(dataSource).sql("CREATE TABLE IF NOT EXISTS orders (id text PRIMARY KEY)").update();
+            LocalContainerEntityManagerFactoryBean factory = new LocalContainerEntityManagerFactoryBean();
+            factory.setDataSource(dataSource);
+            factory.setJpaVendorAdapter(new HibernateJpaVendorAdapter());
+            factory.setManagedTypes(PersistenceManagedTypes.of(OrderEntity.class.getName()));
+            factory.setJpaPropertyMap(Map.of("hibernate.hbm2ddl.auto", "none"));
+            factory.afterPropertiesSet();
+            jpa = factory.getObject();
+        }
+        return jpa;
     }
 
     private static DataSource pool(String isolation) {
