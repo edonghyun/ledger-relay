@@ -1,5 +1,6 @@
 package io.github.ledgerrelay.core.domain;
 
+import io.github.ledgerrelay.core.CommandStatus;
 import io.github.ledgerrelay.core.ResultCategory;
 
 /** 저장 상태(스펙 §4.1, D7). 앱이 보는 조회 상태(§4.2)는 공개 CommandStatus.State다. "미확정"은 상태가 아니라 submit_count로 파생한다. */
@@ -22,6 +23,20 @@ public enum StoredState {
             case APPLIED -> APPLIED;
             case CONFLICT, UNSUPPORTED -> CONFLICT;
             case BUSINESS, PRIOR_FAILURE, INVALID -> REJECTED;
+        };
+    }
+
+    /** 조회 상태(스펙 §4.2). 접수·처리 중은 TB에 보낸 적이 있는지로 나뉜다. 응답이 유실된 미확정도 처리 중이다. */
+    public CommandStatus.State queryState(long submitCount) {
+        if (submitCount < 0) {
+            throw new IllegalArgumentException("submitCount는 0 이상이어야 합니다: " + submitCount);
+        }
+        return switch (this) {
+            case PENDING, CLAIMED -> submitCount == 0 ? CommandStatus.State.ACCEPTED : CommandStatus.State.IN_PROGRESS;
+            case APPLIED -> CommandStatus.State.APPLIED;
+            case REJECTED -> CommandStatus.State.REJECTED;
+            case CONFLICT -> CommandStatus.State.CONFLICT;
+            case SKIPPED -> CommandStatus.State.SKIPPED;
         };
     }
 }
