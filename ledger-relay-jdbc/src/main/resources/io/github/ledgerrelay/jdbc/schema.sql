@@ -48,3 +48,8 @@ CREATE TABLE ledger_command (
 -- 미완료 명령의 키별 맨 앞 판정(§5.2, R7). HALTED도 키를 막으므로 넣는다(F9).
 CREATE INDEX ledger_command_unfinished ON ledger_command (ordering_key, seq)
     WHERE state IN ('PENDING','CLAIMED','HALTED');
+
+-- claim 후보를 접수 순서(id)로 고르는 질의(§5.2, lockDue)가 끝난 이력을 훑지 않게 한다. 없으면 플래너가 기본 키 순서로
+-- 끝난 행을 하나씩 걸러 내며 읽어, 폴링 비용이 이력 크기에 비례한다(F19).
+CREATE INDEX ledger_command_due ON ledger_command (id)
+    WHERE state IN ('PENDING','CLAIMED');
