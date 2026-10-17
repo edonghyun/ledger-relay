@@ -179,6 +179,21 @@ core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다
 | `assertRejection(id, category, code)` | 거절·충돌 사유 |
 | `assertRejectedAsConflict(…)` / `assertRejectedAsMissingReservation(…)` | 접수가 내용 충돌 / 참조 예약 없음으로 거부됨 |
 
+## 6-3. 워커 테스트 (core)
+
+워커 한 바퀴(`RelayWorker.runOnce`)는 메모리 저장소와 가짜 TB 위에서 결정적으로 확인한다. TB에 실제로 보내는 끝까지 테스트는 tigerbeetle 모듈에 둔다.
+
+| 쓰는 말 | 뜻 |
+|---|---|
+| `FakeLedger` | 가짜 TB. 정하지 않은 이체는 `Created`로 끝난다 |
+| `fake.answer(transferId, ExceedsCredits)` | 그 이체에 이 결과를 낸다 |
+| `fake.holdReplies()` / `fake.releaseHeldReplies()` | 응답을 붙잡는다(TB가 답하지 않는 상황) / 붙잡은 응답을 모두 끝낸다 |
+| `fake.failNext(e)` / `fake.replyWithCount(n)` | 다음 요청을 예외로 끝낸다 / 다음 요청에 결과를 n개만 낸다 |
+| `fake.requests()` | 받은 요청(이체 묶음)을 순서대로 본다 |
+| `RecordingWorkerEvents.events()` | 워커가 알린 일을 `"halted:capture-1"`, `"submitted:3"`처럼 받은 순서대로 본다 |
+
+- 응답을 기다리는 일은 `holdReplies`와 future로 결정적으로 만든다. submit-timeout은 짧게(200ms) 주고, "아무 일도 없다"를 볼 때만 그 시간을 관찰 시간으로 쓴다(§8).
+
 ## 7. 리팩터링 규칙
 
 - 같은 준비나 확인이 **두세 번 반복되고 같은 의미**일 때 이름을 붙여 뽑는다. 생김새만 비슷하다고 묶지 않는다.
