@@ -96,14 +96,14 @@ class ResultClassificationTest {
 
     @Nested
     @Order(1)
-    @DisplayName("TB 결과 코드는")
+    @DisplayName("TB 결과 코드를 받으면")
     class Codes {
 
         @ParameterizedTest(name = "{0} → {1}", quoteTextArguments = false)
         @CsvSource(textBlock = CLASSIFICATION_TABLE)
         @DisplayName("분류표에 적힌 분류로 나뉜다")
         void fallsIntoItsCategory(LedgerResultCode code, ResultCategory expected) {
-            assertThat(code.category()).as("%s의 분류", code).isEqualTo(expected);
+            assertFallsInto(code, expected);
         }
 
         @Test
@@ -126,21 +126,32 @@ class ResultClassificationTest {
 
     @Nested
     @Order(2)
-    @DisplayName("분류마다")
+    @DisplayName("분류가 정해지면")
     class Categories {
 
-        @ParameterizedTest(name = "{0} → 알림 {1}", quoteTextArguments = false)
+        @ParameterizedTest(name = "{0} → {2}", quoteTextArguments = false)
         @CsvSource(textBlock = """
-                APPLIED,       false
-                CONFLICT,      true
-                BUSINESS,      false
-                PRIOR_FAILURE, true
-                INVALID,       true
-                UNSUPPORTED,   true
+                APPLIED,       false, 알리지 않는다
+                CONFLICT,      true,  사람에게 알린다
+                BUSINESS,      false, 알리지 않는다
+                PRIOR_FAILURE, true,  사람에게 알린다
+                INVALID,       true,  사람에게 알린다
+                UNSUPPORTED,   true,  사람에게 알린다
                 """)
         @DisplayName("사람에게 알릴지가 정해진다")
-        void decidesWhetherToAlert(ResultCategory category, boolean alerts) {
-            assertThat(category.alerts()).as("%s의 알림 여부", category).isEqualTo(alerts);
+        void decidesWhetherToAlert(ResultCategory category, boolean alerts, String meaning) {
+            assertAlerts(category, alerts);
         }
+    }
+
+    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+
+    private static void assertFallsInto(LedgerResultCode code, ResultCategory expected) {
+        assertThat(code.category()).as("%s가 분류표의 %s로 나뉘기", code, expected).isEqualTo(expected);
+    }
+
+    private static void assertAlerts(ResultCategory category, boolean expected) {
+        assertThat(category.alerts()).as("%s 분류가 %s", category, expected ? "알리기" : "알리지 않기")
+                .isEqualTo(expected);
     }
 }
