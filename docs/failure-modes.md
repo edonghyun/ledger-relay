@@ -221,7 +221,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 
 - **깨지는 것**: claim은 후보마다 게이트와 상태 기계를 같은 트랜잭션 안에서 돌린다. 한 후보의 데이터가 규칙과 어긋나면 그 판단이 예외를 던진다. 예를 들어 참조 예약이 비어 있는 확정 행(DB 직접 수정)이 있으면 `Optional.orElseThrow`가 던진다. 그러면 claim 전체가 롤백되고 워커는 매 바퀴 같은 예외로 끝나, 모든 키가 멈춘다. "그 키만 막힌다"(§3)에 어긋난다.
 - **재현**: `LedgerRelayContract` › 데이터가 어긋난 행이 claim 후보가 되면 › `aMalformedRowIsHaltedAndOtherKeysKeepFlowing`. 다른 키의 pay-2는 잡히고 이상한 행은 멈춘 명령으로 실린다.
-- **구조**: `CommandLifecycle.claim`이 후보 하나의 판단 예외를 잡아 그 행을 HALTED로 주차한다. 판단은 순수 Java라 PG 트랜잭션은 멀쩡하다. 주차도 못 하면 그 후보를 건너뛴다. 운영자는 멈춘 명령 목록(03b)으로 찾는다. 이런 행을 애초에 막는 DB CHECK는 F31에 있다.
+- **구조**: `CommandLifecycle.claim`이 후보 하나의 판단 예외를 잡아 그 행을 HALTED로 주차한다. 판단은 순수 Java라 PG 트랜잭션은 멀쩡하다. 주차도 못 하면(저장소가 끝난 행을 후보로 낸 경우 등) 그 후보를 건너뛴다. 어느 쪽이든 이유(원래 예외)를 `ClaimBatch.problems`에 싣고, 워커가 `WorkerEvents.malformedCandidate`로 알린다(최종 리뷰에서 보강: 처음에는 예외를 버렸고 건너뛰는 경우는 아무 신호도 없었다. `ClaimIsolationTest`). 저장소가 행을 **읽는** 단계(결과 코드 저장 이름 해석)에서 나는 이상은 이 격리 밖이다. 그래서 `known_result`·`result_code`에 저장 이름 68개만 받는 CHECK를 둔다(`anUnknownResultCodeIsRefused`, `everyWireNameIsAccepted`). 그 밖의 이런 행을 막는 DB CHECK는 F31에 있다. 운영자는 멈춘 명령 목록(03b)으로 찾는다.
 - **확인**: 넣기 전에는 claim이 `NoSuchElementException`으로 끝나 테스트가 실패했다.
 
 ### F30. 긴 commandId·순서 키가 접수를 SQL 오류로 깬다 (전체 리뷰에서 발견)
