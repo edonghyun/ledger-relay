@@ -210,6 +210,13 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: `CommandLifecycle.abandonHalted`는 `submitCount > 0`이거나 `knownResult`가 있으면 `IllegalStateException`("이미 TB에 보낸 적이 있어 포기할 수 없습니다")으로 거부한다. 이런 명령은 TB에서 이체를 확인한 뒤 사람이 정리한다. 운영자 공개 포트(03b)가 이 거부를 그대로 드러낸다.
 - **확인**: 넣기 전에 여섯 테스트가 "예외가 없다"로 실패했다.
 
+### F28. 예약이 지워진 뒤 같은 확정을 다시 접수하면 접수증 대신 "예약 없음"이 난다 (전체 리뷰에서 발견)
+
+- **깨지는 것**: `submit`이 참조 검사를 같은 commandId 판정보다 먼저 했다. 보관 작업은 끝난 지 N일 지난 명령을 지운다. 예약은 확정보다 먼저 끝나므로 먼저 지워질 수 있다. 그 뒤 앱이 응답을 놓친 확정을 같은 내용으로 다시 접수하면, 원래 접수증(`LedgerRelay.submit`의 약속) 대신 `ReservationNotFoundException`이 난다. 내용이 다른 재전송도 `CommandConflictException`이 아니라 "예약 없음"이 된다.
+- **재현**: `LedgerRelayContract` › 확정이 끝난 뒤 참조 예약 행이 사라진 상태에서 같은 확정을 다시 접수하면 › `resubmittingAFinishedPostAfterItsReservationIsGoneReturnsTheReceipt`, `resubmittingItWithOtherContentIsAConflict`.
+- **구조**: 순번을 받은 뒤 같은 commandId를 먼저 찾는다. 있으면 접수증이나 충돌로 끝내고 참조 검사는 하지 않는다(스펙 §5.1 단계 3·4, P2d-2). 경쟁 경로(`insertIfAbsent`가 다른 트랜잭션의 행을 돌려줌)는 그대로 해시를 비교한다.
+- **확인**: 바꾸기 전에 두 테스트가 `ReservationNotFoundException`으로 실패했다.
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |

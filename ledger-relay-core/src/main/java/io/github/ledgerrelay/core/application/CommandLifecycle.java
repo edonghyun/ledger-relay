@@ -58,15 +58,16 @@ public final class CommandLifecycle implements LedgerRelay {
         transactions.requireActive(); // G1: 앱 트랜잭션에 묶인다
         // §5.1-2: 키를 잠그고 순번을 받는다. 같은 키의 동시 접수는 여기서 줄을 서므로 순번 순서가 커밋 순서와 같다
         long seq = store.nextSeq(command.orderingKey());
-        // §5.1-3: 참조 검사. 예약의 이체 ID는 영구히 바뀌지 않으므로 지금 정해 둔다(P2a-20)
-        Optional<BigInteger> pendingTransferId = command.reservation()
-                .map(reservationId -> reservationTransferId(command, reservationId));
-        // §5.1-4: 같은 commandId가 있으면 내용을 견준다
+        // §5.1-3: 같은 commandId가 있으면 내용을 견준다. 참조 검사보다 먼저 한다. 보관 작업이 예약을 지운 뒤 같은
+        // 확정을 다시 보내도 처음 접수증을 돌려줘야 하기 때문이다(F28)
         String hash = ContentHash.of(command);
         Optional<CommandRecord> existing = store.find(command.commandId());
         if (existing.isPresent()) {
             return sameOrConflict(existing.get(), hash);
         }
+        // §5.1-4: 참조 검사. 예약의 이체 ID는 영구히 바뀌지 않으므로 지금 정해 둔다(P2a-20)
+        Optional<BigInteger> pendingTransferId = command.reservation()
+                .map(reservationId -> reservationTransferId(command, reservationId));
         // §5.1-5: 이체 ID를 내고 넣는다. 그사이 다른 트랜잭션이 같은 commandId를 넣었다면 저장소가 그 행을 돌려준다
         BigInteger transferId = transferIds.next();
         NewCommand row = new NewCommand(command.commandId(), command.orderingKey(), seq, command.reservation(),

@@ -1134,6 +1134,45 @@ public abstract class LedgerRelayContract {
     }
 
     @Nested
+    @Order(18)
+    @DisplayName("확정이 끝난 뒤 참조 예약 행이 사라진 상태에서 같은 확정을 다시 접수하면 — F28")
+    class ResubmittingAfterTheReservationIsGone {
+
+        CommandReceipt original;
+
+        @BeforeEach
+        void givenCapture1IsAppliedAndHold1IsDeleted() {
+            submit(reserve("hold-1", "order-1", 500));
+            relay.complete(claimOnly("hold-1"), Created);
+            original = submit(post("capture-1", "order-1", "hold-1"));
+            relay.complete(claimOnly("capture-1"), Created);
+            storage.deleteCommand("hold-1");
+        }
+
+        @Test
+        @DisplayName("같은 내용이면 처음 받은 접수증이 돌아온다 — 참조 검사보다 재전송 판정이 먼저다")
+        void resubmittingAFinishedPostAfterItsReservationIsGoneReturnsTheReceipt() {
+            // when
+            CommandReceipt again = submit(post("capture-1", "order-1", "hold-1"));
+
+            // then
+            assertThat(again).as("다시 받은 접수증").isEqualTo(original);
+        }
+
+        @Test
+        @DisplayName("내용이 다르면 예약 없음이 아니라 내용 충돌로 거부된다 (G7)")
+        void resubmittingItWithOtherContentIsAConflict() {
+            // when
+            ThrowingCallable resubmitting = () -> submit(LedgerCommand.post("capture-1").orderingKey("order-1")
+                    .reservation("hold-1").amount(300).build());
+
+            // then
+            assertThatThrownBy(resubmitting).as("같은 commandId·다른 내용의 재전송")
+                    .isInstanceOf(CommandConflictException.class);
+        }
+    }
+
+    @Nested
     @Order(17)
     @DisplayName("이미 TB에 보낸 뒤 멈춘 명령을 포기하려 하면 — F27")
     class AbandoningAHaltedCommandThatWasSent {
