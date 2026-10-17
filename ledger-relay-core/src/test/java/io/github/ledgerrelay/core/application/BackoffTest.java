@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
@@ -19,8 +20,8 @@ class BackoffTest {
 
     @Nested
     @Order(1)
-    @DisplayName("실패 횟수에 따라")
-    class ByFailures {
+    @DisplayName("실패가 거듭되면")
+    class AsFailuresAddUp {
 
         @ParameterizedTest(name = "{0}회 실패 → {1}ms", quoteTextArguments = false)
         @CsvSource(textBlock = """
@@ -34,8 +35,11 @@ class BackoffTest {
                 """)
         @DisplayName("두 배씩 늘고 상한에서 멈춘다 — 실패가 아무리 많아도 넘치지 않는다")
         void doublesUpToTheCap(long failures, long expectedMillis) {
-            assertThat(DEFAULT.after(failures)).as("%d회 실패 뒤의 대기", failures)
-                    .isEqualTo(Duration.ofMillis(expectedMillis));
+            // when
+            Duration wait = DEFAULT.after(failures);
+
+            // then
+            assertThat(wait).as("%d회 실패 뒤의 대기", failures).isEqualTo(Duration.ofMillis(expectedMillis));
         }
     }
 
@@ -47,17 +51,30 @@ class BackoffTest {
         @Test
         @DisplayName("처음 대기가 0이면 거부한다 — 바로 다시 잡으면 막힌 키가 워커를 붙잡는다")
         void refusesAZeroInitialWait() {
-            assertThatThrownBy(() -> new Backoff(Duration.ZERO, Duration.ofSeconds(30)))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("initial");
+            // when
+            ThrowingCallable configuring = () -> new Backoff(Duration.ZERO, Duration.ofSeconds(30));
+
+            // then
+            assertRefusedAsMisconfigured(configuring, "initial");
         }
 
         @Test
         @DisplayName("상한이 처음 대기보다 짧으면 거부한다")
         void refusesACapBelowTheInitialWait() {
-            assertThatThrownBy(() -> new Backoff(Duration.ofSeconds(5), Duration.ofSeconds(1)))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("max");
+            // when
+            ThrowingCallable configuring = () -> new Backoff(Duration.ofSeconds(5), Duration.ofSeconds(1));
+
+            // then
+            assertRefusedAsMisconfigured(configuring, "max");
         }
+    }
+
+    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+
+    private static void assertRefusedAsMisconfigured(ThrowingCallable configuring, String setting) {
+        assertThatThrownBy(configuring)
+                .as("%s 설정이 잘못되어 거부되기를 기대했다", setting)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(setting);
     }
 }

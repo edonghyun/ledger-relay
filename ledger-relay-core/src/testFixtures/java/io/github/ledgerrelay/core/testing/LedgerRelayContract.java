@@ -89,39 +89,53 @@ public abstract class LedgerRelayContract {
         }
 
         @Test
-        @DisplayName("G7: 같은 commandId에 금액만 바꿔 접수하면 내용 충돌로 거부되고, 처음 내용이 남는다")
-        void aDifferentAmountUnderTheSameIdIsAConflict() {
-            // given
-            CommandReceipt first = submit(transfer("pay-1", "order-1", 500));
+        @DisplayName("접수한 적 없는 commandId를 조회하면 아무것도 없다")
+        void anUnknownCommandIsNotFound() {
+            // when
+            Optional<CommandStatus> found = relay.status("never-accepted");
 
+            // then
+            assertThat(found).as("접수한 적 없는 명령의 조회 결과").isEmpty();
+        }
+    }
+
+    @Nested
+    @Order(2)
+    @DisplayName("500원 이체가 접수된 상태에서 같은 commandId로 다른 내용을 접수하면 — G7")
+    class AcceptingOtherContentUnderTheSameId {
+
+        CommandReceipt first;
+
+        @BeforeEach
+        void givenPay1Of500IsAccepted() {
+            first = submit(transfer("pay-1", "order-1", 500));
+        }
+
+        @Test
+        @DisplayName("금액만 바꾸면 내용 충돌로 거부되고, 처음 내용으로는 여전히 같은 접수증을 받는다")
+        void aDifferentAmountIsAConflict() {
             // when
             ThrowingCallable acceptingAnotherAmount = () -> submit(transfer("pay-1", "order-1", 501));
 
             // then
             assertRejectedAsConflict(acceptingAnotherAmount, "pay-1");
             assertThat(submit(transfer("pay-1", "order-1", 500)))
-                    .as("처음 내용으로는 여전히 같은 접수증을 받는다").isEqualTo(first);
+                    .as("처음 내용으로 다시 접수한 접수증").isEqualTo(first);
         }
 
         @Test
-        @DisplayName("G7: 같은 commandId에 순서 키만 바꿔도 내용 충돌이다")
-        void aDifferentOrderingKeyUnderTheSameIdIsAConflict() {
-            // given
-            submit(transfer("pay-1", "order-1", 500));
+        @DisplayName("순서 키만 바꿔도 내용 충돌로 거부된다")
+        void aDifferentOrderingKeyIsAConflict() {
+            // when
+            ThrowingCallable acceptingUnderAnotherKey = () -> submit(transfer("pay-1", "order-2", 500));
 
             // then
-            assertRejectedAsConflict(() -> submit(transfer("pay-1", "order-2", 500)), "pay-1");
-        }
-
-        @Test
-        @DisplayName("접수한 적 없는 commandId를 조회하면 아무것도 없다")
-        void anUnknownCommandIsNotFound() {
-            assertThat(relay.status("never-accepted")).isEmpty();
+            assertRejectedAsConflict(acceptingUnderAnotherKey, "pay-1");
         }
     }
 
     @Nested
-    @Order(2)
+    @Order(3)
     @DisplayName("예약을 참조하는 확정·해제를 접수하면 — §5.1-3, P2")
     class AcceptingAReference {
 
@@ -153,14 +167,22 @@ public abstract class LedgerRelayContract {
         @Test
         @DisplayName("접수되지 않은 예약을 참조하면 거부되고, 확정은 남지 않는다")
         void aMissingReservationIsRefused() {
-            assertRejectedAsMissingReservation(() -> submit(post("capture-1", "order-1", "hold-9")), "capture-1");
+            // when
+            ThrowingCallable referencingHold9 = () -> submit(post("capture-1", "order-1", "hold-9"));
+
+            // then
+            assertRejectedAsMissingReservation(referencingHold9, "capture-1");
             assertThat(relay.status("capture-1")).as("거부된 확정").isEmpty();
         }
 
         @Test
         @DisplayName("다른 순서 키의 예약을 참조하면 거부된다")
         void aReservationUnderAnotherKeyIsRefused() {
-            assertRejectedAsMissingReservation(() -> submit(post("capture-1", "order-2", "hold-1")), "capture-1");
+            // when
+            ThrowingCallable referencingFromOrder2 = () -> submit(post("capture-1", "order-2", "hold-1"));
+
+            // then
+            assertRejectedAsMissingReservation(referencingFromOrder2, "capture-1");
         }
 
         @Test
@@ -169,26 +191,38 @@ public abstract class LedgerRelayContract {
             // given
             submit(transfer("pay-1", "order-1", 500));
 
+            // when
+            ThrowingCallable referencingATransfer = () -> submit(post("capture-1", "order-1", "pay-1"));
+
             // then
-            assertRejectedAsMissingReservation(() -> submit(post("capture-1", "order-1", "pay-1")), "capture-1");
+            assertRejectedAsMissingReservation(referencingATransfer, "capture-1");
         }
 
         @Test
         @DisplayName("자기 자신을 참조하면 거부된다")
         void aCommandCannotReferenceItself() {
-            assertRejectedAsMissingReservation(() -> submit(post("capture-1", "order-1", "capture-1")), "capture-1");
+            // when
+            ThrowingCallable referencingItself = () -> submit(post("capture-1", "order-1", "capture-1"));
+
+            // then
+            assertRejectedAsMissingReservation(referencingItself, "capture-1");
         }
     }
 
     @Nested
-    @Order(3)
-    @DisplayName("앱 트랜잭션과 함께 — G1")
+    @Order(4)
+    @DisplayName("앱 트랜잭션에 묶어 접수하면 — G1")
     class WithTheAppTransaction {
 
         @Test
         @DisplayName("트랜잭션 밖에서 접수하면 거부되고, 아무것도 남지 않는다")
         void submittingOutsideATransactionIsRefused() {
-            assertThatThrownBy(() -> relay.submit(transfer("pay-1", "order-1", 500)))
+            // when
+            ThrowingCallable submittingOutside = () -> relay.submit(transfer("pay-1", "order-1", 500));
+
+            // then
+            assertThatThrownBy(submittingOutside)
+                    .as("트랜잭션 밖이라 거부되기를 기대했다")
                     .isInstanceOf(storage.outsideTransactionError());
             assertThat(relay.status("pay-1")).as("거부된 명령").isEmpty();
         }
@@ -222,8 +256,8 @@ public abstract class LedgerRelayContract {
     }
 
     @Nested
-    @Order(4)
-    @DisplayName("claim하면 — §5.2")
+    @Order(5)
+    @DisplayName("claim하면 — §5.2, G4")
     class Claiming {
 
         @Test
@@ -261,7 +295,7 @@ public abstract class LedgerRelayContract {
         }
 
         @Test
-        @DisplayName("G4: 같은 키의 앞 명령이 끝나지 않았으면 뒤 명령은 잡히지 않는다")
+        @DisplayName("같은 키의 앞 명령이 끝나지 않았으면 뒤 명령은 잡히지 않는다")
         void aLaterCommandWaitsForTheEarlierOne() {
             // given
             submit(transfer("pay-1", "order-1", 500));
@@ -339,7 +373,7 @@ public abstract class LedgerRelayContract {
     }
 
     @Nested
-    @Order(5)
+    @Order(6)
     @DisplayName("잡은 명령에 결과를 쓰면 — §5.3")
     class WritingResults {
 
@@ -449,7 +483,7 @@ public abstract class LedgerRelayContract {
     }
 
     @Nested
-    @Order(6)
+    @Order(7)
     @DisplayName("lease가 끝나 다른 워커가 잡은 뒤 앞 워커가 쓰면 — G5, E3")
     class LateWorker {
 
@@ -528,7 +562,7 @@ public abstract class LedgerRelayContract {
     }
 
     @Nested
-    @Order(7)
+    @Order(8)
     @DisplayName("결과 반영 핸들러가 실패하면 — §5.4, G6")
     class HandlerFails {
 
@@ -620,7 +654,7 @@ public abstract class LedgerRelayContract {
     }
 
     @Nested
-    @Order(8)
+    @Order(9)
     @DisplayName("같은 키의 앞 명령이 끝나면 — G4")
     class AfterTheEarlierCommandFinishes {
 
@@ -712,7 +746,7 @@ public abstract class LedgerRelayContract {
     }
 
     @Nested
-    @Order(9)
+    @Order(10)
     @DisplayName("워커 단계를 앱 트랜잭션 안에서 부르면 — G6")
     class WorkerStepsInsideATransaction {
 

@@ -1,6 +1,7 @@
 package io.github.ledgerrelay.core.testing;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ledgerrelay.core.CommandKind;
@@ -19,6 +20,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -132,13 +134,17 @@ public abstract class CommandStoreContract {
         @Test
         @DisplayName("넣은 적 없는 commandId는 찾지 못한다")
         void anUnknownCommandIsNotFound() {
-            assertThat(inTx(() -> store.find("never-inserted"))).isEmpty();
+            // when
+            Optional<CommandRecord> found = inTx(() -> store.find("never-inserted"));
+
+            // then
+            assertThat(found).as("넣은 적 없는 명령").isEmpty();
         }
     }
 
     @Nested
     @Order(3)
-    @DisplayName("트랜잭션이 — G1, G6")
+    @DisplayName("트랜잭션을 열고 닫으면 — G1, G6")
     class TransactionBoundaries {
 
         @Test
@@ -172,14 +178,23 @@ public abstract class CommandStoreContract {
         @Test
         @DisplayName("밖에서 활성 트랜잭션을 요구하면 거부된다")
         void requiringATransactionOutsideOneFails() {
-            assertThatThrownBy(() -> storage.transactions().requireActive())
+            // when
+            ThrowingCallable requiringOutside = () -> storage.transactions().requireActive();
+
+            // then
+            assertThatThrownBy(requiringOutside)
+                    .as("트랜잭션 밖이라 거부되기를 기대했다")
                     .isInstanceOf(storage.outsideTransactionError());
         }
 
         @Test
         @DisplayName("안에서 활성 트랜잭션을 요구하면 통과한다")
         void requiringATransactionInsideOnePasses() {
-            inTx(() -> storage.transactions().requireActive());
+            // when
+            ThrowingCallable requiringInside = () -> inTx(() -> storage.transactions().requireActive());
+
+            // then
+            assertThatCode(requiringInside).as("트랜잭션 안에서 요구한 결과").doesNotThrowAnyException();
         }
 
         @Test
@@ -434,8 +449,12 @@ public abstract class CommandStoreContract {
         @Test
         @DisplayName("없는 행이면 바뀌지 않는다")
         void anUnknownRowIsRefused() {
-            assertThat(inTx(() -> store.compareAndSet(new RowChange(pay1.rowId() + 1000, StoredState.CLAIMED, 3,
-                    appliedRow(3), new RowChange.Stamp.Completion())))).as("반영 여부").isFalse();
+            // when
+            boolean changed = inTx(() -> store.compareAndSet(new RowChange(pay1.rowId() + 1000, StoredState.CLAIMED, 3,
+                    appliedRow(3), new RowChange.Stamp.Completion())));
+
+            // then
+            assertThat(changed).as("없는 행에 쓴 반영 여부").isFalse();
         }
 
         @Test

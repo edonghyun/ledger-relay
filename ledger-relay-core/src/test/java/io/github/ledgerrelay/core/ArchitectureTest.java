@@ -36,6 +36,7 @@ class ArchitectureTest {
     @Test
     @DisplayName("공개 API는 도메인 규칙·서비스·포트를 모른다 — 앱 코드가 내부 타입에 묶이지 않게")
     void thePublicApiKnowsNothingInside() {
+        // then
         noClasses().that().resideInAPackage(PUBLIC)
                 .should().dependOnClassesThat().resideInAnyPackage(DOMAIN, APPLICATION, SPI)
                 .check(MAIN);
@@ -44,6 +45,7 @@ class ArchitectureTest {
     @Test
     @DisplayName("도메인 규칙은 서비스와 포트를 모른다 — 규칙은 저장 방식과 상관없이 참이다")
     void theDomainKnowsNeitherServiceNorPorts() {
+        // then
         noClasses().that().resideInAPackage(DOMAIN)
                 .should().dependOnClassesThat().resideInAnyPackage(APPLICATION, SPI)
                 .check(MAIN);
@@ -52,6 +54,7 @@ class ArchitectureTest {
     @Test
     @DisplayName("core는 JDK 말고 아무것도 쓰지 않는다 — Spring·PG·TB는 어댑터 모듈만 안다")
     void coreUsesOnlyTheJdk() {
+        // then
         classes().that().resideInAPackage("io.github.ledgerrelay.core..")
                 .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "io.github.ledgerrelay.core..")
                 .check(MAIN);
@@ -60,6 +63,7 @@ class ArchitectureTest {
     @Test
     @DisplayName("포트는 서비스를 모른다 — 어댑터가 서비스 구현에 묶이지 않게")
     void portsDoNotKnowTheService() {
+        // then
         noClasses().that().resideInAPackage(SPI)
                 .should().dependOnClassesThat().resideInAPackage(APPLICATION)
                 .check(MAIN);

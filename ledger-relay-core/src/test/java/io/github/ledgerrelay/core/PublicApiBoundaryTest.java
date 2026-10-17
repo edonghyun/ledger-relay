@@ -30,6 +30,7 @@ class PublicApiBoundaryTest {
     @Test
     @DisplayName("공개 패키지에는 정해 둔 타입만 있다 — 규칙은 domain에, 서비스는 application에, 포트는 spi에 둔다")
     void onlyTheListedTypesArePublic() {
+        // then
         assertThat(publicTopLevelTypes())
                 .as("공개 패키지 %s의 최상위 공개 타입", PACKAGE)
                 .containsExactlyInAnyOrderElementsOf(PUBLIC_TYPES);

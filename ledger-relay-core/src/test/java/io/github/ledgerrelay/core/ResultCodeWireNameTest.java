@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Arrays;
 import java.util.List;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
@@ -93,8 +94,8 @@ class ResultCodeWireNameTest {
 
     @Nested
     @Order(1)
-    @DisplayName("코드마다")
-    class EveryCode {
+    @DisplayName("결과 코드를 저장하면")
+    class StoringACode {
 
         @ParameterizedTest(name = "{0} ↔ {1}", quoteTextArguments = false)
         @CsvSource(textBlock = WIRE_NAME_TABLE)
@@ -111,7 +112,7 @@ class ResultCodeWireNameTest {
         @Test
         @DisplayName("저장 이름 표는 모든 코드를 정확히 한 번씩 담고, 이름이 겹치지 않는다")
         void tableListsEveryCodeOnce() {
-            // given
+            // when
             List<String[]> rows = WIRE_NAME_TABLE.lines()
                     .map(String::strip)
                     .filter(line -> !line.isEmpty())
@@ -136,17 +137,30 @@ class ResultCodeWireNameTest {
         @ValueSource(strings = {"ExceedsCredits", "EXCEEDS_CREDITS", "exceeds_credit", "", "deprecated_18"})
         @DisplayName("코드로 바꾸지 않고 거부한다 — Java 상수 이름이나 비슷한 철자를 저장 이름으로 받지 않는다")
         void refusesAnythingButAWireName(String notAWireName) {
-            assertThatThrownBy(() -> LedgerResultCode.fromWireName(notAWireName))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("알 수 없는 결과 코드 저장 이름");
+            // when
+            ThrowingCallable reading = () -> LedgerResultCode.fromWireName(notAWireName);
+
+            // then
+            assertRefusedAsUnknownWireName(reading);
         }
 
         @Test
         @DisplayName("null도 같은 이유로 거부한다")
         void refusesNull() {
-            assertThatThrownBy(() -> LedgerResultCode.fromWireName(null))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("알 수 없는 결과 코드 저장 이름");
+            // when
+            ThrowingCallable reading = () -> LedgerResultCode.fromWireName(null);
+
+            // then
+            assertRefusedAsUnknownWireName(reading);
         }
+    }
+
+    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+
+    private static void assertRefusedAsUnknownWireName(ThrowingCallable reading) {
+        assertThatThrownBy(reading)
+                .as("저장 이름이 아니라서 거부되기를 기대했다")
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("알 수 없는 결과 코드 저장 이름");
     }
 }

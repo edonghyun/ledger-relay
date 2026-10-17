@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
@@ -50,8 +51,11 @@ class CommandStateMachineTest {
         @EnumSource(value = GateDecision.class, names = {"CLOSED", "HALT"})
         @DisplayName("게이트가 닫혔거나 멈췄으면 아무 일도 없다")
         void aClosedOrHaltedGateLeavesTheRow(GateDecision gate) {
-            assertThat(CommandStateMachine.apply(CommandRow.accepted(), new Step.Claim(gate, false)))
-                    .isEqualTo(new StepResult.Unchanged());
+            // when
+            StepResult result = CommandStateMachine.apply(CommandRow.accepted(), new Step.Claim(gate, false));
+
+            // then
+            assertThat(result).as("게이트 %s에서 claim한 결과", gate).isEqualTo(new StepResult.Unchanged());
         }
 
         @Test
@@ -69,20 +73,30 @@ class CommandStateMachineTest {
         }
 
         @Test
-        @DisplayName("lease가 살아 있는 처리 중 명령을 claim하는 것은 버그다")
+        @DisplayName("lease가 살아 있는 처리 중 명령을 claim하면 버그로 거부된다")
         void claimingALiveLeaseIsABug() {
+            // given
             CommandRow held = new CommandRow(StoredState.CLAIMED, 3, 0, Optional.empty(), Optional.empty(), 0);
 
-            assertBug(() -> CommandStateMachine.apply(held, new Step.Claim(GateDecision.OPEN, false)));
+            // when
+            ThrowingCallable claiming = () -> CommandStateMachine.apply(held, new Step.Claim(GateDecision.OPEN, false));
+
+            // then
+            assertBug(claiming);
         }
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(value = StoredState.class, names = {"APPLIED", "REJECTED", "CONFLICT", "SKIPPED"})
-        @DisplayName("끝난 명령을 claim하는 것은 버그다")
+        @DisplayName("끝난 명령을 claim하면 버그로 거부된다")
         void claimingAFinishedCommandIsABug(StoredState finished) {
+            // given
             CommandRow done = new CommandRow(finished, 2, 1, Optional.empty(), Optional.empty(), 0);
 
-            assertBug(() -> CommandStateMachine.apply(done, new Step.Claim(GateDecision.OPEN, false)));
+            // when
+            ThrowingCallable claiming = () -> CommandStateMachine.apply(done, new Step.Claim(GateDecision.OPEN, false));
+
+            // then
+            assertBug(claiming);
         }
     }
 
@@ -97,7 +111,11 @@ class CommandStateMachineTest {
         @Test
         @DisplayName("제출을 기록하면 처리 중 그대로이고 제출 횟수가 1 오른다")
         void recordingASubmissionCountsIt() {
-            assertMoved(CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.MarkSubmitted(5)),
+            // when
+            StepResult result = CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.MarkSubmitted(5));
+
+            // then
+            assertMoved(result,
                     new CommandRow(StoredState.CLAIMED, 5, 1, Optional.empty(), Optional.empty(), 0),
                     RECORD_SUBMISSION);
         }
@@ -105,7 +123,11 @@ class CommandStateMachineTest {
         @Test
         @DisplayName("성공(Created)으로 끝내면 적용됨이 되고, 결과 코드가 남고, 핸들러가 실행된다")
         void completingWithSuccessApplies() {
-            assertMoved(CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.Complete(5, Created)),
+            // when
+            StepResult result = CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.Complete(5, Created));
+
+            // then
+            assertMoved(result,
                     new CommandRow(StoredState.APPLIED, 5, 0, Optional.empty(), Optional.of(Created), 0),
                     RUN_HANDLER);
         }
@@ -113,7 +135,11 @@ class CommandStateMachineTest {
         @Test
         @DisplayName("잔액 부족(ExceedsCredits)으로 끝내면 거절됨이 된다")
         void completingWithABusinessRejectionRejects() {
-            assertMoved(CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.Complete(5, ExceedsCredits)),
+            // when
+            StepResult result = CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.Complete(5, ExceedsCredits));
+
+            // then
+            assertMoved(result,
                     new CommandRow(StoredState.REJECTED, 5, 0, Optional.empty(), Optional.of(ExceedsCredits), 0),
                     RUN_HANDLER);
         }
@@ -121,7 +147,11 @@ class CommandStateMachineTest {
         @Test
         @DisplayName("내용 충돌로 끝내면 충돌이 된다")
         void completingWithAConflictConflicts() {
-            assertMoved(CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.Complete(5, ExistsWithDifferentAmount)),
+            // when
+            StepResult result = CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.Complete(5, ExistsWithDifferentAmount));
+
+            // then
+            assertMoved(result,
                     new CommandRow(StoredState.CONFLICT, 5, 0, Optional.empty(), Optional.of(ExistsWithDifferentAmount), 0),
                     RUN_HANDLER);
         }
@@ -129,7 +159,11 @@ class CommandStateMachineTest {
         @Test
         @DisplayName("건너뛰면 건너뜀이 되고, 결과 코드 없이 핸들러가 실행된다")
         void skippingSkips() {
-            assertMoved(CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.Skip(5)),
+            // when
+            StepResult result = CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.Skip(5));
+
+            // then
+            assertMoved(result,
                     new CommandRow(StoredState.SKIPPED, 5, 0, Optional.empty(), Optional.empty(), 0),
                     RUN_HANDLER);
         }
@@ -140,8 +174,11 @@ class CommandStateMachineTest {
             // given
             CommandRow submittedOnce = new CommandRow(StoredState.CLAIMED, 5, 1, Optional.empty(), Optional.empty(), 0);
 
+            // when
+            StepResult result = CommandStateMachine.apply(submittedOnce, new Step.Release(5));
+
             // then
-            assertMoved(CommandStateMachine.apply(submittedOnce, new Step.Release(5)),
+            assertMoved(result,
                     new CommandRow(StoredState.PENDING, 5, 1, Optional.empty(), Optional.empty(), 0),
                     BACKOFF);
         }
@@ -152,8 +189,11 @@ class CommandStateMachineTest {
             // given
             CommandRow failedTwice = new CommandRow(StoredState.CLAIMED, 5, 1, Optional.empty(), Optional.empty(), 2);
 
+            // when
+            StepResult result = CommandStateMachine.apply(failedTwice, new Step.HandlerFailed(5, Optional.of(ExceedsCredits)));
+
             // then
-            assertMoved(CommandStateMachine.apply(failedTwice, new Step.HandlerFailed(5, Optional.of(ExceedsCredits))),
+            assertMoved(result,
                     new CommandRow(StoredState.PENDING, 5, 1, Optional.of(ExceedsCredits), Optional.empty(), 3),
                     BACKOFF, KEEP_KNOWN_RESULT, COUNT_HANDLER_FAILURE);
         }
@@ -168,23 +208,35 @@ class CommandStateMachineTest {
                 new CommandRow(StoredState.CLAIMED, 6, 1, Optional.of(ExceedsCredits), Optional.empty(), 1);
 
         @Test
-        @DisplayName("그 결과로 끝낸다 — TB에 다시 보내지 않고 핸들러만 다시 실행한다")
+        @DisplayName("그 결과로 끝내면 거절됨이 되고 핸들러가 다시 실행된다 — TB에는 다시 보내지 않는다")
         void completesWithTheKnownResult() {
-            assertMoved(CommandStateMachine.apply(HELD_KNOWING_EXCEEDS_CREDITS, new Step.Complete(6, ExceedsCredits)),
+            // when
+            StepResult result = CommandStateMachine.apply(HELD_KNOWING_EXCEEDS_CREDITS, new Step.Complete(6, ExceedsCredits));
+
+            // then
+            assertMoved(result,
                     new CommandRow(StoredState.REJECTED, 6, 1, Optional.of(ExceedsCredits), Optional.of(ExceedsCredits), 1),
                     RUN_HANDLER);
         }
 
         @Test
-        @DisplayName("TB 제출을 기록하는 것은 버그다 — 다시 보내면 원래 사유가 IdAlreadyFailed로 덮인다")
+        @DisplayName("TB 제출을 기록하면 버그로 거부된다 — 다시 보내면 원래 사유가 IdAlreadyFailed로 덮인다")
         void submittingAgainIsABug() {
-            assertBug(() -> CommandStateMachine.apply(HELD_KNOWING_EXCEEDS_CREDITS, new Step.MarkSubmitted(6)));
+            // when
+            ThrowingCallable writing = () -> CommandStateMachine.apply(HELD_KNOWING_EXCEEDS_CREDITS, new Step.MarkSubmitted(6));
+
+            // then
+            assertBug(writing);
         }
 
         @Test
-        @DisplayName("다른 코드로 끝내는 것은 버그다")
+        @DisplayName("다른 코드로 끝내면 버그로 거부된다")
         void completingWithAnotherCodeIsABug() {
-            assertBug(() -> CommandStateMachine.apply(HELD_KNOWING_EXCEEDS_CREDITS, new Step.Complete(6, IdAlreadyFailed)));
+            // when
+            ThrowingCallable writing = () -> CommandStateMachine.apply(HELD_KNOWING_EXCEEDS_CREDITS, new Step.Complete(6, IdAlreadyFailed));
+
+            // then
+            assertBug(writing);
         }
     }
 
@@ -210,27 +262,42 @@ class CommandStateMachineTest {
         @MethodSource("writesWithTheOldToken4")
         @DisplayName("토큰 5로 다시 claim된 행에 토큰 4로 쓰면 0행이다")
         void anOldTokenIsFenced(Step.Write lateWrite) {
+            // given
             CommandRow reclaimed = new CommandRow(StoredState.CLAIMED, 5, 1, Optional.empty(), Optional.empty(), 0);
 
-            assertFenced(CommandStateMachine.apply(reclaimed, lateWrite));
+            // when
+            StepResult result = CommandStateMachine.apply(reclaimed, lateWrite);
+
+            // then
+            assertFenced(result);
         }
 
         @ParameterizedTest(name = "{0}")
         @MethodSource("writesWithToken5")
         @DisplayName("되돌려진 행에 같은 토큰으로 써도 0행이다 — 토큰만이 아니라 처리 중 상태도 본다")
         void aReleasedRowIsFencedEvenWithTheSameToken(Step.Write lateWrite) {
+            // given
             CommandRow released = new CommandRow(StoredState.PENDING, 5, 1, Optional.empty(), Optional.empty(), 0);
 
-            assertFenced(CommandStateMachine.apply(released, lateWrite));
+            // when
+            StepResult result = CommandStateMachine.apply(released, lateWrite);
+
+            // then
+            assertFenced(result);
         }
 
         @ParameterizedTest(name = "{0}")
         @MethodSource("writesWithToken5")
         @DisplayName("끝난 행에 쓰면 0행이다 — 최종 상태는 바뀌지 않는다")
         void aFinishedRowIsFenced(Step.Write lateWrite) {
+            // given
             CommandRow applied = new CommandRow(StoredState.APPLIED, 5, 1, Optional.empty(), Optional.of(Created), 0);
 
-            assertFenced(CommandStateMachine.apply(applied, lateWrite));
+            // when
+            StepResult result = CommandStateMachine.apply(applied, lateWrite);
+
+            // then
+            assertFenced(result);
         }
     }
 
@@ -277,7 +344,7 @@ class CommandStateMachineTest {
         assertThat(actual).as("쓰기가 0행으로 막히기를 기대했다").isEqualTo(new StepResult.Fenced());
     }
 
-    private static void assertBug(org.assertj.core.api.ThrowableAssert.ThrowingCallable step) {
+    private static void assertBug(ThrowingCallable step) {
         assertThatThrownBy(step).as("버그로 거부되기를 기대했다")
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("버그");

@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
@@ -26,8 +27,8 @@ class StoredStateTest {
 
     @Nested
     @Order(1)
-    @DisplayName("TB 결과 분류를 받은 처리 중 명령은")
-    class AfterATigerBeetleResult {
+    @DisplayName("처리 중 명령이 TB 결과를 받으면")
+    class OnATigerBeetleResult {
 
         @ParameterizedTest(name = "{0} → {1}", quoteTextArguments = false)
         @CsvSource(textBlock = """
@@ -40,7 +41,11 @@ class StoredStateTest {
                 """)
         @DisplayName("분류가 정한 최종 상태로 끝난다")
         void endsInTheStateItsCategoryNames(ResultCategory category, StoredState expected) {
-            assertThat(StoredState.finalStateFor(category)).as("%s의 최종 상태", category).isEqualTo(expected);
+            // when
+            StoredState endsIn = StoredState.finalStateFor(category);
+
+            // then
+            assertThat(endsIn).as("%s의 최종 상태", category).isEqualTo(expected);
         }
 
         @ParameterizedTest(name = "{0}")
@@ -53,9 +58,12 @@ class StoredStateTest {
                     .filter(candidate -> candidate.category() == category).findFirst().orElseThrow();
             CommandStatus.State endsIn = StoredState.finalStateFor(code.category()).queryState(1);
 
+            // when
+            ThrowingCallable makingTheQueryResult = () -> new CommandStatus("pay-1", endsIn,
+                    Optional.of(Rejection.of(code)), BigInteger.ONE, 1, at, Optional.of(at));
+
             // then
-            assertThatCode(() -> new CommandStatus("pay-1", endsIn, Optional.of(Rejection.of(code)), BigInteger.ONE, 1,
-                            at, Optional.of(at)))
+            assertThatCode(makingTheQueryResult)
                     .as("%s(%s)로 끝난 %s 조회 결과", code, code.category(), endsIn)
                     .doesNotThrowAnyException();
         }
@@ -83,7 +91,11 @@ class StoredStateTest {
         @CsvSource(textBlock = QUERY_STATE_TABLE)
         @DisplayName("저장 상태와 제출 횟수로 조회 상태가 정해진다 — TB에 보낸 적이 있으면 미확정도 처리 중이다")
         void showsTheQueryState(StoredState stored, long submitCount, CommandStatus.State expected) {
-            assertThat(stored.queryState(submitCount))
+            // when
+            CommandStatus.State shown = stored.queryState(submitCount);
+
+            // then
+            assertThat(shown)
                     .as("%s 상태에서 %d회 제출한 명령의 조회 상태", stored, submitCount)
                     .isEqualTo(expected);
         }
@@ -91,10 +103,12 @@ class StoredStateTest {
         @Test
         @DisplayName("조회 상태 표는 모든 저장 상태를 한 번 이상 담는다")
         void tableCoversEveryStoredState() {
+            // when
             List<String> statesInTheTable = QUERY_STATE_TABLE.lines()
                     .map(String::strip).filter(line -> !line.isEmpty())
                     .map(line -> line.split(",")[0].strip()).distinct().toList();
 
+            // then
             assertThat(statesInTheTable).containsExactlyInAnyOrderElementsOf(
                     Arrays.stream(StoredState.values()).map(Enum::name).toList());
         }
@@ -102,7 +116,12 @@ class StoredStateTest {
         @Test
         @DisplayName("제출 횟수가 음수면 저장소 버그이므로 거부한다")
         void refusesANegativeSubmitCount() {
-            assertThatThrownBy(() -> StoredState.PENDING.queryState(-1))
+            // when
+            ThrowingCallable querying = () -> StoredState.PENDING.queryState(-1);
+
+            // then
+            assertThatThrownBy(querying)
+                    .as("저장소 버그로 거부되기를 기대했다")
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("submitCount");
         }
