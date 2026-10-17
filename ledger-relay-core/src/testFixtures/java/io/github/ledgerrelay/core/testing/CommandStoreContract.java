@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ledgerrelay.core.CommandKind;
 import io.github.ledgerrelay.core.LedgerResultCode;
+import io.github.ledgerrelay.core.SkipReason;
 import io.github.ledgerrelay.core.domain.CommandRow;
 import io.github.ledgerrelay.core.domain.QueuedCommand;
 import io.github.ledgerrelay.core.domain.StoredState;
@@ -352,6 +353,19 @@ public abstract class CommandStoreContract {
         }
 
         @Test
+        @DisplayName("맨 앞 명령이 멈췄으면 그 키에서는 아무것도 후보가 아니다 — 멈춘 명령은 limit도 차지하지 않는다")
+        void aHaltedHeadBlocksItsKeyWithoutUsingTheLimit() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            inserted(newTransfer("pay-2", "order-1", 2));
+            inserted(newTransfer("pay-3", "order-2", 1));
+            halted("pay-1");
+
+            // then
+            assertDueWithLimit(1, "pay-3");
+        }
+
+        @Test
         @DisplayName("한 번에 limit개까지만, 접수한 순서대로 낸다")
         void atMostLimitInAcceptanceOrder() {
             // given
@@ -434,6 +448,20 @@ public abstract class CommandStoreContract {
 
             // then
             assertThat(record("pay-1").row()).as("다시 읽은 행").isEqualTo(failedTwiceKnowingExceedsCredits);
+        }
+
+        @Test
+        @DisplayName("건너뛴 이유도 그대로 남는다")
+        void theSkipReasonIsKept() {
+            // given
+            CommandRow abandoned = new CommandRow(StoredState.SKIPPED, 3, 0, Optional.empty(), Optional.empty(), 0,
+                    Optional.of(SkipReason.ABANDONED_BY_OPERATOR));
+
+            // when
+            finished("pay-1", abandoned);
+
+            // then
+            assertThat(record("pay-1").row()).as("다시 읽은 행").isEqualTo(abandoned);
         }
 
         @Test
@@ -568,6 +596,14 @@ public abstract class CommandStoreContract {
         CommandRecord r = record(commandId);
         changed(new RowChange(r.rowId(), r.row().state(), r.row().leaseToken(), claimedRow(token),
                 new RowChange.Stamp.LeaseFor(LEASE)));
+    }
+
+    /** 전제: 접수된 이 행이 토큰 1의 멈춤(HALTED)이 된다. */
+    protected void halted(String commandId) {
+        CommandRecord r = record(commandId);
+        changed(new RowChange(r.rowId(), StoredState.PENDING, r.row().leaseToken(),
+                new CommandRow(StoredState.HALTED, r.row().leaseToken() + 1, 0, Optional.empty(), Optional.empty(), 0),
+                new RowChange.Stamp.Halt()));
     }
 
     /** 전제: 이 행이 finalRow로 끝난다. */

@@ -17,6 +17,7 @@ import io.github.ledgerrelay.core.LedgerResultCode;
 import io.github.ledgerrelay.core.Rejection;
 import io.github.ledgerrelay.core.ReservationNotFoundException;
 import io.github.ledgerrelay.core.ResultCategory;
+import io.github.ledgerrelay.core.SkipReason;
 import io.github.ledgerrelay.core.application.Backoff;
 import io.github.ledgerrelay.core.application.ClaimBatch;
 import io.github.ledgerrelay.core.application.ClaimedCommand;
@@ -760,7 +761,7 @@ public abstract class LedgerRelayContract {
         }
 
         @Test
-        @DisplayName("건너뛰면 건너뜀으로 끝나고, 사유 없이 핸들러가 한 번 실행된다")
+        @DisplayName("건너뛰면 건너뜀으로 끝나고, 거절 사유 없이 '예약 미적용' 이유로 핸들러가 한 번 실행된다")
         void skippingFinishesWithoutAReason() {
             // given
             submit(reserve("hold-1", "order-1", 500));
@@ -775,6 +776,7 @@ public abstract class LedgerRelayContract {
             assertWritten(result);
             assertQueryState("capture-1", State.SKIPPED);
             assertThat(status("capture-1").rejection()).as("건너뜀의 거절 사유").isEmpty();
+            assertThat(status("capture-1").skipReason()).as("건너뛴 이유").contains(SkipReason.RESERVATION_NOT_APPLIED);
             assertHandlerRanOnceFor("capture-1", State.SKIPPED);
         }
 

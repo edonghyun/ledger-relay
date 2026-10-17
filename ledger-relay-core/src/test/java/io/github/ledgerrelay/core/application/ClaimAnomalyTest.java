@@ -1,10 +1,14 @@
 package io.github.ledgerrelay.core.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ledgerrelay.core.CommandKind;
+import io.github.ledgerrelay.core.CommandStatus.State;
+import io.github.ledgerrelay.core.CommandStatus;
 import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.domain.CommandRow;
+import io.github.ledgerrelay.core.domain.StoredState;
 import io.github.ledgerrelay.core.spi.NewCommand;
 import io.github.ledgerrelay.core.spi.TransferBody;
 import io.github.ledgerrelay.core.testing.InMemoryStorage;
@@ -13,6 +17,7 @@ import io.github.ledgerrelay.core.testing.SequentialTransferIds;
 import java.math.BigInteger;
 import java.time.Duration;
 import java.util.Optional;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -28,6 +33,7 @@ class ClaimAnomalyTest {
 
     static final Duration LEASE = Duration.ofSeconds(30);
 
+    final RecordingHandler handler = new RecordingHandler();
     InMemoryStorage storage;
     CommandLifecycle relay;
 
@@ -35,7 +41,7 @@ class ClaimAnomalyTest {
     void givenAnEmptyRelay() {
         storage = InMemoryStorage.create();
         relay = new CommandLifecycle(storage.store(), storage.transactions(), new SequentialTransferIds(),
-                new RecordingHandler(), new Backoff(Duration.ofSeconds(5), Duration.ofSeconds(20)));
+                handler, new Backoff(Duration.ofSeconds(5), Duration.ofSeconds(20)));
     }
 
     @Nested
@@ -95,13 +101,50 @@ class ClaimAnomalyTest {
         }
 
         @Test
-        @DisplayName("claim해도 행은 막 접수된 그대로다 — 토큰도 오르지 않는다")
-        void haltingLeavesTheRow() {
+        @DisplayName("claim하면 행이 멈춤이 되고 토큰이 1 오른다 — TB에는 보내지 않았다")
+        void haltingParksTheRow() {
             // when
             relay.claim(10, LEASE);
 
             // then
-            assertStillJustAccepted("capture-1");
+            assertRow("capture-1", new CommandRow(StoredState.HALTED, 1, 0, Optional.empty(), Optional.empty(), 0));
+        }
+
+        @Test
+        @DisplayName("조회하면 멈춤으로 보인다 — 접수됨으로 보여 원인을 놓치지 않게")
+        void theQueryShowsItHalted() {
+            // when
+            relay.claim(10, LEASE);
+
+            // then
+            assertThat(relay.status("capture-1").map(CommandStatus::state)).as("capture-1의 조회 상태")
+                    .contains(State.HALTED);
+        }
+
+        @Test
+        @DisplayName("멈춘 명령은 다음 claim에서 다시 알리지 않는다 — 알림은 멈출 때 한 번이다")
+        void itIsReportedOnce() {
+            // given
+            relay.claim(10, LEASE);
+
+            // when
+            ClaimBatch next = relay.claim(10, LEASE);
+
+            // then
+            assertNothingHalted(next);
+        }
+
+        @Test
+        @DisplayName("멈춘 키의 뒤 명령은 운영자가 풀 때까지 기다린다 — 같은 키의 순서를 건너뛰지 않는다(G4)")
+        void laterCommandsInTheKeyWait() {
+            // given
+            relay.claim(10, LEASE);
+
+            // when
+            ClaimBatch next = relay.claim(10, LEASE);
+
+            // then
+            assertNothingClaimed(next);
         }
 
         @Test
@@ -117,6 +160,132 @@ class ClaimAnomalyTest {
             // then
             assertHalted(batch, "capture-1");
             assertClaimed(batch, "pay-1");
+        }
+    }
+
+    @Nested
+    @Order(3)
+    @DisplayName("멈춘 명령이 있는 상태에서 다른 키의 명령이 기다리면 — F9")
+    class WhileAKeyIsHalted {
+
+        @BeforeEach
+        void givenCapture1IsHaltedAndPay1Waits() {
+            accepted(reserve("hold-1", "order-1", 2));
+            accepted(post("capture-1", "order-1", 1, "hold-1", 102));
+            relay.claim(10, LEASE);
+            storage.transactions().inTransaction(() -> relay.submit(LedgerCommand.transfer("pay-1")
+                    .orderingKey("order-2").debit(1).credit(2).amount(500).ledger(1).code(1).build()));
+        }
+
+        @Test
+        @DisplayName("한 번에 하나만 잡아도 그 하나는 다른 키의 명령이다 — 멈춘 명령은 limit을 차지하지 않는다")
+        void theHaltedCommandDoesNotUseUpTheLimit() {
+            // when
+            ClaimBatch batch = relay.claim(1, LEASE);
+
+            // then
+            assertClaimed(batch, "pay-1");
+        }
+    }
+
+    @Nested
+    @Order(4)
+    @DisplayName("멈춘 확정을 운영자가 포기하면 — F9")
+    class AbandoningTheHaltedPost {
+
+        @BeforeEach
+        void givenCapture1IsHaltedAheadOfHold1() {
+            accepted(reserve("hold-1", "order-1", 2));
+            accepted(post("capture-1", "order-1", 1, "hold-1", 102));
+            relay.claim(10, LEASE);
+        }
+
+        @Test
+        @DisplayName("건너뜀으로 끝나고, 핸들러가 '운영자 포기' 사유를 한 번 받는다 — TB에는 한 번도 가지 않았다")
+        void itEndsSkippedAsAbandoned() {
+            // when
+            WriteResult result = relay.abandonHalted("capture-1");
+
+            // then
+            assertThat(result).as("포기 쓰기").isEqualTo(new WriteResult.Written());
+            assertHandlerRanOnceAsAbandoned("capture-1");
+        }
+
+        @Test
+        @DisplayName("키가 풀려 뒤에 있던 예약이 잡힌다")
+        void theKeyIsReleased() {
+            // given
+            relay.abandonHalted("capture-1");
+
+            // when
+            ClaimBatch batch = relay.claim(10, LEASE);
+
+            // then
+            assertClaimed(batch, "hold-1");
+        }
+
+        @Test
+        @DisplayName("핸들러가 실패하면 멈춘 그대로 남고, 핸들러 실패가 돌아온다 — 운영자가 다시 포기할 수 있다")
+        void aFailingHandlerLeavesItHalted() {
+            // given
+            handler.failNextCalls(1);
+
+            // when
+            WriteResult result = relay.abandonHalted("capture-1");
+
+            // then
+            assertThat(result).as("포기 쓰기").isInstanceOf(WriteResult.HandlerFailed.class);
+            assertRow("capture-1", new CommandRow(StoredState.HALTED, 1, 0, Optional.empty(), Optional.empty(), 0));
+        }
+    }
+
+    @Nested
+    @Order(5)
+    @DisplayName("멈추지 않은 명령을 포기하려 하면")
+    class AbandoningSomethingElse {
+
+        @Test
+        @DisplayName("접수된 명령이면 거부되고, 아무것도 바뀌지 않는다")
+        void anAcceptedCommandIsRefused() {
+            // given
+            storage.transactions().inTransaction(() -> relay.submit(LedgerCommand.transfer("pay-1")
+                    .orderingKey("order-1").debit(1).credit(2).amount(500).ledger(1).code(1).build()));
+
+            // when
+            ThrowingCallable abandoning = () -> relay.abandonHalted("pay-1");
+
+            // then
+            assertThatThrownBy(abandoning).as("멈춘 명령이 아니라 거부되기를 기대했다")
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("HALTED");
+            assertRow("pay-1", CommandRow.accepted());
+        }
+
+        @Test
+        @DisplayName("접수한 적 없는 명령이면 거부된다")
+        void anUnknownCommandIsRefused() {
+            // when
+            ThrowingCallable abandoning = () -> relay.abandonHalted("never-accepted");
+
+            // then
+            assertThatThrownBy(abandoning).as("없는 명령이라 거부되기를 기대했다")
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("never-accepted");
+        }
+
+        @Test
+        @DisplayName("트랜잭션 안에서 부르면 거부된다 — 핸들러 실패가 바깥 트랜잭션에 묻히지 않게(G6)")
+        void abandoningInsideATransactionIsRefused() {
+            // given
+            accepted(reserve("hold-1", "order-1", 2));
+            accepted(post("capture-1", "order-1", 1, "hold-1", 102));
+            relay.claim(10, LEASE);
+
+            // when
+            ThrowingCallable abandoningInside =
+                    () -> storage.transactions().inTransaction(() -> relay.abandonHalted("capture-1"));
+
+            // then
+            assertThatThrownBy(abandoningInside).as("트랜잭션 안이라 거부되기를 기대했다")
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("트랜잭션 밖에서");
         }
     }
 
@@ -162,8 +331,15 @@ class ClaimAnomalyTest {
         assertThat(batch.halted()).as("멈춘 명령이 없기를 기대했다").isEmpty();
     }
 
-    private void assertStillJustAccepted(String commandId) {
+    private void assertRow(String commandId, CommandRow expected) {
         CommandRow row = storage.transactions().inTransaction(() -> storage.store().find(commandId)).orElseThrow().row();
-        assertThat(row).as("%s의 행 — 막 접수된 그대로(토큰 0)", commandId).isEqualTo(CommandRow.accepted());
+        assertThat(row).as("%s의 행", commandId).isEqualTo(expected);
+    }
+
+    private void assertHandlerRanOnceAsAbandoned(String commandId) {
+        assertThat(handler.completedFor(commandId).stream().map(outcome -> outcome.state() + "/" + outcome.skipReason()
+                .map(Enum::name).orElse("-")).toList())
+                .as("%s에 대해 끝까지 실행된 핸들러 호출(상태/건너뛴 이유)", commandId)
+                .containsExactly("SKIPPED/ABANDONED_BY_OPERATOR");
     }
 }

@@ -143,6 +143,8 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
                     now.plus(retry.backoff()), row.record().completedAt());
             case RowChange.Stamp.Completion completion -> row.with(change.next(), row.leaseExpiresAt(),
                     row.nextAttemptAt(), Optional.of(now));
+            case RowChange.Stamp.Halt halt -> row.with(change.next(), row.leaseExpiresAt(), row.nextAttemptAt(),
+                    row.record().completedAt());
         };
         rows.put(change.rowId(), next);
         return true;
@@ -192,7 +194,8 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
             return switch (record.row().state()) {
                 case PENDING -> !nextAttemptAt.isAfter(now);
                 case CLAIMED -> leaseExpiresAt.isBefore(now);
-                case APPLIED, REJECTED, CONFLICT, SKIPPED -> false;
+                // 멈춘 명령은 운영자가 풀 때까지 후보가 아니다. 맨 앞이므로 그 키의 뒤 명령도 후보가 되지 않는다
+                case APPLIED, REJECTED, CONFLICT, SKIPPED, HALTED -> false;
             };
         }
 

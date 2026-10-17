@@ -13,6 +13,7 @@ public record CommandStatus(
         String commandId,
         State state,
         Optional<Rejection> rejection,
+        Optional<SkipReason> skipReason,
         BigInteger transferId,
         long submitCount,
         Instant acceptedAt,
@@ -27,10 +28,12 @@ public record CommandStatus(
         APPLIED,
         REJECTED,
         CONFLICT,
-        SKIPPED;
+        SKIPPED,
+        /** 정상 경로에서 나올 수 없는 입력이라 멈췄다. 그 키는 운영자가 풀 때까지 막힌다(§5.2 HALT). */
+        HALTED;
 
         public boolean isFinal() {
-            return this != ACCEPTED && this != IN_PROGRESS;
+            return this != ACCEPTED && this != IN_PROGRESS && this != HALTED;
         }
     }
 
@@ -38,6 +41,7 @@ public record CommandStatus(
         Objects.requireNonNull(commandId, "commandId");
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(rejection, "rejection");
+        Objects.requireNonNull(skipReason, "skipReason");
         Objects.requireNonNull(transferId, "transferId");
         Objects.requireNonNull(acceptedAt, "acceptedAt");
         Objects.requireNonNull(completedAt, "completedAt");
@@ -58,6 +62,10 @@ public record CommandStatus(
                 throw new IllegalArgumentException(reason.tbCode() + "(" + reason.category() + ")는 " + state + " 상태의 사유가 아닙니다");
             }
         });
+        if (skipReason.isPresent() != (state == State.SKIPPED)) {
+            throw new IllegalArgumentException(
+                    "skipReason은 SKIPPED일 때만, 그리고 그때는 반드시 있어야 합니다: state=" + state + ", skipReason=" + skipReason);
+        }
         if (completedAt.isPresent() != state.isFinal()) {
             throw new IllegalArgumentException("completedAt은 끝난 명령에만, 그리고 반드시 있어야 합니다: state=" + state);
         }

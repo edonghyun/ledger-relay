@@ -116,11 +116,11 @@ class CommandStatusTest {
         }
 
         @ParameterizedTest(name = "{0}")
-        @EnumSource(value = State.class, names = {"ACCEPTED", "IN_PROGRESS"})
-        @DisplayName("끝나지 않은 명령에 완료 시각을 붙이면 만들어지지 않는다")
+        @EnumSource(value = State.class, names = {"ACCEPTED", "IN_PROGRESS", "HALTED"})
+        @DisplayName("끝나지 않았거나 멈춘 명령에 완료 시각을 붙이면 만들어지지 않는다")
         void refusesACompletionTimeBeforeTheEnd(State unfinished) {
             // when
-            ThrowingCallable makingIt = () -> new CommandStatus("pay-1", unfinished, Optional.empty(), BigInteger.ONE, 0,
+            ThrowingCallable makingIt = () -> new CommandStatus("pay-1", unfinished, Optional.empty(), Optional.empty(), BigInteger.ONE, 0,
                     ACCEPTED_AT, Optional.of(COMPLETED_AT));
 
             // then
@@ -131,7 +131,7 @@ class CommandStatusTest {
         @DisplayName("끝난 명령에 완료 시각이 없으면 만들어지지 않는다")
         void refusesAFinishedCommandWithoutACompletionTime() {
             // when
-            ThrowingCallable makingIt = () -> new CommandStatus("pay-1", State.APPLIED, Optional.empty(), BigInteger.ONE, 1,
+            ThrowingCallable makingIt = () -> new CommandStatus("pay-1", State.APPLIED, Optional.empty(), Optional.empty(), BigInteger.ONE, 1,
                     ACCEPTED_AT, Optional.empty());
 
             // then
@@ -139,10 +139,56 @@ class CommandStatusTest {
         }
     }
 
+    @Nested
+    @Order(3)
+    @DisplayName("건너뜀으로 끝난 조회 결과를 만들면")
+    class MakingASkippedResult {
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(SkipReason.class)
+        @DisplayName("건너뛴 이유를 함께 담는다 — 예약 미적용인지 운영자 포기인지 앱이 구분한다")
+        void aSkippedCommandCarriesWhyItWasSkipped(SkipReason why) {
+            // when
+            CommandStatus status = skipped(Optional.of(why));
+
+            // then
+            assertThat(status.skipReason()).as("건너뛴 이유").contains(why);
+        }
+
+        @Test
+        @DisplayName("이유가 없으면 만들어지지 않는다")
+        void refusesAMissingSkipReason() {
+            // when
+            ThrowingCallable makingIt = () -> skipped(Optional.empty());
+
+            // then
+            assertCannotBeMade(makingIt, "skipReason");
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = State.class, names = {"APPLIED", "ACCEPTED", "HALTED"})
+        @DisplayName("건너뜀이 아닌데 이유를 붙이면 만들어지지 않는다")
+        void refusesASkipReasonWhereNoneBelongs(State state) {
+            // when
+            ThrowingCallable makingIt = () -> new CommandStatus("pay-1", state, Optional.empty(),
+                    Optional.of(SkipReason.ABANDONED_BY_OPERATOR), BigInteger.ONE, 0, ACCEPTED_AT,
+                    state.isFinal() ? Optional.of(COMPLETED_AT) : Optional.empty());
+
+            // then
+            assertCannotBeMade(makingIt, "skipReason");
+        }
+    }
+
     // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
 
+    private static CommandStatus skipped(Optional<SkipReason> why) {
+        return new CommandStatus("pay-1", State.SKIPPED, Optional.empty(), why, BigInteger.ONE, 0, ACCEPTED_AT,
+                Optional.of(COMPLETED_AT));
+    }
+
     private static CommandStatus finished(State state, Optional<Rejection> rejection) {
-        return new CommandStatus("pay-1", state, rejection, BigInteger.ONE, 1, ACCEPTED_AT, Optional.of(COMPLETED_AT));
+        return new CommandStatus("pay-1", state, rejection, Optional.empty(), BigInteger.ONE, 1, ACCEPTED_AT,
+                Optional.of(COMPLETED_AT));
     }
 
     /** 만들지 못하고 IllegalArgumentException이 나며, 메시지가 무엇이 틀렸는지 말한다. */

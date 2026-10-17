@@ -94,12 +94,20 @@ public final class CommandLifecycle implements LedgerRelay {
                 // lockDue가 처리 중 명령을 내는 것은 lease가 끝났을 때뿐이다
                 boolean leaseExpired = candidate.row().state() == StoredState.CLAIMED;
                 StepResult result = CommandStateMachine.apply(candidate.row(), new Step.Claim(gate, leaseExpired));
-                if (result instanceof StepResult.Moved moved && store.compareAndSet(new RowChange(candidate.rowId(),
-                        candidate.row().state(), candidate.row().leaseToken(), moved.row(),
-                        new RowChange.Stamp.LeaseFor(lease)))) {
-                    claimed.add(claimedOf(candidate, moved.row(), gate == GateDecision.SKIP));
-                } else if (gate == GateDecision.HALT) {
+                if (!(result instanceof StepResult.Moved moved)) {
+                    continue;
+                }
+                // 멈출 명령은 HALTED로 주차해 그 키만 막는다. 다시 후보가 되지 않으므로 알림은 이때 한 번이다(F9)
+                boolean halting = moved.row().state() == StoredState.HALTED;
+                RowChange.Stamp stamp = halting ? new RowChange.Stamp.Halt() : new RowChange.Stamp.LeaseFor(lease);
+                if (!store.compareAndSet(new RowChange(candidate.rowId(), candidate.row().state(),
+                        candidate.row().leaseToken(), moved.row(), stamp))) {
+                    continue;
+                }
+                if (halting) {
                     halted.add(candidate.commandId());
+                } else {
+                    claimed.add(claimedOf(candidate, moved.row(), gate == GateDecision.SKIP));
                 }
             }
             return new ClaimBatch(claimed, halted);
@@ -141,6 +149,35 @@ public final class CommandLifecycle implements LedgerRelay {
     }
 
     /**
+     * 운영자가 멈춘(HALTED) 명령을 포기한다(§5.2 HALT, docs/failure-modes.md F9). TB에 보내지 않고 건너뜀으로 끝내며,
+     * 같은 트랜잭션에서 핸들러가 '운영자 포기' 사유를 받는다. 핸들러가 실패하면 멈춘 그대로 남는다. 트랜잭션 밖에서 부른다.
+     *
+     * @throws IllegalArgumentException 접수한 적 없는 명령
+     * @throws IllegalStateException    멈춘 명령이 아니다
+     */
+    public WriteResult abandonHalted(String commandId) {
+        requireOutsideTransaction();
+        try {
+            return transactions.inTransaction(() -> {
+                CommandRecord current = store.find(commandId)
+                        .orElseThrow(() -> new IllegalArgumentException("접수한 적 없는 명령입니다: " + commandId));
+                if (current.row().state() != StoredState.HALTED) {
+                    throw new IllegalStateException("멈춘(HALTED) 명령만 포기할 수 있습니다: " + commandId + "는 "
+                            + current.row().state());
+                }
+                StepResult.Moved moved = (StepResult.Moved) CommandStateMachine.apply(current.row(), new Step.Abandon());
+                return land(current, StoredState.HALTED, current.row().leaseToken(), moved);
+            });
+        } catch (HandlerFailedSignal failed) {
+            // 롤백되어 멈춘 그대로다. 받은 TB 결과가 없으므로 따로 기록할 것도 없다
+            if (failed.getCause() instanceof Error error) {
+                throw error;
+            }
+            return new WriteResult.HandlerFailed((RuntimeException) failed.getCause());
+        }
+    }
+
+    /**
      * 최종 쓰기. 핸들러가 던지면 그 트랜잭션은 롤백되어 결과 쓰기도 없던 일이 된다(G6). 그다음 새 트랜잭션에서
      * 받은 결과를 남기고 backoff 뒤 다시 잡히게 한다(§5.4, P2a-22).
      */
@@ -169,15 +206,23 @@ public final class CommandLifecycle implements LedgerRelay {
         if (!(CommandStateMachine.apply(current.row(), step) instanceof StepResult.Moved moved)) {
             return new WriteResult.Fenced();
         }
-        // 상태 기계가 이미 막았지만, 읽은 뒤 다른 워커가 바꿨을 수 있으므로 저장소에서 한 번 더 막는다(P2a-7)
-        boolean landed = store.compareAndSet(new RowChange(current.rowId(), StoredState.CLAIMED, step.token(),
+        return land(current, StoredState.CLAIMED, step.token(), moved);
+    }
+
+    /**
+     * 상태 기계가 계산한 행을 조건부로 쓰고, 최종 상태면 같은 트랜잭션에서 핸들러를 실행한다. 상태 기계가 이미
+     * 막았지만, 읽은 뒤 다른 워커가 바꿨을 수 있으므로 저장소에서 한 번 더 막는다(P2a-7).
+     */
+    private WriteResult land(CommandRecord current, StoredState expectedState, long expectedToken,
+            StepResult.Moved moved) {
+        boolean landed = store.compareAndSet(new RowChange(current.rowId(), expectedState, expectedToken,
                 moved.row(), stampFor(moved)));
         if (!landed) {
             return new WriteResult.Fenced();
         }
         if (moved.effects().contains(Transition.Effect.RUN_HANDLER)) {
             // 방금 쓴 행을 다시 읽어 완료 시각까지 담는다
-            CommandStatus outcome = statusOf(store.find(claimed.commandId()).orElseThrow());
+            CommandStatus outcome = statusOf(store.find(current.commandId()).orElseThrow());
             try {
                 handler.onCompleted(outcome);
             } catch (RuntimeException | Error e) {
@@ -249,6 +294,7 @@ public final class CommandLifecycle implements LedgerRelay {
                 ? row.resultCode().map(Rejection::of)
                 : Optional.empty();
         return new CommandStatus(record.commandId(), row.state().queryState(row.submitCount()), rejection,
+                row.skipReason(),
                 record.transferId(), row.submitCount(), record.acceptedAt(), record.completedAt());
     }
 }

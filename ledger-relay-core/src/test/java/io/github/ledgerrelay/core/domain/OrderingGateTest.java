@@ -263,18 +263,26 @@ class OrderingGateTest {
                 OPEN,   CLAIM_WITH_GATE_OPEN
                 SKIP,   CLAIM_WITH_GATE_OPEN
                 CLOSED, CLAIM_WITH_GATE_CLOSED
-                HALT,   CLAIM_WITH_GATE_CLOSED
+                HALT,   CLAIM_WITH_GATE_HALTED
                 """)
-        @DisplayName("전이표의 claim 사건이 된다 — 건너뛸 명령도 먼저 claim하고, 멈춘 명령은 그대로 둔다 (§5.2 → §4.3)")
+        @DisplayName("전이표의 claim 사건이 된다 — 건너뛸 명령도 먼저 claim하고, 멈출 명령은 멈춤 사건이 된다 (§5.2 → §4.3)")
         void becomesAClaimEvent(GateDecision decision, CommandEvent expected) {
-            assertThat(decision.claimEvent()).as("%s 결정의 claim 사건", decision).isEqualTo(expected);
+            // when
+            CommandEvent event = decision.claimEvent();
+
+            // then
+            assertThat(event).as("%s 결정의 claim 사건", decision).isEqualTo(expected);
         }
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(GateDecision.class)
         @DisplayName("멈춤(HALT)만 사람에게 알린다")
         void onlyHaltAlerts(GateDecision decision) {
-            assertThat(decision.alerts()).as("%s 결정의 알림 여부", decision).isEqualTo(decision == GateDecision.HALT);
+            // when
+            boolean alerts = decision.alerts();
+
+            // then
+            assertThat(alerts).as("%s 결정의 알림 여부", decision).isEqualTo(decision == GateDecision.HALT);
         }
     }
 

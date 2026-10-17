@@ -14,6 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ledgerrelay.core.LedgerResultCode;
+import io.github.ledgerrelay.core.SkipReason;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -48,14 +49,25 @@ class CommandStateMachineTest {
         }
 
         @ParameterizedTest(name = "게이트 {0}")
-        @EnumSource(value = GateDecision.class, names = {"CLOSED", "HALT"})
-        @DisplayName("게이트가 닫혔거나 멈췄으면 아무 일도 없다")
-        void aClosedOrHaltedGateLeavesTheRow(GateDecision gate) {
+        @EnumSource(value = GateDecision.class, names = "CLOSED")
+        @DisplayName("게이트가 닫혔으면 아무 일도 없다")
+        void aClosedGateLeavesTheRow(GateDecision gate) {
             // when
             StepResult result = CommandStateMachine.apply(CommandRow.accepted(), new Step.Claim(gate, false));
 
             // then
             assertThat(result).as("게이트 %s에서 claim한 결과", gate).isEqualTo(new StepResult.Unchanged());
+        }
+
+        @Test
+        @DisplayName("게이트가 멈췄으면 멈춤이 되고 토큰이 1 오른다 — TB에는 보내지 않는다")
+        void aHaltedGateHaltsTheCommand() {
+            // when
+            StepResult result = CommandStateMachine.apply(CommandRow.accepted(), new Step.Claim(GateDecision.HALT, false));
+
+            // then
+            assertMoved(result, new CommandRow(StoredState.HALTED, 1, 0, Optional.empty(), Optional.empty(), 0),
+                    INCREMENT_LEASE_TOKEN);
         }
 
         @Test
@@ -86,8 +98,8 @@ class CommandStateMachineTest {
         }
 
         @ParameterizedTest(name = "{0}")
-        @EnumSource(value = StoredState.class, names = {"APPLIED", "REJECTED", "CONFLICT", "SKIPPED"})
-        @DisplayName("끝난 명령을 claim하면 버그로 거부된다")
+        @EnumSource(value = StoredState.class, names = {"APPLIED", "REJECTED", "CONFLICT", "SKIPPED", "HALTED"})
+        @DisplayName("끝났거나 멈춘 명령을 claim하면 버그로 거부된다")
         void claimingAFinishedCommandIsABug(StoredState finished) {
             // given
             CommandRow done = new CommandRow(finished, 2, 1, Optional.empty(), Optional.empty(), 0);
@@ -157,14 +169,15 @@ class CommandStateMachineTest {
         }
 
         @Test
-        @DisplayName("건너뛰면 건너뜀이 되고, 결과 코드 없이 핸들러가 실행된다")
+        @DisplayName("건너뛰면 건너뜀이 되고, 결과 코드 없이 '예약 미적용' 사유로 핸들러가 실행된다")
         void skippingSkips() {
             // when
             StepResult result = CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.Skip(5));
 
             // then
             assertMoved(result,
-                    new CommandRow(StoredState.SKIPPED, 5, 0, Optional.empty(), Optional.empty(), 0),
+                    new CommandRow(StoredState.SKIPPED, 5, 0, Optional.empty(), Optional.empty(), 0,
+                            Optional.of(SkipReason.RESERVATION_NOT_APPLIED)),
                     RUN_HANDLER);
         }
 
@@ -303,6 +316,42 @@ class CommandStateMachineTest {
 
     @Nested
     @Order(5)
+    @DisplayName("멈춘 명령을 운영자가 포기하면 — §5.2 HALT")
+    class AbandoningAHaltedCommand {
+
+        static final CommandRow HALTED_WITH_TOKEN_1 =
+                new CommandRow(StoredState.HALTED, 1, 0, Optional.empty(), Optional.empty(), 0);
+
+        @Test
+        @DisplayName("건너뜀이 되고, '운영자 포기' 사유로 핸들러가 실행된다 — 토큰과 제출 횟수는 그대로다")
+        void abandoningSkipsIt() {
+            // when
+            StepResult result = CommandStateMachine.apply(HALTED_WITH_TOKEN_1, new Step.Abandon());
+
+            // then
+            assertMoved(result,
+                    new CommandRow(StoredState.SKIPPED, 1, 0, Optional.empty(), Optional.empty(), 0,
+                            Optional.of(SkipReason.ABANDONED_BY_OPERATOR)),
+                    RUN_HANDLER);
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = StoredState.class, names = {"PENDING", "CLAIMED", "APPLIED", "SKIPPED"})
+        @DisplayName("멈추지 않은 명령을 포기하면 버그로 거부된다 — 서비스가 먼저 막는다")
+        void abandoningAnythingElseIsABug(StoredState notHalted) {
+            // given
+            CommandRow row = new CommandRow(notHalted, 1, 0, Optional.empty(), Optional.empty(), 0);
+
+            // when
+            ThrowingCallable abandoning = () -> CommandStateMachine.apply(row, new Step.Abandon());
+
+            // then
+            assertBug(abandoning);
+        }
+    }
+
+    @Nested
+    @Order(6)
     @DisplayName("전이표와 견주면")
     class AgainstTheTable {
 

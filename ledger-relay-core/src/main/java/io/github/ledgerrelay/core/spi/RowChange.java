@@ -35,6 +35,10 @@ public record RowChange(long rowId, StoredState expectedState, long expectedToke
         record RetryAfter(Duration backoff) implements Stamp {
         }
 
+        /** 멈춤: 시각 컬럼은 바꾸지 않는다. */
+        record Halt() implements Stamp {
+        }
+
         /** 최종 상태: completed_at = now. */
         record Completion() implements Stamp {
         }

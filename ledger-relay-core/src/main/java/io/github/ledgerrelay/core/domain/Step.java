@@ -15,6 +15,10 @@ public sealed interface Step {
     record Claim(GateDecision gate, boolean leaseExpired) implements Step {
     }
 
+    /** 운영자가 멈춘(HALTED) 명령을 포기한다. 토큰을 내밀지 않으며, 서비스가 읽은 토큰으로 조건부로 쓴다. */
+    record Abandon() implements Step {
+    }
+
     /** claim 때 받은 토큰으로 하는 쓰기. jdbc에서는 {@code WHERE lease_token = ? AND state = 'CLAIMED'}다. */
     sealed interface Write extends Step {
         long token();

@@ -1,6 +1,7 @@
 package io.github.ledgerrelay.core.domain;
 
 import io.github.ledgerrelay.core.LedgerResultCode;
+import io.github.ledgerrelay.core.SkipReason;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -17,12 +18,20 @@ public record CommandRow(
         long submitCount,
         Optional<LedgerResultCode> knownResult,
         Optional<LedgerResultCode> resultCode,
-        int handlerFailures) {
+        int handlerFailures,
+        Optional<SkipReason> skipReason) {
 
     public CommandRow {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(knownResult, "knownResult");
         Objects.requireNonNull(resultCode, "resultCode");
+        Objects.requireNonNull(skipReason, "skipReason");
+    }
+
+    /** 건너뜀으로 끝나지 않은 행. */
+    public CommandRow(StoredState state, long leaseToken, long submitCount, Optional<LedgerResultCode> knownResult,
+            Optional<LedgerResultCode> resultCode, int handlerFailures) {
+        this(state, leaseToken, submitCount, knownResult, resultCode, handlerFailures, Optional.empty());
     }
 
     /** 막 접수된 행. */

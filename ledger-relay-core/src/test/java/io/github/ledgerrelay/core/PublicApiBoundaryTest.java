@@ -23,7 +23,8 @@ class PublicApiBoundaryTest {
             "LedgerResultCode",
             "Rejection",
             "ReservationNotFoundException",
-            "ResultCategory");
+            "ResultCategory",
+            "SkipReason");
 
     static final String PACKAGE = "io.github.ledgerrelay.core";
 

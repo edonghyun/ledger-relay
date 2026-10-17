@@ -16,7 +16,8 @@ public enum GateDecision {
         return switch (this) {
             // 건너뛸 명령도 먼저 claim한다. 건너뜀(RESERVATION_NOT_APPLIED)은 claim 뒤의 사건이다.
             case OPEN, SKIP -> CommandEvent.CLAIM_WITH_GATE_OPEN;
-            case CLOSED, HALT -> CommandEvent.CLAIM_WITH_GATE_CLOSED;
+            case CLOSED -> CommandEvent.CLAIM_WITH_GATE_CLOSED;
+            case HALT -> CommandEvent.CLAIM_WITH_GATE_HALTED;
         };
     }
 

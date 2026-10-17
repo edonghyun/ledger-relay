@@ -139,7 +139,7 @@ core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다
 | 쓰는 말 | 뜻 |
 |---|---|
 | `newTransfer("pay-1", "order-1", 1)`, `newReserve(…)`, `newPost("capture-1", "order-1", 2, "hold-1")` | (저장소 계약) 넣을 행. 이체 ID는 100+순번, 해시는 `hash-of-<id>` |
-| `inserted(row)` / `claimed(id, token)` / `finished(id, row)` / `released(id)` | (저장소 계약) **전제**: 행이 들어감 / 처리 중이 됨 / 끝남 / 되돌아감 |
+| `inserted(row)` / `claimed(id, token)` / `finished(id, row)` / `released(id)` / `halted(id)` | (저장소 계약) **전제**: 행이 들어감 / 처리 중이 됨 / 끝남 / 되돌아감 / 멈춤 |
 | `assertDue(ids…)` / `assertDueWithLimit(n, ids…)` / `assertNothingDue()` | (저장소 계약) claim 후보가 정확히 이것(접수 순서) / 없음 |
 | `transfer("pay-1", "order-1", 500)`, `reserve(…)`, `post("capture-1", "order-1", "hold-1")`, `voidOf(…)` | (서비스 계약) 명령. 키와 금액을 숨기지 않는다 |
 | `submit(command)` | (서비스 계약) 앱처럼 트랜잭션 안에서 접수한다 |

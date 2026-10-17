@@ -1,6 +1,7 @@
 package io.github.ledgerrelay.core.domain;
 
 import io.github.ledgerrelay.core.LedgerResultCode;
+import io.github.ledgerrelay.core.SkipReason;
 import java.util.Optional;
 
 /**
@@ -19,6 +20,7 @@ public final class CommandStateMachine {
         return switch (step) {
             case Step.Claim claim -> claim(row, claim);
             case Step.Write write -> write(row, write);
+            case Step.Abandon abandon -> follow(row, CommandEvent.ABANDONED_BY_OPERATOR, abandon);
         };
     }
 
@@ -27,7 +29,7 @@ public final class CommandStateMachine {
             case PENDING -> claim.gate().claimEvent();
             // 처리 중 명령은 lease가 끝났을 때만 다시 claim된다. 살아 있으면 표의 "불가" 칸으로 간다.
             case CLAIMED -> claim.leaseExpired() ? CommandEvent.LEASE_EXPIRED : CommandEvent.CLAIM_WITH_GATE_OPEN;
-            case APPLIED, REJECTED, CONFLICT, SKIPPED -> CommandEvent.CLAIM_WITH_GATE_OPEN;
+            case APPLIED, REJECTED, CONFLICT, SKIPPED, HALTED -> CommandEvent.CLAIM_WITH_GATE_OPEN;
         };
         return follow(row, event, claim);
     }
@@ -87,7 +89,12 @@ public final class CommandStateMachine {
         Optional<LedgerResultCode> resultCode = step instanceof Step.Complete complete
                 ? Optional.of(complete.code())
                 : row.resultCode();
-        return new CommandRow(transition.to(), token, submitCount, knownResult, resultCode, handlerFailures);
+        Optional<SkipReason> skipReason = switch (step) {
+            case Step.Skip skip -> Optional.of(SkipReason.RESERVATION_NOT_APPLIED);
+            case Step.Abandon abandon -> Optional.of(SkipReason.ABANDONED_BY_OPERATOR);
+            default -> row.skipReason();
+        };
+        return new CommandRow(transition.to(), token, submitCount, knownResult, resultCode, handlerFailures, skipReason);
     }
 
     private static IllegalStateException bug(String what) {

@@ -10,11 +10,13 @@ public enum StoredState {
     APPLIED,
     REJECTED,
     CONFLICT,
-    SKIPPED;
+    SKIPPED,
+    /** 정상 경로에서 나올 수 없는 입력이라 멈췄다(§5.2 HALT). 최종 상태가 아니므로 그 키는 막힌다. 운영자만 풀 수 있다. */
+    HALTED;
 
     /** 최종 상태는 다시 바뀌지 않는다(G5). */
     public boolean isFinal() {
-        return this != PENDING && this != CLAIMED;
+        return this == APPLIED || this == REJECTED || this == CONFLICT || this == SKIPPED;
     }
 
     /** TB 결과 분류(§4.4)를 받은 처리 중 명령이 끝나는 상태. */
@@ -37,6 +39,7 @@ public enum StoredState {
             case REJECTED -> CommandStatus.State.REJECTED;
             case CONFLICT -> CommandStatus.State.CONFLICT;
             case SKIPPED -> CommandStatus.State.SKIPPED;
+            case HALTED -> CommandStatus.State.HALTED;
         };
     }
 }

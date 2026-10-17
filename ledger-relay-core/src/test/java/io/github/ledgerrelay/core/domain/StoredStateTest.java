@@ -60,7 +60,7 @@ class StoredStateTest {
 
             // when
             ThrowingCallable makingTheQueryResult = () -> new CommandStatus("pay-1", endsIn,
-                    Optional.of(Rejection.of(code)), BigInteger.ONE, 1, at, Optional.of(at));
+                    Optional.of(Rejection.of(code)), Optional.empty(), BigInteger.ONE, 1, at, Optional.of(at));
 
             // then
             assertThatCode(makingTheQueryResult)
@@ -80,6 +80,7 @@ class StoredStateTest {
             REJECTED, 1, REJECTED
             CONFLICT, 1, CONFLICT
             SKIPPED,  0, SKIPPED
+            HALTED,   0, HALTED
             """;
 
     @Nested
