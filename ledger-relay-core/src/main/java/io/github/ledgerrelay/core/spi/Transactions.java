@@ -19,4 +19,11 @@ public interface Transactions {
      * 예외 타입은 구현이 정한다. jdbc는 Spring의 IllegalTransactionStateException을 던진다.
      */
     void requireActive();
+
+    /**
+     * 호출한 스레드에 활성 트랜잭션이 있는가. 워커 단계는 트랜잭션 밖에서만 불려야 하므로 서비스가 이것으로 막는다.
+     * 바깥 트랜잭션에 합류하면 핸들러 실패의 롤백이 바깥에 묻혀 G6이 깨지기 때문이다. jdbc는
+     * {@code TransactionSynchronizationManager.isActualTransactionActive()}다.
+     */
+    boolean isActive();
 }

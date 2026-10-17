@@ -690,6 +690,44 @@ public abstract class LedgerRelayContract {
         }
     }
 
+    @Nested
+    @Order(9)
+    @DisplayName("워커 단계를 앱 트랜잭션 안에서 부르면 — G6")
+    class WorkerStepsInsideATransaction {
+
+        @Test
+        @DisplayName("claim은 거부되고, 아무것도 잡히지 않는다")
+        void claimingInsideATransactionIsRefused() {
+            // given
+            submit(transfer("pay-1", "order-1", 500));
+
+            // when
+            ThrowingCallable claimingInside = () -> storage.transactions().inTransaction(() -> relay.claim(10, LEASE));
+
+            // then
+            assertRefusedAsAWorkerStepInsideATransaction(claimingInside);
+            assertClaimed(relay.claim(10, LEASE), "pay-1");
+        }
+
+        @Test
+        @DisplayName("결과 쓰기는 거부되고, 핸들러가 실패해도 결과가 반쯤 커밋되지 않는다")
+        void completingInsideATransactionIsRefused() {
+            // given
+            submit(transfer("pay-1", "order-1", 500));
+            ClaimedCommand pay1 = claimOnly("pay-1");
+            handler.failNextCalls(1);
+
+            // when
+            ThrowingCallable completingInside =
+                    () -> storage.transactions().inTransaction(() -> relay.complete(pay1, ExceedsCredits));
+
+            // then
+            assertRefusedAsAWorkerStepInsideATransaction(completingInside);
+            assertQueryState("pay-1", State.ACCEPTED);
+            assertHandlerNeverRanFor("pay-1");
+        }
+    }
+
     // ── 명령을 만드는 말: 금액과 키는 숨기지 않는다 ──────────────────────
 
     protected static LedgerCommand transfer(String commandId, String orderingKey, long amount) {
@@ -797,6 +835,13 @@ public abstract class LedgerRelayContract {
     protected void assertRejection(String commandId, ResultCategory category, LedgerResultCode code) {
         assertThat(status(commandId).rejection()).as("%s의 거절 사유", commandId)
                 .contains(new Rejection(category, code));
+    }
+
+    protected static void assertRefusedAsAWorkerStepInsideATransaction(ThrowingCallable step) {
+        assertThatThrownBy(step)
+                .as("워커 단계가 트랜잭션 안에서 거부되기를 기대했다")
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("트랜잭션 밖에서");
     }
 
     /** 앱 트랜잭션이 일부러 실패한다. */

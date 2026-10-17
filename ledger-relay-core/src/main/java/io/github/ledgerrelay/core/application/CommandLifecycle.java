@@ -83,6 +83,7 @@ public final class CommandLifecycle implements LedgerRelay {
 
     /** 게이트(§5.2)를 통과한 명령을 접수 순서로 limit개까지 잡는다. 트랜잭션 밖에서 부른다. */
     public ClaimBatch claim(int limit, Duration lease) {
+        requireOutsideTransaction();
         return transactions.inTransaction(() -> {
             List<ClaimedCommand> claimed = new ArrayList<>();
             List<String> halted = new ArrayList<>();
@@ -114,21 +115,25 @@ public final class CommandLifecycle implements LedgerRelay {
 
     /** TB에 보내기 직전에 제출을 기록한다. 트랜잭션 밖에서 부른다. */
     public WriteResult markSubmitted(ClaimedCommand claimed) {
+        requireOutsideTransaction();
         return transactions.inTransaction(() -> write(claimed, new Step.MarkSubmitted(claimed.leaseToken())));
     }
 
     /** TB 결과로 끝내고, 같은 트랜잭션에서 핸들러를 실행한다(G6). 트랜잭션 밖에서 부른다. */
     public WriteResult complete(ClaimedCommand claimed, LedgerResultCode code) {
+        requireOutsideTransaction();
         return finish(claimed, new Step.Complete(claimed.leaseToken(), code), Optional.of(code));
     }
 
     /** 참조한 예약이 적용되지 않아 건너뛰고, 같은 트랜잭션에서 핸들러를 실행한다. 트랜잭션 밖에서 부른다. */
     public WriteResult skip(ClaimedCommand claimed) {
+        requireOutsideTransaction();
         return finish(claimed, new Step.Skip(claimed.leaseToken()), Optional.empty());
     }
 
     /** 응답이 없거나 예외가 나서 되돌린다. backoff가 지나야 다시 잡힌다. 트랜잭션 밖에서 부른다. */
     public WriteResult release(ClaimedCommand claimed) {
+        requireOutsideTransaction();
         return transactions.inTransaction(() -> write(claimed, new Step.Release(claimed.leaseToken())));
     }
 
@@ -172,6 +177,17 @@ public final class CommandLifecycle implements LedgerRelay {
             }
         }
         return new WriteResult.Written();
+    }
+
+    /**
+     * 워커 단계는 단계마다 자기 트랜잭션을 연다. 바깥 트랜잭션에 합류하면 핸들러 실패의 롤백이 바깥에 묻혀,
+     * 결과만 커밋되고 핸들러 효과는 없는 상태가 될 수 있다(G6).
+     */
+    private void requireOutsideTransaction() {
+        if (transactions.isActive()) {
+            throw new IllegalStateException("버그: 워커 단계(claim, markSubmitted, complete, skip, release)는 "
+                    + "트랜잭션 밖에서 부른다. 바깥 트랜잭션에 합류하면 핸들러 실패가 롤백되지 않는다(G6)");
+        }
     }
 
     /** 전이가 함께 바꿀 시각 컬럼(§5.2~§5.4). */

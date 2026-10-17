@@ -62,6 +62,11 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
     }
 
     @Override
+    public boolean isActive() {
+        return lock.isHeldByCurrentThread();
+    }
+
+    @Override
     public long nextSeq(String orderingKey) {
         requireTransaction();
         return lastSeqByKey.merge(orderingKey, 1L, Long::sum);

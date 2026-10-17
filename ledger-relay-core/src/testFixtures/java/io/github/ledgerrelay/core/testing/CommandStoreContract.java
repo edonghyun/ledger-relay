@@ -181,6 +181,18 @@ public abstract class CommandStoreContract {
         void requiringATransactionInsideOnePasses() {
             inTx(() -> storage.transactions().requireActive());
         }
+
+        @Test
+        @DisplayName("안에서는 활성으로, 밖에서는 활성이 아닌 것으로 보인다")
+        void reportsWhetherATransactionIsActive() {
+            // when
+            boolean inside = inTx(() -> storage.transactions().isActive());
+            boolean outside = storage.transactions().isActive();
+
+            // then
+            assertThat(inside).as("트랜잭션 안에서 본 활성 여부").isTrue();
+            assertThat(outside).as("트랜잭션 밖에서 본 활성 여부").isFalse();
+        }
     }
 
     @Nested
