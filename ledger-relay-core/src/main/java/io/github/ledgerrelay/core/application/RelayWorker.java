@@ -7,7 +7,9 @@ import io.github.ledgerrelay.core.spi.WorkerEvents;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * 워커 한 바퀴(스펙 §5.3, 03a P3a-1·P3a-4). 스레드·주기·종료는 부르는 쪽(03b)이 맡는다. 여러 스레드가 같은 인스턴스의
@@ -61,14 +63,39 @@ public final class RelayWorker {
                 return new CycleReport(batch.claimed().size(), 0, completed, 0);
             }
             List<Submission> request = sending.stream().map(ClaimedCommand::submission).toList();
-            CompletableFuture<List<LedgerResultCode>> reply = ledger.submit(request);
-            // 보낸 몫의 슬롯은 요청이 실제로 끝날 때 돌아온다. timeout이 나도 요청은 TB 클라이언트 안에 남는다(§5.3-2)
             int sent = request.size();
+            CompletableFuture<List<LedgerResultCode>> reply;
+            try {
+                reply = ledger.submit(request);
+            } catch (RuntimeException e) {
+                events.submitFailed(sent, e);
+                return released(batch, sent, completed, sending);
+            }
+            // 보낸 몫의 슬롯은 요청이 실제로 끝날 때 돌아온다. timeout이 나도 요청은 TB 클라이언트 안에 남는다(§5.3-2)
             slots.giveBack(held - sent);
             held = 0;
             reply.whenComplete((results, failure) -> slots.giveBack(sent));
             events.submitted(sent);
-            List<LedgerResultCode> results = await(reply);
+            List<LedgerResultCode> results;
+            try {
+                results = reply.get(settings.submitTimeout().toNanos(), TimeUnit.NANOSECONDS);
+            } catch (TimeoutException e) {
+                // 늦게 오는 응답은 무시한다. future에는 슬롯 반납만 걸려 있다(P3a-5)
+                events.submitTimedOut(sent);
+                return released(batch, sent, completed, sending);
+            } catch (ExecutionException e) {
+                events.submitFailed(sent, e.getCause());
+                return released(batch, sent, completed, sending);
+            } catch (InterruptedException e) {
+                CycleReport report = released(batch, sent, completed, sending);
+                Thread.currentThread().interrupt();
+                return report;
+            }
+            if (results.size() != sent) {
+                // 결과를 순서로 짝지으므로 하나만 밀려도 남의 결과로 끝난다. 쓰지 않는다(P3a-6)
+                events.malformedReply(sent, results.size());
+                return released(batch, sent, completed, sending);
+            }
             for (int i = 0; i < sending.size(); i++) {
                 completed += written(sending.get(i), lifecycle.complete(sending.get(i), results.get(i)));
             }
@@ -78,12 +105,13 @@ public final class RelayWorker {
         }
     }
 
-    private List<LedgerResultCode> await(CompletableFuture<List<LedgerResultCode>> reply) {
-        try {
-            return reply.get(settings.submitTimeout().toNanos(), TimeUnit.NANOSECONDS);
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
+    /** 보낸 명령을 모두 되돌린다. backoff가 지나면 같은 이체 ID로 다시 잡힌다(§5.3-4, D7). */
+    private CycleReport released(ClaimBatch batch, int sent, int completed, List<ClaimedCommand> sending) {
+        int released = 0;
+        for (ClaimedCommand claimed : sending) {
+            released += written(claimed, lifecycle.release(claimed));
         }
+        return new CycleReport(batch.claimed().size(), sent, completed, released);
     }
 
     /** @return 반영됐으면 1. 0행이나 핸들러 실패는 알리고 0이다 */

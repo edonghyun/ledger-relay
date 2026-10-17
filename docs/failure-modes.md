@@ -154,6 +154,20 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: `LedgerCommand` 생성자의 `requireWellFormed`가 세 문자열 필드를 검사하고 `InvalidCommandException`으로 거부한다. 같은 판정을 공개 정적 메서드 `LedgerCommand.isAcceptableId`로 내고, 서비스의 `status`는 접수될 수 없는 id면 DB에 묻지 않고 "없음"을, `abandonHalted`는 "접수한 적 없는 명령"을 돌려준다. 판단이 core에 있으므로 저장소는 이런 값을 받지 않는다.
 - **확인**: 검사를 넣기 전에 생성자 세 행이 "예외가 없다"로, 계약 세 테스트가 PG 위에서 6건(SQL 오류, `pay-?`의 상태, 다른 명령의 HALTED 검사) 실패했다.
 
+### F21. submit-timeout 뒤 슬롯을 바로 돌려주면 TB가 멈춘 동안 요청이 끝없이 쌓인다 (03a)
+
+- **깨지는 것**: TB Java 클라이언트에는 timeout이 없다. 워커가 submit-timeout으로 기다림을 끊어도 요청은 클라이언트 안에 남아 TB가 돌아올 때까지 다시 보내진다. 그때 in-flight 슬롯을 돌려주면 워커는 다음 바퀴에 또 claim하고 또 보낸다. TB가 멈춘 동안 클라이언트 안에 요청이 끝없이 쌓이고, TB가 돌아오는 순간 한꺼번에 몰린다.
+- **재현**: `RelayWorkerTest` › TB가 submit-timeout 안에 답하지 않으면 › `aTimedOutRequestKeepsItsSlotsUntilItEnds`. 슬롯 4에 이체 둘을 보내 timeout이 나면 남은 슬롯이 2여야 하고, 붙잡힌 응답이 끝난 뒤에야 4가 된다. 슬롯을 claim 전에 잡는 것은 `noSlotsMeansNoClaim`이 고정한다. 슬롯이 없으면 claim하지 않으므로 명령은 lease 없이 접수됨으로 남는다.
+- **구조**: `RelayWorker`는 claim 전에 batch-size만큼 슬롯을 잡는다(P3a-2). 보내지 않는 몫은 바로 돌려주고, 보낸 몫은 요청 future의 `whenComplete`에서만 돌려준다.
+- **확인**: 대조군 두 개. 반납을 `whenComplete`에서 "보낸 직후"로 옮기자 `aTimedOutRequestKeepsItsSlotsUntilItEnds`와 `unusedSlotsAreGivenBackAtOnce`가 실패했다. claim 전 슬롯 확인을 끄자 `noSlotsMeansNoClaim`이 실패했다.
+
+### F22. 결과 개수가 요청과 다르면 남의 결과로 끝난다 (03a)
+
+- **깨지는 것**: 워커는 TB 결과를 요청 순서로 명령과 짝짓는다. 결과가 하나 모자라거나 남으면 뒤의 명령들이 앞 명령의 결과를 받는다. 성공한 이체가 거절됨으로 끝나거나 그 반대가 된다. 핸들러는 틀린 결과로 업무를 처리한다.
+- **재현**: `RelayWorkerTest` › TB 요청이 예외로 끝나거나 결과 개수가 틀리면 › `aReplyWithTheWrongCountWritesNothing`. 이체 둘에 결과 하나가 오면 아무것도 쓰지 않고 둘 다 되돌리며, `malformedReply:2:1`을 알린다.
+- **구조**: `RelayWorker`가 결과 개수를 요청 개수와 비교한다(P3a-6). 다르면 모두 `release`한다. 다시 보낼 때는 같은 이체 ID이므로 TB가 이미 기록한 것은 `exists`로 돌아온다. 어댑터는 개수를 검사하지 않는다. 판단은 core에 있다.
+- **확인**: 처리를 넣기 전에는 `results.get(i)`가 범위를 벗어나 바퀴가 예외로 끝났다(테스트 실패).
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |

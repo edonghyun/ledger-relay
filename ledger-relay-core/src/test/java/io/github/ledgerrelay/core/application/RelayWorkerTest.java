@@ -192,6 +192,162 @@ class RelayWorkerTest {
         }
     }
 
+    @Nested
+    @Order(3)
+    @DisplayName("TB가 submit-timeout 안에 답하지 않으면")
+    class WhenTheLedgerDoesNotAnswer {
+
+        @BeforeEach
+        void givenRepliesAreHeld() {
+            fake.holdReplies();
+        }
+
+        @Test
+        @DisplayName("명령을 되돌려 나중에 다시 보내게 하고, 조회는 처리 중으로 남는다")
+        void theCommandsAreReleasedForALaterRetry() {
+            // given
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            CycleReport report = worker.runOnce();
+
+            // then
+            assertThat(report.released()).as("되돌린 명령 수").isEqualTo(1);
+            assertState("pay-1", State.IN_PROGRESS);
+            assertThat(events.events()).as("워커 이벤트").contains("submitTimedOut:1");
+        }
+
+        @Test
+        @DisplayName("보낸 이체의 슬롯은 요청이 실제로 끝날 때까지 돌아오지 않는다 — TB 클라이언트 안에 요청이 남아 있다")
+        void aTimedOutRequestKeepsItsSlotsUntilItEnds() {
+            // given: 슬롯 4, batch 4인 워커에 다른 키의 이체 둘
+            InFlightLimit four = new InFlightLimit(4);
+            RelayWorker small = new RelayWorker(relay, fake, four,
+                    new WorkerSettings(4, 4, Duration.ofSeconds(30), Duration.ofMillis(200), Duration.ofMillis(100)),
+                    events);
+            accepted(transfer("pay-1", "order-1"));
+            accepted(transfer("pay-2", "order-2"));
+            small.runOnce();
+            assertThat(four.available()).as("timeout 직후 남은 슬롯").isEqualTo(2);
+
+            // when
+            fake.releaseHeldReplies();
+
+            // then
+            assertThat(four.available()).as("요청이 끝난 뒤 남은 슬롯").isEqualTo(4);
+        }
+
+        @Test
+        @DisplayName("timeout 뒤에 늦게 온 응답은 아무것도 쓰지 않는다 — 핸들러도 실행되지 않는다")
+        void aLateReplyAfterTheTimeoutWritesNothing() {
+            // given
+            accepted(transfer("pay-1", "order-1"));
+            worker.runOnce();
+
+            // when
+            fake.releaseHeldReplies();
+
+            // then
+            assertThat(handler.completedFor("pay-1")).as("pay-1의 핸들러 실행").isEmpty();
+            assertState("pay-1", State.IN_PROGRESS);
+        }
+
+        @Test
+        @DisplayName("backoff 뒤 다시 보낼 때도 같은 이체 ID로 보내고, 그 결과로 끝난다 (D7)")
+        void theRetryUsesTheSameTransferId() {
+            // given: 첫 요청이 timeout으로 되돌려졌고, 이제 TB가 답한다
+            BigInteger transferId = accepted(transfer("pay-1", "order-1")).transferId();
+            worker.runOnce();
+            fake.releaseHeldReplies();
+            storage.elapse(BACKOFF_MAX);
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertRequests(List.of(transferId), List.of(transferId));
+            assertState("pay-1", State.APPLIED);
+        }
+    }
+
+    @Nested
+    @Order(4)
+    @DisplayName("TB 요청이 예외로 끝나거나 결과 개수가 틀리면")
+    class WhenTheRequestFailsOrTheReplyIsMalformed {
+
+        @Test
+        @DisplayName("예외로 끝나면 명령을 되돌리고, 슬롯은 모두 돌아온다")
+        void aFailedRequestReleasesItsCommands() {
+            // given
+            fake.failNext(new IllegalStateException("연결이 끊겼다"));
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            CycleReport report = worker.runOnce();
+
+            // then
+            assertThat(report.released()).as("되돌린 명령 수").isEqualTo(1);
+            assertThat(events.events()).as("워커 이벤트").contains("submitFailed:1");
+            assertThat(slots.available()).as("남은 슬롯").isEqualTo(SETTINGS.maxInFlight());
+        }
+
+        @Test
+        @DisplayName("결과 개수가 요청과 다르면 아무것도 쓰지 않고 모두 되돌린다 — 순서로 짝지으므로 남의 결과로 끝나지 않게")
+        void aReplyWithTheWrongCountWritesNothing() {
+            // given
+            fake.replyWithCount(1);
+            accepted(transfer("pay-1", "order-1"));
+            accepted(transfer("pay-2", "order-2"));
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertThat(handler.completedFor("pay-1")).as("pay-1의 핸들러 실행").isEmpty();
+            assertState("pay-1", State.IN_PROGRESS);
+            assertState("pay-2", State.IN_PROGRESS);
+            assertThat(events.events()).as("워커 이벤트").contains("malformedReply:2:1");
+        }
+    }
+
+    @Nested
+    @Order(5)
+    @DisplayName("in-flight 슬롯이 모자라면")
+    class WhenSlotsRunOut {
+
+        @Test
+        @DisplayName("claim하지 않고 쉰다 — 명령은 접수됨 그대로이고 lease도 잡히지 않는다 (배압)")
+        void noSlotsMeansNoClaim() {
+            // given: 다른 쪽이 슬롯을 모두 쥐었다
+            slots.tryTake(SETTINGS.maxInFlight(), Duration.ZERO);
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            CycleReport report = worker.runOnce();
+
+            // then
+            assertThat(report).as("한 바퀴의 리포트").isEqualTo(CycleReport.IDLE);
+            assertState("pay-1", State.ACCEPTED);
+            assertThat(storage.transactions().inTransaction(() -> storage.store().find("pay-1")).orElseThrow()
+                    .row().leaseToken()).as("pay-1의 lease 토큰").isZero();
+            assertThat(events.events()).as("워커 이벤트").contains("noSlots");
+        }
+
+        @Test
+        @DisplayName("보내지 않은 몫의 슬롯은 바로 돌아온다 — 명령 하나면 batch 128 중 127이 돌아온다")
+        void unusedSlotsAreGivenBackAtOnce() {
+            // given
+            fake.holdReplies();
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertThat(slots.available()).as("붙잡힌 요청 하나가 쥔 뒤 남은 슬롯").isEqualTo(SETTINGS.maxInFlight() - 1);
+        }
+    }
+
     // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
 
     private CommandReceipt accepted(LedgerCommand command) {
