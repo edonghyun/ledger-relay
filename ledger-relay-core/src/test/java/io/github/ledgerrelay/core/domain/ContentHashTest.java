@@ -1,11 +1,15 @@
 package io.github.ledgerrelay.core.domain;
 
 import static io.github.ledgerrelay.core.LedgerCommand.AMOUNT_MAX;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.params.provider.Arguments.argumentSet;
 
 import io.github.ledgerrelay.core.LedgerCommand;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
@@ -79,47 +83,47 @@ class ContentHashTest {
         @ParameterizedTest(name = "{argumentSetName}")
         @MethodSource("oneFieldApart")
         @DisplayName("해시가 다르다")
-        void hashDiffers(LedgerCommand one, LedgerCommand other) {
+        void hashDiffers(LedgerCommand one, LedgerCommand other, String field) {
             assertDifferentHash(one, other);
         }
 
         static Stream<Arguments> oneFieldApart() {
             return Stream.of(
                     argumentSet("kind가 다르면 (이체 vs 예약)",
-                            aTransfer("c").build(), aReserveLikeTheTransfer("c").build()),
+                            aTransfer("c").build(), aReserveLikeTheTransfer("c").build(), "kind"),
                     argumentSet("orderingKey가 다르면",
-                            aTransfer("c").build(), aTransfer("c").orderingKey("order-43").build()),
+                            aTransfer("c").build(), aTransfer("c").orderingKey("order-43").build(), "orderingKey"),
                     argumentSet("보내는 계좌가 다르면",
-                            aTransfer("c").build(), aTransfer("c").debit(1003).build()),
+                            aTransfer("c").build(), aTransfer("c").debit(1003).build(), "debitAccountId"),
                     argumentSet("받는 계좌가 다르면",
-                            aTransfer("c").build(), aTransfer("c").credit(2003).build()),
+                            aTransfer("c").build(), aTransfer("c").credit(2003).build(), "creditAccountId"),
                     argumentSet("금액이 다르면",
-                            aTransfer("c").build(), aTransfer("c").amount(501).build()),
+                            aTransfer("c").build(), aTransfer("c").amount(501).build(), "amount"),
                     argumentSet("ledger가 다르면",
-                            aTransfer("c").build(), aTransfer("c").ledger(2).build()),
+                            aTransfer("c").build(), aTransfer("c").ledger(2).build(), "ledger"),
                     argumentSet("code가 다르면",
-                            aTransfer("c").build(), aTransfer("c").code(11).build()),
+                            aTransfer("c").build(), aTransfer("c").code(11).build(), "code"),
                     argumentSet("code가 다르면 (10 vs 266: 하위 8비트가 같은 값)",
-                            aTransfer("c").build(), aTransfer("c").code(266).build()),
+                            aTransfer("c").build(), aTransfer("c").code(266).build(), "code"),
                     argumentSet("timeoutSeconds가 다르면",
                             aReserveLikeTheTransfer("c").timeoutSeconds(30).build(),
-                            aReserveLikeTheTransfer("c").timeoutSeconds(31).build()),
+                            aReserveLikeTheTransfer("c").timeoutSeconds(31).build(), "timeoutSeconds"),
                     argumentSet("reservation이 다르면",
-                            aPost().build(), aPost().reservation("hold-2").build()),
+                            aPost().build(), aPost().reservation("hold-2").build(), "reservationCommandId"),
                     argumentSet("user_data_64가 다르면",
-                            aTransfer("c").build(), aTransfer("c").userData64(7).build()),
+                            aTransfer("c").build(), aTransfer("c").userData64(7).build(), "userData64"),
                     argumentSet("user_data_32가 다르면",
-                            aTransfer("c").build(), aTransfer("c").userData32(7).build()));
+                            aTransfer("c").build(), aTransfer("c").userData32(7).build(), "userData32"));
         }
 
         @Test
         @DisplayName("위 표는 해시 필드를 하나도 빠뜨리지 않는다")
         void tableCoversEveryHashedField() {
-            // 위 표의 행 이름 앞부분(필드)과 HASHED_FIELDS가 1:1로 대응하는지 사람이 읽기 쉽게 명시한다.
-            List<String> coveredByTheTable = List.of("kind", "orderingKey", "debitAccountId", "creditAccountId",
-                    "amount", "ledger", "code", "timeoutSeconds", "reservationCommandId", "userData64", "userData32");
+            // given: 표의 행마다 셋째 칸이 그 행이 바꾼 필드다
+            List<Object> coveredByTheTable = oneFieldApart().map(row -> row.get()[2]).toList();
 
-            assertThat(ContentHash.HASHED_FIELDS).containsExactlyInAnyOrderElementsOf(coveredByTheTable);
+            // then
+            assertThat(coveredByTheTable).as("표가 바꿔 보는 필드").containsAll(ContentHash.HASHED_FIELDS);
         }
     }
 
@@ -139,54 +143,119 @@ class ContentHashTest {
         }
 
         @Test
-        @DisplayName("user_data는 부호 없는 정수로 해시한다: -1은 2^64-1과 2^32-1로 읽힌다")
+        @DisplayName("user_data는 부호 없는 정수로 적는다: -1은 2^64-1과 2^32-1로 읽힌다")
         void userDataIsHashedUnsigned() {
             // when
-            String hash = ContentHash.of(aTransfer("pay-1").userData64(-1L).userData32(-1).build());
+            LedgerCommand command = aTransfer("pay-1").userData64(-1L).userData32(-1).build();
 
             // then
-            assertPinnedHash(hash, "bbda13fdbd0aec09cb1ae90ab5373ec19c10aced23daabdd833020da9c1d51e8");
+            assertEncodedAs(command, """
+                    v1
+                    kind=8:transfer
+                    orderingKey=8:order-42
+                    debitAccountId=4:1001
+                    creditAccountId=4:2002
+                    amount=3:500
+                    ledger=1:1
+                    code=2:10
+                    timeoutSeconds=1:0
+                    reservationCommandId=0:
+                    userData64=20:18446744073709551615
+                    userData32=10:4294967295
+                    """);
         }
 
         @Test
-        @DisplayName("한글 순서 키는 UTF-8 바이트 길이로 인코딩한다: \"주문-42\"는 10바이트다")
+        @DisplayName("한글 순서 키는 UTF-8 바이트 길이로 적는다: \"주문-42\"는 9바이트다(한글 두 글자 3바이트씩 + 3)")
         void nonAsciiValuesUseUtf8ByteLength() {
             // when
-            String hash = ContentHash.of(aTransfer("pay-1").orderingKey("주문-42").build());
+            LedgerCommand command = aTransfer("pay-1").orderingKey("주문-42").build();
 
             // then
-            assertPinnedHash(hash, "41af1a6cd0a1f072ae912dd5b1f5e53cf38dfa50931d2af9c19ce9af4ba4e424");
+            assertEncodedAs(command, """
+                    v1
+                    kind=8:transfer
+                    orderingKey=9:주문-42
+                    debitAccountId=4:1001
+                    creditAccountId=4:2002
+                    amount=3:500
+                    ledger=1:1
+                    code=2:10
+                    timeoutSeconds=1:0
+                    reservationCommandId=0:
+                    userData64=1:0
+                    userData32=1:0
+                    """);
         }
 
         @Test
-        @DisplayName("금액을 생략한 확정(hold-1 전액)의 해시는 b7e73277…다 — 계좌 0, AMOUNT_MAX 39자리, reservation이 들어가는 경로")
+        @DisplayName("금액을 생략한 확정(hold-1 전액)은 계좌 0, AMOUNT_MAX 39자리, reservation을 적는다")
         void knownVectorForAFullPost() {
             // when
-            String hash = ContentHash.of(aPost().build());
+            LedgerCommand command = aPost().build();
 
             // then
-            assertPinnedHash(hash, "b7e732771a199173974ab911aa4e0ba28bc7de62ec6c39ef5fbbef97c957c476");
+            assertEncodedAs(command, """
+                    v1
+                    kind=4:post
+                    orderingKey=8:order-42
+                    debitAccountId=1:0
+                    creditAccountId=1:0
+                    amount=39:340282366920938463463374607431768211455
+                    ledger=1:0
+                    code=1:0
+                    timeoutSeconds=1:0
+                    reservationCommandId=6:hold-1
+                    userData64=1:0
+                    userData32=1:0
+                    """);
         }
 
         @Test
-        @DisplayName("해제(hold-1)의 해시는 6489e328…다 — kind \"void\"를 로캘과 무관하게 소문자로 쓴다")
+        @DisplayName("해제(hold-1)는 kind \"void\"를 로캘과 무관하게 소문자로 적는다")
         void knownVectorForAVoid() {
             // when
-            String hash = ContentHash.of(LedgerCommand.voidReservation("release-1").orderingKey("order-42")
-                    .reservation("hold-1").build());
+            LedgerCommand command = LedgerCommand.voidReservation("release-1").orderingKey("order-42")
+                    .reservation("hold-1").build();
 
             // then
-            assertPinnedHash(hash, "6489e32839398c0782aab2f1698f09b1cbe1e5fcbb58e2cbb7f9fe7a73176d60");
+            assertEncodedAs(command, """
+                    v1
+                    kind=4:void
+                    orderingKey=8:order-42
+                    debitAccountId=1:0
+                    creditAccountId=1:0
+                    amount=1:0
+                    ledger=1:0
+                    code=1:0
+                    timeoutSeconds=1:0
+                    reservationCommandId=6:hold-1
+                    userData64=1:0
+                    userData32=1:0
+                    """);
         }
 
         @Test
-        @DisplayName("만료 2^32-1초 예약의 해시는 cddde740…다 — timeout을 int로 자르지 않는다")
+        @DisplayName("만료 2^32-1초 예약은 timeout을 int로 자르지 않고 10자리로 적는다")
         void knownVectorForTheLongestReserveTimeout() {
             // when
-            String hash = ContentHash.of(aReserveLikeTheTransfer("hold-1").timeoutSeconds(4_294_967_295L).build());
+            LedgerCommand command = aReserveLikeTheTransfer("hold-1").timeoutSeconds(4_294_967_295L).build();
 
             // then
-            assertPinnedHash(hash, "cddde740f9d46225d1189f68c751a2e46a69640d92bff9dfbd63f1eba4f9bd63");
+            assertEncodedAs(command, """
+                    v1
+                    kind=7:reserve
+                    orderingKey=8:order-42
+                    debitAccountId=4:1001
+                    creditAccountId=4:2002
+                    amount=3:500
+                    ledger=1:1
+                    code=2:10
+                    timeoutSeconds=10:4294967295
+                    reservationCommandId=0:
+                    userData64=1:0
+                    userData32=1:0
+                    """);
         }
 
         @Test
@@ -220,6 +289,22 @@ class ContentHashTest {
     /** 기준 확정: hold-1 전액 확정. */
     private static LedgerCommand.Builder aPost() {
         return LedgerCommand.post("capture-1").orderingKey("order-42").reservation("hold-1");
+    }
+
+    /**
+     * 손으로 쓴 v1 정규 텍스트의 SHA-256과 같은지 본다. 기대값은 텍스트이므로, 실패하면 어느 줄이 바뀌었는지 독자가 직접
+     * 읽을 수 있다. 텍스트의 마지막 줄바꿈이 인코딩 끝의 '\n'이다.
+     */
+    private static void assertEncodedAs(LedgerCommand command, String canonicalText) {
+        assertPinnedHash(ContentHash.of(command), sha256Hex(canonicalText));
+    }
+
+    private static String sha256Hex(String text) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     /** 고정 해시는 손으로 계산한 값이다. 다르다면 기대값을 고치지 말고 인코딩이 왜 바뀌었는지 본다. */
