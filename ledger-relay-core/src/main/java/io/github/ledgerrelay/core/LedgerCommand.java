@@ -10,6 +10,9 @@ import java.util.Optional;
  * <p>값은 정규화된 상태로 담는다(§5.1). 생략한 선택값은 명시적 기본값이 된다. post·void는 계좌·ledger·code를
  * 예약에서 물려받으므로 0이다. 금액을 생략한 post는 {@link #AMOUNT_MAX}(전액 확정)다. 규칙을 어기면
  * {@link InvalidCommandException}을 던진다. 빌더를 거치지 않고 생성자를 직접 불러도 같은 검증을 받는다.
+ *
+ * <p>전액 확정은 금액을 생략한다(AMOUNT_MAX). TB는 실제 확정 금액을 저장하며, 같은 본문으로 다시 보내면 {@code exists}다.
+ * 해제도 같다. post·void의 user_data_64·32는 0이면 예약의 값을 따른다(TB 0.17.9, {@code ReservationSemanticsTest}).
  */
 public record LedgerCommand(
         String commandId,
