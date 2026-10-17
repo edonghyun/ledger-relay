@@ -203,10 +203,14 @@ class RelayOnTigerBeetleTest {
                 worker.runOnce();
                 assertState("pay-1", State.IN_PROGRESS);
 
-                // when: 연결을 복구하고 backoff가 지난 뒤 다시 돈다
+                // when: 연결을 복구하고, 적용될 때까지 backoff를 지나며 다시 돈다. TB 클라이언트가 다시 붙고 끊기기 전의
+                // 요청을 먼저 보내는 데 걸리는 시간은 정해져 있지 않아, submit-timeout 한 번에 기대지 않는다
                 proxied.restoreConnection();
-                storage.elapse(BACKOFF_MAX);
-                worker.runOnce();
+                long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+                do {
+                    storage.elapse(BACKOFF_MAX);
+                    worker.runOnce();
+                } while (relay.status("pay-1").orElseThrow().state() != State.APPLIED && System.nanoTime() < deadline);
 
                 // then
                 assertState("pay-1", State.APPLIED);
