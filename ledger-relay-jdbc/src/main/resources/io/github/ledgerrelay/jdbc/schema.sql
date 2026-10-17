@@ -1,21 +1,23 @@
 -- ledger-relay 스키마(스펙 §5.6). 앱의 마이그레이션 도구(Flyway, Liquibase 등)가 적용한다. 라이브러리는 자동 적용하지 않는다.
 -- 부호 없는 값(P2b-5): u128은 numeric(39,0), u64는 numeric(20,0), u32는 bigint, u16은 integer. 범위는 CHECK가 막는다.
 -- 열거값(P2b-6): state·kind·skip_reason은 Java 상수 이름, known_result·result_code는 결과 코드의 저장 이름(wireName).
+-- ID(command_id, ordering_key, reservation_command_id)는 바이트로 비교하는 불투명 값이라 COLLATE "C"다. OS collation이 바뀌어도
+-- 유일 인덱스가 어긋나지 않는다(F31). 순서 키 행은 지우지 않는다: 지우면 경쟁 중에 순번이 1로 돌아간다(02d P2d-11).
 
 -- 순서 키마다 다음에 낼 순번. 접수가 이 행을 잠그고 커밋까지 놓지 않으므로 seq 순서가 커밋 순서와 같다(R12, P2b-8).
 CREATE TABLE ledger_ordering_key (
-    ordering_key text PRIMARY KEY,
+    ordering_key text COLLATE "C" PRIMARY KEY,
     next_seq     bigint NOT NULL CHECK (next_seq >= 1)
 );
 
 CREATE TABLE ledger_command (
     id                     bigserial PRIMARY KEY,
-    command_id             text NOT NULL UNIQUE,
+    command_id             text COLLATE "C" NOT NULL UNIQUE,
     transfer_id            numeric(39,0) NOT NULL CHECK (transfer_id BETWEEN 0 AND 340282366920938463463374607431768211455),
-    ordering_key           text NOT NULL,
+    ordering_key           text COLLATE "C" NOT NULL,
     seq                    bigint NOT NULL,
     kind                   text NOT NULL CHECK (kind IN ('TRANSFER','RESERVE','POST','VOID')),
-    reservation_command_id text,
+    reservation_command_id text COLLATE "C",
     pending_transfer_id    numeric(39,0) CHECK (pending_transfer_id BETWEEN 0 AND 340282366920938463463374607431768211455),
     debit_account_id       numeric(39,0) NOT NULL CHECK (debit_account_id BETWEEN 0 AND 340282366920938463463374607431768211455),
     credit_account_id      numeric(39,0) NOT NULL CHECK (credit_account_id BETWEEN 0 AND 340282366920938463463374607431768211455),
@@ -42,7 +44,15 @@ CREATE TABLE ledger_command (
     accepted_at            timestamptz NOT NULL DEFAULT now(),
     completed_at           timestamptz,
     UNIQUE (ordering_key, seq),
-    CHECK ((skip_reason IS NOT NULL) = (state = 'SKIPPED'))
+    -- 이체 ID가 겹치면 TB의 exists가 남의 명령을 적용됨으로 만든다(F31)
+    CONSTRAINT ledger_command_transfer_id_key UNIQUE (transfer_id),
+    CONSTRAINT ledger_command_seq_check CHECK (seq >= 1),
+    CONSTRAINT ledger_command_skipped_reason_check CHECK ((skip_reason IS NOT NULL) = (state = 'SKIPPED')),
+    -- post·void만 예약을 참조하고, 참조하면 예약의 이체 ID도 있다(F29: 이런 행이 claim을 멈추지 않게 애초에 막는다)
+    CONSTRAINT ledger_command_reference_check CHECK (
+        (kind IN ('POST','VOID')) = (reservation_command_id IS NOT NULL AND pending_transfer_id IS NOT NULL)),
+    -- 처리 중인데 lease 만료 시각이 없으면 영원히 다시 잡히지 않는다
+    CONSTRAINT ledger_command_claimed_lease_check CHECK (state <> 'CLAIMED' OR lease_expires_at IS NOT NULL)
 );
 
 -- 미완료 명령의 키별 맨 앞 판정(§5.2, R7). HALTED도 키를 막으므로 넣는다(F9).

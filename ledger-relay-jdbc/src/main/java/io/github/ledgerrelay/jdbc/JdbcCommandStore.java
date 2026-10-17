@@ -27,6 +27,17 @@ public final class JdbcCommandStore implements CommandStore {
         this.sql = JdbcClient.create(dataSource);
     }
 
+    /**
+     * 읽는 컬럼. {@code SELECT c.*}를 쓰지 않는다. 운영 중 {@code ADD COLUMN} 마이그레이션 뒤 서버 준비 문장이
+     * "cached plan must not change result type"(0A000)으로 실패하고, 앱 트랜잭션 안이면 그 트랜잭션 전체가 중단된다(F31).
+     */
+    private static final String COLUMNS = """
+            c.id, c.command_id, c.transfer_id, c.ordering_key, c.seq, c.kind, c.reservation_command_id,
+            c.pending_transfer_id, c.debit_account_id, c.credit_account_id, c.amount, c.ledger, c.code,
+            c.timeout_seconds, c.user_data_64, c.user_data_32, c.content_hash, c.state, c.lease_token,
+            c.submit_count, c.known_result, c.result_code, c.handler_failures, c.skip_reason, c.accepted_at,
+            c.completed_at""";
+
     /** 이 행을 지금 트랜잭션이 넣었는가(P2b-2). 아직 쓰기를 하지 않은 트랜잭션은 ID가 없으므로 false다. */
     private static final String ACCEPTED_HERE =
             "coalesce(c.accepted_xact = pg_current_xact_id_if_assigned(), false) AS accepted_in_this_transaction";
@@ -65,7 +76,7 @@ public final class JdbcCommandStore implements CommandStore {
 
     @Override
     public Optional<CommandRecord> find(String commandId) {
-        return sql.sql("SELECT c.*, " + ACCEPTED_HERE + " FROM ledger_command c WHERE c.command_id = :id")
+        return sql.sql("SELECT " + COLUMNS + ", " + ACCEPTED_HERE + " FROM ledger_command c WHERE c.command_id = :id")
                 .param("id", commandId)
                 .query((rs, rowNum) -> CommandRows.read(rs))
                 .optional();
@@ -73,7 +84,7 @@ public final class JdbcCommandStore implements CommandStore {
 
     /** {@link #lockDue}의 질의. 실행 계획 테스트가 같은 질의를 본다. */
     static final String LOCK_DUE = """
-                SELECT c.*, %s,
+                SELECT %s, %s,
                        r.command_id AS r_command_id, r.seq AS r_seq, r.state AS r_state
                 FROM ledger_command c
                 LEFT JOIN ledger_command r ON r.command_id = c.reservation_command_id
@@ -85,7 +96,7 @@ public final class JdbcCommandStore implements CommandStore {
                 ORDER BY c.id
                 LIMIT :limit
                 FOR UPDATE OF c SKIP LOCKED
-            """.formatted(ACCEPTED_HERE);
+            """.formatted(COLUMNS, ACCEPTED_HERE);
 
     /**
      * claim 후보를 잠그고 읽는다(P2b-10). 후보 행만 {@code FOR UPDATE OF c SKIP LOCKED}로 잠근다. 맨 앞 판정과 참조 예약은

@@ -6,6 +6,7 @@ import static io.github.ledgerrelay.core.LedgerResultCode.ExistsWithDifferentAmo
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import io.github.ledgerrelay.core.CommandConflictException;
 import io.github.ledgerrelay.core.CommandKind;
@@ -1186,6 +1187,7 @@ public abstract class LedgerRelayContract {
         @Test
         @DisplayName("그 행만 멈춤으로 알리고, 다른 키의 명령은 그대로 잡힌다 — 한 행의 이상이 릴레이 전체를 멈추지 않게")
         void aMalformedRowIsHaltedAndOtherKeysKeepFlowing() {
+            assumeTrue(storage.allowsMalformedRows(), "이 저장소는 스키마가 이런 행을 막는다(F31)");
             // given: 참조 예약이 비어 있는 확정 행(접수 검사로는 만들 수 없다)과, 다른 키의 정상 이체
             acceptedPastTheChecks(new NewCommand("capture-1", "order-1", 1, Optional.empty(), BigInteger.valueOf(101),
                     "hash-of-capture-1", new TransferBody(CommandKind.POST, BigInteger.ZERO, BigInteger.ZERO,
@@ -1413,7 +1415,7 @@ public abstract class LedgerRelayContract {
     // ── 접수 검사를 거치지 않은 행: 버그·DB 직접 수정 뒤의 상태를 만든다. 이체 ID는 100+순번이다 ──────
 
     protected static NewCommand reserveRow(String commandId, String orderingKey, long seq) {
-        return new NewCommand(commandId, orderingKey, seq, Optional.empty(), BigInteger.valueOf(100 + seq),
+        return new NewCommand(commandId, orderingKey, seq, Optional.empty(), TestTransferIds.transferIdFor(orderingKey, seq),
                 "hash-of-" + commandId, new TransferBody(CommandKind.RESERVE, BigInteger.valueOf(1),
                         BigInteger.valueOf(2), BigInteger.valueOf(500), 1, 1, 0, Optional.empty(), 0, 0));
     }
@@ -1421,7 +1423,7 @@ public abstract class LedgerRelayContract {
     protected static NewCommand postRow(String commandId, String orderingKey, long seq, String reservationCommandId,
             long pendingTransferId) {
         return new NewCommand(commandId, orderingKey, seq, Optional.of(reservationCommandId),
-                BigInteger.valueOf(100 + seq), "hash-of-" + commandId,
+                TestTransferIds.transferIdFor(orderingKey, seq), "hash-of-" + commandId,
                 new TransferBody(CommandKind.POST, BigInteger.ZERO, BigInteger.ZERO, BigInteger.valueOf(500), 0, 0, 0,
                         Optional.of(BigInteger.valueOf(pendingTransferId)), 0, 0));
     }

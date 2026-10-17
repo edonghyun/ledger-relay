@@ -701,13 +701,13 @@ public abstract class CommandStoreContract {
     // ── 행을 만드는 말: 값은 숨기지 않는다. 이체 ID는 101부터, 해시는 "hash-of-<id>"다 ─────────
 
     protected static NewCommand newTransfer(String commandId, String orderingKey, long seq) {
-        return new NewCommand(commandId, orderingKey, seq, Optional.empty(), BigInteger.valueOf(100 + seq),
+        return new NewCommand(commandId, orderingKey, seq, Optional.empty(), TestTransferIds.transferIdFor(orderingKey, seq),
                 "hash-of-" + commandId, new TransferBody(CommandKind.TRANSFER, BigInteger.valueOf(1),
                         BigInteger.valueOf(2), BigInteger.valueOf(500), 1, 1, 0, Optional.empty(), 0, 0));
     }
 
     protected static NewCommand newReserve(String commandId, String orderingKey, long seq) {
-        return new NewCommand(commandId, orderingKey, seq, Optional.empty(), BigInteger.valueOf(100 + seq),
+        return new NewCommand(commandId, orderingKey, seq, Optional.empty(), TestTransferIds.transferIdFor(orderingKey, seq),
                 "hash-of-" + commandId, new TransferBody(CommandKind.RESERVE, BigInteger.valueOf(1),
                         BigInteger.valueOf(2), BigInteger.valueOf(500), 1, 1, 0, Optional.empty(), 0, 0));
     }
@@ -715,7 +715,7 @@ public abstract class CommandStoreContract {
     /** 예약의 이체 ID는 예약이 순번 1로 들어갔다고 보고 101로 둔다. */
     protected static NewCommand newPost(String commandId, String orderingKey, long seq, String reservationCommandId) {
         return new NewCommand(commandId, orderingKey, seq, Optional.of(reservationCommandId),
-                BigInteger.valueOf(100 + seq), "hash-of-" + commandId,
+                TestTransferIds.transferIdFor(orderingKey, seq), "hash-of-" + commandId,
                 new TransferBody(CommandKind.POST, BigInteger.ZERO, BigInteger.ZERO, BigInteger.valueOf(500), 0, 0, 0,
                         Optional.of(BigInteger.valueOf(101)), 0, 0));
     }
@@ -824,4 +824,5 @@ public abstract class CommandStoreContract {
             super("테스트가 일부러 롤백한다");
         }
     }
+
 }

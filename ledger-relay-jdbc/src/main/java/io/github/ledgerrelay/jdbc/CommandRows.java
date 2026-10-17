@@ -27,7 +27,7 @@ final class CommandRows {
     private CommandRows() {
     }
 
-    /** {@code SELECT c.*, … AS accepted_in_this_transaction}의 한 행을 읽는다. */
+    /** {@code JdbcCommandStore.COLUMNS}와 {@code accepted_in_this_transaction}을 고른 한 행을 읽는다. */
     static CommandRecord read(ResultSet rs) throws SQLException {
         TransferBody body = new TransferBody(
                 CommandKind.valueOf(rs.getString("kind")),

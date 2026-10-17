@@ -3,12 +3,15 @@ package io.github.ledgerrelay.jdbc;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
+import io.github.ledgerrelay.core.spi.CommandRecord;
+import io.github.ledgerrelay.core.spi.NewCommand;
 import io.github.ledgerrelay.core.testing.CommandStoreContract;
 import io.github.ledgerrelay.core.testing.StorageUnderTest;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -112,6 +115,111 @@ class JdbcCommandStoreTest extends CommandStoreContract {
 
         private List<String> dueIds() {
             return storage.store().lockDue(10).stream().map(d -> d.command().commandId()).toList();
+        }
+    }
+
+    @Nested
+    @Order(102)
+    @DisplayName("jdbc 전용: 스키마가 지키는 것 — F31")
+    class TheSchemaGuards {
+
+        static final String UNIQUE_VIOLATION = "23505";
+
+        PostgresStorage storage;
+
+        @BeforeEach
+        void givenAStore() {
+            storage = PostgresStorage.withDataSourceTransactions();
+        }
+
+        @ParameterizedTest(name = "{0}.{1}", quoteTextArguments = false)
+        @CsvSource(textBlock = """
+                ledger_command,      command_id
+                ledger_command,      ordering_key
+                ledger_command,      reservation_command_id
+                ledger_ordering_key, ordering_key
+                """)
+        @DisplayName("ID 컬럼은 바이트로 비교한다(COLLATE \"C\") — OS collation이 바뀌어도 유일 인덱스가 어긋나지 않게")
+        void idColumnsCompareByteForByte(String table, String column) {
+            // when
+            String collation = storage.sql().sql("""
+                    SELECT c.collname FROM pg_attribute a JOIN pg_collation c ON c.oid = a.attcollation
+                    WHERE a.attrelid = :table::regclass AND a.attname = :column
+                    """).param("table", table).param("column", column).query(String.class).single();
+
+            // then
+            assertThat(collation).as("%s.%s의 collation", table, column).isEqualTo("C");
+        }
+
+        @Test
+        @DisplayName("다른 명령에 같은 TB 이체 ID를 넣으면 거부된다 — 이체 ID가 겹치면 TB의 exists가 남의 명령을 적용됨으로 만든다")
+        void aDuplicateTransferIdIsRefused() {
+            // given
+            storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(newTransfer("pay-1", "order-1", 1)));
+
+            // when
+            Throwable refused = catchThrowable(() -> storage.sql().sql("""
+                    UPDATE ledger_command SET command_id = 'pay-2', ordering_key = 'order-2'
+                    WHERE command_id = 'pay-1'
+                    """).update());
+            Throwable duplicate = catchThrowable(() -> storage.transactions().inTransaction(() -> storage.store()
+                    .insertIfAbsent(new NewCommand("pay-3", "order-3", 1, Optional.empty(),
+                            record("pay-2").transferId(), "hash-of-pay-3", newTransfer("pay-3", "order-3", 1).body()))));
+
+            // then
+            assertThat(refused).as("이름만 바꾼 행").isNull();
+            assertThat(sqlState(duplicate)).as("같은 이체 ID의 새 명령 (실패: %s)", duplicate).isEqualTo(UNIQUE_VIOLATION);
+        }
+
+        @ParameterizedTest(name = "{0} → {2}", quoteTextArguments = false)
+        @CsvSource(textBlock = """
+                확정의 참조 예약을 지우면,          UPDATE ledger_command SET reservation_command_id = NULL WHERE command_id = 'capture-1', ledger_command_reference_check
+                처리 중인데 lease가 없으면,         UPDATE ledger_command SET state = 'CLAIMED' WHERE command_id = 'capture-1',            ledger_command_claimed_lease_check
+                순번이 0이면,                       UPDATE ledger_command SET seq = 0 WHERE command_id = 'capture-1',                      ledger_command_seq_check
+                """)
+        @DisplayName("Java 불변식과 어긋나는 행은 이름 붙은 CHECK가 거부한다")
+        void rowsThatBreakTheInvariantsAreRefused(String meaning, String update, String constraint) {
+            // given
+            storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(newPost("capture-1", "order-1", 2,
+                    "hold-1")));
+
+            // when
+            Throwable refused = catchThrowable(() -> storage.sql().sql(update).update());
+
+            // then
+            assertThat(sqlState(refused)).as("%s (실패: %s)", meaning, refused).isEqualTo(CHECK_VIOLATION);
+            assertThat(refused).as("%s를 막은 제약", meaning).hasMessageContaining(constraint);
+        }
+
+        @Test
+        @DisplayName("같은 커넥션에서 준비 문장이 된 조회도 운영 중 ADD COLUMN 뒤에 깨지지 않는다 — SELECT * 를 쓰지 않는다")
+        void findSurvivesAnAddedColumn() {
+            // given: 커넥션 하나로 같은 조회를 여섯 번 해 서버 준비 문장으로 만들었다(pgjdbc prepareThreshold 5)
+            var single = PostgresStorage.singleConnection();
+            try {
+                JdbcCommandStore onOneConnection = new JdbcCommandStore(single);
+                storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(newTransfer("pay-1", "order-1",
+                        1)));
+                for (int i = 0; i < 6; i++) {
+                    onOneConnection.find("pay-1");
+                }
+                storage.sql().sql("ALTER TABLE ledger_command ADD COLUMN migration_probe int").update();
+
+                // when: 앱 트랜잭션 안의 조회(접수가 하는 것)
+                var inAppTransaction = new org.springframework.transaction.support.TransactionTemplate(
+                        new org.springframework.jdbc.datasource.DataSourceTransactionManager(single));
+                Throwable broken = catchThrowable(() -> inAppTransaction.execute(status -> onOneConnection.find("pay-1")));
+
+                // then
+                assertThat(broken).as("컬럼이 늘어난 뒤의 조회").isNull();
+            } finally {
+                storage.sql().sql("ALTER TABLE ledger_command DROP COLUMN IF EXISTS migration_probe").update();
+                single.destroy();
+            }
+        }
+
+        private CommandRecord record(String commandId) {
+            return storage.transactions().inTransaction(() -> storage.store().find(commandId)).orElseThrow();
         }
     }
 

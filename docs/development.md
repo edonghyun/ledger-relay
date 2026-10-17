@@ -30,6 +30,11 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 - `JpaTransactionManager`에 같은 DataSource를 알려 주고(`setDataSource`), JPA dialect는 `HibernateJpaDialect`(Spring이 Hibernate에 쓰는 기본)를 바꾸지 않는다. 이 dialect가 JDBC 커넥션을 트랜잭션에 노출해야 `JdbcClient`가 같은 트랜잭션에 합류한다(F16).
 - `DefaultJpaDialect`는 격리 수준 지정을 거부한다(`InvalidIsolationLevelException`). 워커 단계는 READ COMMITTED를 명시하므로(P2b-16) 이 dialect에서는 시작하지 못한다. `JtaTransactionManager`도 `allowCustomIsolationLevels=true`가 아니면 같다.
 
+### 큐 테이블 운영 (02d)
+
+- `ledger_command`는 상태가 바뀔 때마다 부분 인덱스 두 개(`ledger_command_unfinished`, `ledger_command_due`)의 조건 컬럼(`state`)이 바뀌어 HOT 갱신이 되지 않는다. 죽은 튜플이 작은 인덱스에 빨리 쌓이므로 테이블별 autovacuum을 낮게 잡는다(예: `autovacuum_vacuum_scale_factor = 0.01`, `autovacuum_vacuum_cost_limit` 상향). `fillfactor = 80`을 두면 `markSubmitted` 같은 상태 외 갱신이 같은 페이지에 들어갈 여지가 생긴다. 수치는 아직 재지 않았다.
+- `ledger_ordering_key`의 행은 지우지 않는다. 지우는 작업이 진행 중인 접수와 겹치면 다음 접수의 순번이 1로 돌아가 순서가 뒤집히거나 앱 트랜잭션이 깨진다(02d P2d-11). 행 하나는 수십 바이트다.
+
 ### DB를 옮길 때
 
 - 덤프·복원이나 다른 클러스터로 옮긴 DB에서는 옮겨 온 행의 `accepted_xact`가 새 클러스터의 트랜잭션 ID와 우연히 같을 수 있다. 그러면 이미 커밋된 예약이 "같은 트랜잭션에서 접수한 예약"으로 보여 정상 확정이 거부된다(O7). 복원 직후, 워커를 켜기 전에 `UPDATE ledger_command SET accepted_xact = '0'`을 실행한다.

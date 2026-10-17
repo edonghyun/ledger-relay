@@ -231,6 +231,16 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: `LedgerCommand.MAX_ID_BYTES = 512`다. commandId, orderingKey, reservationCommandId에 적용하고, `isAcceptableId`도 같은 상한을 본다.
 - **확인**: 넣기 전에 세 테스트가 실패했다.
 
+### F31. 스키마가 ID 비교·이체 ID·행 불변식을 DB 쪽에서 지키지 않는다 (전체 리뷰에서 발견)
+
+- **깨지는 것**:
+  - **collation**: `command_id`의 유일 인덱스가 접수의 멱등성을 지킨다. 그런데 이 컬럼이 DB 기본 collation을 쓰면 문제가 된다. OS의 libc collation이 바뀌면(postgres 이미지의 Debian 판 변경, glibc 2.28류 업그레이드) text b-tree 인덱스가 조용히 어긋날 수 있다. 그러면 `ON CONFLICT (command_id)`가 있는 행을 못 찾아, 다시 보낸 접수가 새 이체 ID로 두 번째 행을 만들고 돈이 두 번 나간다.
+  - **이체 ID 중복**: `transfer_id`가 겹치면(생성기 버그) 두 번째 명령은 TB에서 `exists`를 받아 남의 이체를 자기 결과로 삼는다.
+  - **행 불변식**: 처리 중인데 lease 만료 시각이 없는 행은 영원히 다시 잡히지 않는다. 참조 예약이 없는 확정 행은 F29를 일으킨다. 운영 중 마이그레이션도 문제다. `ADD COLUMN` 뒤 `SELECT c.*`의 서버 준비 문장이 앱 트랜잭션 안에서 `0A000 cached plan must not change result type`으로 실패해, 그 앱 트랜잭션 전체가 중단된다.
+- **재현**: `JdbcCommandStoreTest` › jdbc 전용: 스키마가 지키는 것 › `idColumnsCompareByteForByte`(4), `aDuplicateTransferIdIsRefused`, `rowsThatBreakTheInvariantsAreRefused`(3), `findSurvivesAnAddedColumn`. 마지막 것은 앱 트랜잭션 안의 조회로 재현했다. 트랜잭션 밖에서는 pgjdbc가 스스로 다시 준비해 재현되지 않았다.
+- **구조**: ID 컬럼은 `COLLATE "C"`로 둔다. 이름 붙은 제약으로 `ledger_command_transfer_id_key UNIQUE`, `ledger_command_seq_check`, `ledger_command_reference_check`, `ledger_command_claimed_lease_check`, `ledger_command_skipped_reason_check`를 둔다. 질의는 공용 컬럼 목록(`JdbcCommandStore.COLUMNS`)을 쓴다. 계약 테스트의 행 빌더는 키마다 다른 이체 ID를 낸다(`TestTransferIds`).
+- **확인**: 넣기 전에 9건이 실패했다(collation 4, 이체 ID 1, CHECK 3, 컬럼 추가 1).
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |

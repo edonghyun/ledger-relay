@@ -37,4 +37,12 @@ public interface StorageUnderTest {
     default boolean clockStandsStill() {
         return true;
     }
+
+    /**
+     * 규칙과 어긋난 행(참조 예약이 없는 확정 등)을 직접 넣을 수 있는가. PostgreSQL은 스키마 CHECK가 막으므로 false이고, 그래서
+     * 그런 행이 claim 후보가 되는 장(F29)을 건너뛴다.
+     */
+    default boolean allowsMalformedRows() {
+        return true;
+    }
 }

@@ -91,6 +91,15 @@ final class PostgresStorage implements StorageUnderTest {
         return storage;
     }
 
+    /**
+     * 커넥션 하나만 계속 쓰는 DataSource. 서버 준비 문장(pgjdbc prepareThreshold)이 그 커넥션에 쌓이는 동작을 확인할 때 쓴다.
+     * 호출자가 {@code destroy()}로 닫는다.
+     */
+    static org.springframework.jdbc.datasource.SingleConnectionDataSource singleConnection() {
+        return new org.springframework.jdbc.datasource.SingleConnectionDataSource(CONTAINER.getJdbcUrl(),
+                CONTAINER.getUsername(), CONTAINER.getPassword(), true);
+    }
+
     /** 대조군: 격리 수준은 받아들이지만 JDBC 커넥션을 노출하지 않는 dialect */
     static final class NonExposingJpaDialect extends org.springframework.orm.jpa.DefaultJpaDialect {
         @Override
@@ -114,6 +123,11 @@ final class PostgresStorage implements StorageUnderTest {
     @Override
     public Transactions transactions() {
         return transactions;
+    }
+
+    @Override
+    public boolean allowsMalformedRows() {
+        return false;
     }
 
     @Override
