@@ -189,12 +189,25 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: `WorkerSettings`는 `lease ≥ 2 × submitTimeout`이 아니면 거부한다. 결과 쓰기는 명령마다 핸들러를 포함한 트랜잭션 하나라서 batch-size에 비례한다. 큰 batch-size에서는 lease를 더 길게 잡아야 한다고 Javadoc에 적었다. 이 몫은 핸들러 속도에 달려 있어 설정 검증으로는 막지 못한다.
 - **확인**: 검사를 넣기 전에 그 행은 "예외가 없다"로 실패했다.
 
+### F26. TB 컨테이너가 listening 직후 들어온 TCP 접속에 panic한다 (열린 장애 O4를 원인까지 좁힘)
+
+- **깨지는 것**: TigerBeetle 0.17.9 컨테이너가 `listening on`을 찍고 2~130ms 뒤 `thread 1 panic: reached unreachable code`(exit 139)로 죽는다. 우리 클라이언트가 붙기 전이다. 테스트 클래스 하나가 통째로 `initializationError`로 실패한다. 2026-10-17에는 tigerbeetle 모듈 실행의 절반 이상에서 났다.
+- **재현과 원인 좁히기(2026-10-18, 픽스처와 같은 명령의 `docker run`)**:
+  - 포트를 공개하지 않고 띄우기만 하면 50번 중 0번이었다(단독 20번, 3개 동시 기동 30번).
+  - 포트를 공개(`-P`)하면 클라이언트가 없는데도 15번 중 2번 났다.
+  - 포트를 공개하지 않고, listening 직후 같은 네트워크 네임스페이스에서 `nc -z`로 TCP 접속만 했다 끊으면 30번 중 3번 났다.
+  - 같은 탐침을 3초 뒤에 하면 20번 중 0번이었다.
+  - 메모리 부족은 아니다. VM에 5.9GiB가 남아 있었고 dmesg에 OOM 기록이 없었다.
+  - 결론: listening 직후의 짧은 구간에 들어온 TCP 접속이 TB를 죽인다. 테스트에서 그 접속을 넣는 쪽은 Docker Desktop의 포트 공개 경로로 보인다. 우리 코드는 그 시점을 정할 수 없다. TB 쪽 버그로 보며, TB 소스로 확인하지는 않았다.
+- **구조(완화)**: `TigerBeetleContainer.start()`는 안정 확인 구간(1초) 안에 서버가 죽으면 새 컨테이너로 다시 띄운다. 최대 3번이다. 다른 기동 실패(io_uring 등)는 다시 띄우지 않는다. 다시 띄울 때마다 표준 오류에 `O4: …다시 띄운다(시도 n)`를 남겨, 테스트 결과 XML에서 빈도를 셀 수 있다. 1초가 지난 뒤의 사망은 지금처럼 `assertAlive`가 드러낸다.
+- **재현 테스트**: `TigerBeetleContainerGuardTest` › `startRetriesWhenTheServerDiesRightAfterListening`(한 번 죽고 다음엔 사는 가짜 서버), `startFailsWhenServerDiesRightAfterListening`(매번 죽으면 "3번 시도"와 panic 로그로 실패).
+- **확인**: 시도 횟수를 1로 줄이는 대조군에서 두 테스트가 실패했다. 완화를 넣은 뒤 tigerbeetle 모듈을 5번 돌려 실패 0이었다. 다만 그 5번은 실제 TB의 재시도도 0번이었다(자연 발생 없음). 그래서 실제 panic에 대한 효과는 아직 관찰하지 못했다.
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |
 |---|---|---|
 | O2 | 워커가 어느 지점에서 죽어도 중복 없이 복구되는가(kill -9) | 4단계 E1 |
-| O4 | TB 컨테이너가 기동 중 `panic: reached unreachable code`로 가끔 죽는다. main에서도 재현된다 | 조사 필요(테스트 환경) |
 | O5 | 멈춘 명령을 목록으로 볼 방법이 없다. 알림을 놓치면 `abandonHalted`에 넘길 commandId를 SQL로 찾아야 한다 | 3단계. 멈춘 명령 조회 |
 | O7 | 덤프·복원이나 다른 클러스터로 옮긴 DB에서는 옮겨 온 `accepted_xact`가 새 트랜잭션 ID와 우연히 같아져, 이미 커밋된 예약을 참조한 정상 확정이 `ReservationNotFoundException`으로 거부될 수 있다. 재현 테스트는 두지 않았다. 클러스터 이전을 재현하는 비용이 절차 한 줄보다 크다 | 이전 절차: 복원 직후 `UPDATE ledger_command SET accepted_xact = '0'`(docs/development.md) |
 

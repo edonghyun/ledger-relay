@@ -35,8 +35,15 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
     /** 관찰된 크래시는 "listening on" 뒤 2~130ms 안에 일어났다. 그보다 넉넉한 안정 확인 구간. */
     private static final Duration STABILITY_WINDOW = Duration.ofSeconds(1);
     private static final int LOG_TAIL_CHARS = 2_000;
+    /**
+     * listening 직후 죽으면 새 컨테이너로 다시 띄우는 최대 횟수(O4). TB 0.17.9는 listening 직후의 짧은 구간에 TCP 접속이
+     * 들어오면 panic한다. Docker Desktop이 공개 포트를 잇는 접속을 그 구간에 넣을 수 있어 테스트가 막을 수 없다
+     * (docs/failure-modes.md F26).
+     */
+    static final int START_ATTEMPTS = 3;
 
     private final ToStringConsumer logs = new ToStringConsumer();
+    private final List<String> scriptsPerAttempt;
 
     public TigerBeetleContainer() {
         this(true);
@@ -46,9 +53,15 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
         this(unconfinedSeccomp, startScript());
     }
 
-    /** 테스트 전용: 시작 스크립트를 바꿔 크래시 같은 서버 동작을 흉내 낸다. */
+    /** 테스트 전용: 시작 스크립트를 바꿔 크래시 같은 서버 동작을 흉내 낸다. 다시 띄울 때도 같은 스크립트다. */
     TigerBeetleContainer(boolean unconfinedSeccomp, String script) {
+        this(unconfinedSeccomp, List.of(script));
+    }
+
+    /** 테스트 전용: 시도마다 다른 스크립트를 쓴다. 시도가 스크립트보다 많으면 마지막 것을 쓴다. */
+    TigerBeetleContainer(boolean unconfinedSeccomp, List<String> scriptsPerAttempt) {
         super(DockerImageName.parse(imageTag()));
+        this.scriptsPerAttempt = List.copyOf(scriptsPerAttempt);
         withExposedPorts(PORT);
         withCreateContainerCmdModifier(cmd -> {
             cmd.withEntrypoint("/bin/sh", "-c");
@@ -56,7 +69,6 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
                 cmd.getHostConfig().withSecurityOpts(List.of("seccomp=unconfined"));
             }
         });
-        withCommand(new String[] {script});
         withLogConsumer(logs);
         waitingFor(Wait.forLogMessage(".*listening on.*", 1).withStartupTimeout(Duration.ofSeconds(120)));
     }
@@ -75,14 +87,37 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
                 + " && exec /tigerbeetle start --addresses=0.0.0.0:" + PORT + " --development " + DATA_FILE;
     }
 
-    /** 기동 실패를 컨테이너 로그 끝부분과 함께 다시 던진다. 원인(io_uring, panic)이 메시지에 남는다. */
+    /**
+     * 기동한다. listening 직후 죽으면 새 컨테이너로 {@link #START_ATTEMPTS}번까지 다시 띄운다(O4). 그 밖의 기동 실패(io_uring
+     * 등)는 다시 띄워도 같으므로 바로 던진다. 실패는 컨테이너 로그 끝부분과 함께 던진다. 원인(io_uring, panic)이 메시지에 남는다.
+     */
     @Override
     public void start() {
-        try {
-            super.start();
-        } catch (RuntimeException e) {
-            throw new ContainerLaunchException("TigerBeetle 컨테이너 기동 실패. 로그 끝부분:\n" + logTail(), e);
+        for (int attempt = 1; ; attempt++) {
+            withCommand(new String[] {scriptsPerAttempt.get(Math.min(attempt, scriptsPerAttempt.size()) - 1)});
+            try {
+                super.start();
+                return;
+            } catch (RuntimeException e) {
+                if (!diedRightAfterListening(e) || attempt == START_ATTEMPTS) {
+                    String tries = diedRightAfterListening(e) ? attempt + "번 시도 모두 listening 직후 종료. " : "";
+                    throw new ContainerLaunchException("TigerBeetle 컨테이너 기동 실패. " + tries + "로그 끝부분:\n"
+                            + logTail(), e);
+                }
+                // 재시도 빈도를 테스트 결과(XML의 system-err)에서 셀 수 있게 남긴다
+                System.err.println("O4: TigerBeetle가 listening 직후 종료되어 새 컨테이너로 다시 띄운다(시도 " + attempt + ")");
+                stop();
+            }
         }
+    }
+
+    private static boolean diedRightAfterListening(Throwable failure) {
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            if (t instanceof DiedRightAfterListening) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -94,7 +129,7 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
             throw new IllegalStateException("안정 확인 중 인터럽트", e);
         }
         if (!isRunning()) {
-            throw new IllegalStateException("TigerBeetle가 listening 직후 종료되었습니다");
+            throw new DiedRightAfterListening();
         }
     }
 
@@ -111,6 +146,13 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
     private String logTail() {
         String all = logs.toUtf8String();
         return all.length() <= LOG_TAIL_CHARS ? all : all.substring(all.length() - LOG_TAIL_CHARS);
+    }
+
+    /** 안정 확인 구간 안에 서버가 죽었다. 이 실패만 다시 띄울 이유가 된다. */
+    private static final class DiedRightAfterListening extends IllegalStateException {
+        DiedRightAfterListening() {
+            super("TigerBeetle가 listening 직후 종료되었습니다");
+        }
     }
 
     /** TB 클라이언트가 해석할 수 있는 {@code IPv4:포트} 주소. */
