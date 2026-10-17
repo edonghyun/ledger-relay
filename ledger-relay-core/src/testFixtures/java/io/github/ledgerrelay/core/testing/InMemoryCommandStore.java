@@ -1,6 +1,7 @@
 package io.github.ledgerrelay.core.testing;
 
 import io.github.ledgerrelay.core.domain.CommandRow;
+import io.github.ledgerrelay.core.domain.QueuedCommand;
 import io.github.ledgerrelay.core.spi.CommandRecord;
 import io.github.ledgerrelay.core.spi.CommandStore;
 import io.github.ledgerrelay.core.spi.DueCommand;
@@ -8,6 +9,7 @@ import io.github.ledgerrelay.core.spi.NewCommand;
 import io.github.ledgerrelay.core.spi.RowChange;
 import io.github.ledgerrelay.core.spi.Transactions;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -91,13 +93,63 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
     @Override
     public List<DueCommand> lockDue(int limit) {
         requireTransaction();
-        return List.of();
+        Instant now = clock.get();
+        // 순서 키마다 맨 앞(가장 작은 seq)의 미완료 명령(P2a-19)
+        Map<String, Long> headSeqByKey = new HashMap<>();
+        for (Row row : rows.values()) {
+            CommandRecord r = row.record();
+            if (!r.row().state().isFinal()) {
+                headSeqByKey.merge(r.orderingKey(), r.seq(), Math::min);
+            }
+        }
+        List<DueCommand> due = new ArrayList<>();
+        for (Row row : rows.values()) {
+            if (due.size() >= limit) {
+                break;
+            }
+            CommandRecord r = row.record();
+            boolean isHead = !r.row().state().isFinal() && headSeqByKey.get(r.orderingKey()) == r.seq();
+            if (isHead && row.isDue(now)) {
+                due.add(new DueCommand(r, reservationOf(r)));
+            }
+        }
+        return due;
     }
 
     @Override
     public boolean compareAndSet(RowChange change) {
         requireTransaction();
-        return false;
+        Row row = rows.get(change.rowId());
+        if (row == null) {
+            return false;
+        }
+        CommandRow current = row.record().row();
+        if (current.state() != change.expectedState() || current.leaseToken() != change.expectedToken()) {
+            return false;
+        }
+        Instant now = clock.get();
+        Row next = switch (change.stamp()) {
+            case RowChange.Stamp.LeaseFor lease -> row.with(change.next(), now.plus(lease.lease()), row.nextAttemptAt(),
+                    row.record().completedAt());
+            // first_submitted_at은 조회 결과에 나가지 않으므로 메모리 저장소는 기록하지 않는다
+            case RowChange.Stamp.FirstSubmission submission -> row.with(change.next(), row.leaseExpiresAt(),
+                    row.nextAttemptAt(), row.record().completedAt());
+            case RowChange.Stamp.RetryAfter retry -> row.with(change.next(), row.leaseExpiresAt(),
+                    now.plus(retry.backoff()), row.record().completedAt());
+            case RowChange.Stamp.Completion completion -> row.with(change.next(), row.leaseExpiresAt(),
+                    row.nextAttemptAt(), Optional.of(now));
+        };
+        rows.put(change.rowId(), next);
+        return true;
+    }
+
+    private Optional<QueuedCommand> reservationOf(CommandRecord command) {
+        return command.reservationCommandId()
+                .map(rowIdByCommandId::get)
+                .map(rows::get)
+                .map(Row::record)
+                .map(reservation -> new QueuedCommand(reservation.commandId(), reservation.seq(),
+                        reservation.row().state()));
     }
 
     private void requireTransaction() {
@@ -129,5 +181,21 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
      * @param nextAttemptAt  접수 상태의 행이 claim 후보가 되는 시각
      */
     private record Row(CommandRecord record, Instant leaseExpiresAt, Instant nextAttemptAt) {
+
+        /** claim 후보가 될 시각이 됐는가(§5.2). 접수 상태는 다음 시도 시각이 됐을 때, 처리 중은 lease가 끝났을 때. */
+        boolean isDue(Instant now) {
+            return switch (record.row().state()) {
+                case PENDING -> !nextAttemptAt.isAfter(now);
+                case CLAIMED -> leaseExpiresAt.isBefore(now);
+                case APPLIED, REJECTED, CONFLICT, SKIPPED -> false;
+            };
+        }
+
+        Row with(CommandRow newRow, Instant newLeaseExpiresAt, Instant newNextAttemptAt, Optional<Instant> completedAt) {
+            CommandRecord r = record;
+            return new Row(new CommandRecord(r.rowId(), r.commandId(), r.orderingKey(), r.seq(),
+                    r.reservationCommandId(), r.transferId(), r.contentHash(), r.body(), newRow, r.acceptedAt(),
+                    completedAt), newLeaseExpiresAt, newNextAttemptAt);
+        }
     }
 }

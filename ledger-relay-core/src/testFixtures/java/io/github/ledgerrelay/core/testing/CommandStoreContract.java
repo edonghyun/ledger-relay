@@ -4,12 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ledgerrelay.core.CommandKind;
+import io.github.ledgerrelay.core.LedgerResultCode;
 import io.github.ledgerrelay.core.domain.CommandRow;
+import io.github.ledgerrelay.core.domain.QueuedCommand;
+import io.github.ledgerrelay.core.domain.StoredState;
 import io.github.ledgerrelay.core.spi.CommandRecord;
 import io.github.ledgerrelay.core.spi.CommandStore;
+import io.github.ledgerrelay.core.spi.DueCommand;
 import io.github.ledgerrelay.core.spi.NewCommand;
+import io.github.ledgerrelay.core.spi.RowChange;
 import io.github.ledgerrelay.core.spi.TransferBody;
 import java.math.BigInteger;
+import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +31,9 @@ import org.junit.jupiter.api.Test;
  * 구현마다 이 클래스를 상속한 테스트 하나를 둔다.
  */
 public abstract class CommandStoreContract {
+
+    protected static final Duration LEASE = Duration.ofSeconds(30);
+    protected static final Duration BACKOFF = Duration.ofSeconds(5);
 
     protected StorageUnderTest storage;
     protected CommandStore store;
@@ -173,6 +183,264 @@ public abstract class CommandStoreContract {
         }
     }
 
+    @Nested
+    @Order(4)
+    @DisplayName("claim 후보를 잠그면 — §5.2")
+    class LockingDueCommands {
+
+        @Test
+        @DisplayName("넣은 명령은 바로 후보다")
+        void anInsertedCommandIsDue() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+
+            // then
+            assertDue("pay-1");
+        }
+
+        @Test
+        @DisplayName("순서 키마다 맨 앞의 미완료 명령만 후보다")
+        void onlyTheHeadOfEachKeyIsDue() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            inserted(newTransfer("pay-2", "order-1", 2));
+
+            // then
+            assertDue("pay-1");
+        }
+
+        @Test
+        @DisplayName("맨 앞 명령이 처리 중이면 그 키에서는 아무것도 후보가 아니다")
+        void aKeyWithAClaimedHeadHasNothingDue() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            inserted(newTransfer("pay-2", "order-1", 2));
+            claimed("pay-1", 1);
+
+            // then
+            assertNothingDue();
+        }
+
+        @Test
+        @DisplayName("막힌 키의 뒤 명령들은 limit을 차지하지 않는다 — 다른 키가 굶지 않게")
+        void aBlockedKeyDoesNotUseUpTheLimit() {
+            // given
+            inserted(newTransfer("a-1", "order-a", 1));
+            inserted(newTransfer("a-2", "order-a", 2));
+            inserted(newTransfer("a-3", "order-a", 3));
+            inserted(newTransfer("b-1", "order-b", 1));
+            claimed("a-1", 1);
+
+            // then
+            assertDueWithLimit(1, "b-1");
+        }
+
+        @Test
+        @DisplayName("맨 앞 명령이 끝나면 다음 명령이 후보다")
+        void theNextCommandIsDueOnceTheHeadFinishes() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            inserted(newTransfer("pay-2", "order-1", 2));
+            finished("pay-1", appliedRow(1));
+
+            // then
+            assertDue("pay-2");
+        }
+
+        @Test
+        @DisplayName("끝난 명령은 후보가 아니다")
+        void aFinishedCommandIsNotDue() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            finished("pay-1", rejectedRow(1));
+
+            // then
+            assertNothingDue();
+        }
+
+        @Test
+        @DisplayName("lease가 살아 있으면 후보가 아니다")
+        void aLiveLeaseIsNotDue() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            claimed("pay-1", 1);
+            storage.elapse(LEASE.minusSeconds(1));
+
+            // then
+            assertNothingDue();
+        }
+
+        @Test
+        @DisplayName("lease가 끝나면 처리 중 명령이 다시 후보다")
+        void anExpiredLeaseIsDue() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            claimed("pay-1", 1);
+            storage.elapse(LEASE.plusSeconds(1));
+
+            // when
+            List<DueCommand> due = inTx(() -> store.lockDue(10));
+
+            // then
+            assertThat(due).as("후보 수").hasSize(1);
+            assertThat(due.get(0).command().row()).as("후보의 행 — 처리 중 그대로, 토큰 1").isEqualTo(claimedRow(1));
+        }
+
+        @Test
+        @DisplayName("되돌린 명령은 backoff가 지나기 전에는 후보가 아니다")
+        void aReleasedCommandWaitsForItsBackoff() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            claimed("pay-1", 1);
+            released("pay-1");
+            storage.elapse(BACKOFF.minusSeconds(1));
+
+            // then
+            assertNothingDue();
+        }
+
+        @Test
+        @DisplayName("되돌린 명령은 backoff가 지나면 다시 후보다")
+        void aReleasedCommandIsDueAfterItsBackoff() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            claimed("pay-1", 1);
+            released("pay-1");
+            storage.elapse(BACKOFF);
+
+            // then
+            assertDue("pay-1");
+        }
+
+        @Test
+        @DisplayName("한 번에 limit개까지만, 접수한 순서대로 낸다")
+        void atMostLimitInAcceptanceOrder() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            inserted(newTransfer("pay-2", "order-2", 1));
+            inserted(newTransfer("pay-3", "order-3", 1));
+
+            // then
+            assertDueWithLimit(2, "pay-1", "pay-2");
+        }
+
+        @Test
+        @DisplayName("post 후보는 참조한 예약의 순번과 상태를 싣는다 — 게이트가 볼 것")
+        void aPostCarriesItsReservation() {
+            // given
+            inserted(newReserve("hold-1", "order-1", 1));
+            inserted(newPost("capture-1", "order-1", 2, "hold-1"));
+            finished("hold-1", appliedRow(1));
+
+            // when
+            List<DueCommand> due = inTx(() -> store.lockDue(10));
+
+            // then
+            assertThat(due).as("후보 수").hasSize(1);
+            assertThat(due.get(0).reservation()).as("capture-1이 참조한 예약")
+                    .contains(new QueuedCommand("hold-1", 1, StoredState.APPLIED));
+        }
+
+        @Test
+        @DisplayName("참조한 예약 행이 없으면 예약 칸이 비어 있다 — 저장소는 참조를 검사하지 않는다")
+        void aMissingReservationIsEmpty() {
+            // given
+            inserted(newPost("capture-1", "order-1", 1, "hold-9"));
+
+            // when
+            List<DueCommand> due = inTx(() -> store.lockDue(10));
+
+            // then
+            assertThat(due).as("후보 수").hasSize(1);
+            assertThat(due.get(0).reservation()).as("없는 예약").isEmpty();
+        }
+    }
+
+    @Nested
+    @Order(5)
+    @DisplayName("조건부로 바꾸면 — G5")
+    class ComparingAndSetting {
+
+        CommandRecord pay1;
+
+        @BeforeEach
+        void givenPay1IsHeldWithToken3() {
+            inserted(newTransfer("pay-1", "order-1", 1));
+            claimed("pay-1", 3);
+            pay1 = record("pay-1");
+        }
+
+        @Test
+        @DisplayName("상태와 토큰이 맞으면 상태 기계가 준 행으로 바뀐다")
+        void aMatchingWriteLands() {
+            // when
+            boolean changed = inTx(() -> store.compareAndSet(
+                    new RowChange(pay1.rowId(), StoredState.CLAIMED, 3, appliedRow(3), new RowChange.Stamp.Completion())));
+
+            // then
+            assertThat(changed).as("반영 여부").isTrue();
+            assertThat(record("pay-1").row()).as("바뀐 행").isEqualTo(appliedRow(3));
+        }
+
+        @Test
+        @DisplayName("토큰이 다르면 바뀌지 않는다")
+        void anotherTokenIsRefused() {
+            // when
+            boolean changed = inTx(() -> store.compareAndSet(
+                    new RowChange(pay1.rowId(), StoredState.CLAIMED, 2, appliedRow(2), new RowChange.Stamp.Completion())));
+
+            // then
+            assertUnchanged(changed, claimedRow(3));
+        }
+
+        @Test
+        @DisplayName("상태가 다르면 토큰이 같아도 바뀌지 않는다")
+        void anotherStateIsRefused() {
+            // when
+            boolean changed = inTx(() -> store.compareAndSet(
+                    new RowChange(pay1.rowId(), StoredState.PENDING, 3, appliedRow(3), new RowChange.Stamp.Completion())));
+
+            // then
+            assertUnchanged(changed, claimedRow(3));
+        }
+
+        @Test
+        @DisplayName("없는 행이면 바뀌지 않는다")
+        void anUnknownRowIsRefused() {
+            assertThat(inTx(() -> store.compareAndSet(new RowChange(pay1.rowId() + 1000, StoredState.CLAIMED, 3,
+                    appliedRow(3), new RowChange.Stamp.Completion())))).as("반영 여부").isFalse();
+        }
+
+        @Test
+        @DisplayName("완료 시각을 찍으면 생기고, 그 전에는 없다")
+        void completionStampsTheTime() {
+            // given
+            assertThat(pay1.completedAt()).as("끝나기 전의 완료 시각").isEmpty();
+
+            // when
+            finished("pay-1", appliedRow(3));
+
+            // then
+            assertThat(record("pay-1").completedAt()).as("끝난 뒤의 완료 시각").isPresent();
+        }
+
+        @Test
+        @DisplayName("트랜잭션이 던지면 바꾼 것이 되돌아간다 — 핸들러가 던질 때 결과가 남지 않게(G6)")
+        void aThrowingTransactionUndoesTheWrite() {
+            // when
+            Runnable writeThenFail = () -> storage.transactions().inTransaction(() -> {
+                store.compareAndSet(new RowChange(pay1.rowId(), StoredState.CLAIMED, 3, appliedRow(3),
+                        new RowChange.Stamp.Completion()));
+                throw new Rollback();
+            });
+
+            // then
+            assertThatThrownBy(writeThenFail::run).isInstanceOf(Rollback.class);
+            assertThat(record("pay-1").row()).as("롤백 뒤의 행").isEqualTo(claimedRow(3));
+            assertThat(record("pay-1").completedAt()).as("롤백 뒤의 완료 시각").isEmpty();
+        }
+    }
+
     // ── 행을 만드는 말: 값은 숨기지 않는다. 이체 ID는 101부터, 해시는 "hash-of-<id>"다 ─────────
 
     protected static NewCommand newTransfer(String commandId, String orderingKey, long seq) {
@@ -218,6 +486,71 @@ public abstract class CommandStoreContract {
     protected CommandRecord record(String commandId) {
         return inTx(() -> store.find(commandId)).orElseThrow(
                 () -> new AssertionError(commandId + "가 저장되어 있기를 기대했지만 찾지 못함"));
+    }
+
+    protected static CommandRow pendingRow(long token) {
+        return new CommandRow(StoredState.PENDING, token, 0, Optional.empty(), Optional.empty(), 0);
+    }
+
+    protected static CommandRow claimedRow(long token) {
+        return new CommandRow(StoredState.CLAIMED, token, 0, Optional.empty(), Optional.empty(), 0);
+    }
+
+    protected static CommandRow appliedRow(long token) {
+        return new CommandRow(StoredState.APPLIED, token, 0, Optional.empty(), Optional.of(LedgerResultCode.Created), 0);
+    }
+
+    protected static CommandRow rejectedRow(long token) {
+        return new CommandRow(StoredState.REJECTED, token, 0, Optional.empty(),
+                Optional.of(LedgerResultCode.ExceedsCredits), 0);
+    }
+
+    /** 전제: 이 행이 토큰 token의 처리 중이 되고, lease가 지금부터 LEASE 동안 살아 있다. */
+    protected void claimed(String commandId, long token) {
+        CommandRecord r = record(commandId);
+        changed(new RowChange(r.rowId(), r.row().state(), r.row().leaseToken(), claimedRow(token),
+                new RowChange.Stamp.LeaseFor(LEASE)));
+    }
+
+    /** 전제: 이 행이 finalRow로 끝난다. */
+    protected void finished(String commandId, CommandRow finalRow) {
+        CommandRecord r = record(commandId);
+        changed(new RowChange(r.rowId(), r.row().state(), r.row().leaseToken(), finalRow,
+                new RowChange.Stamp.Completion()));
+    }
+
+    /** 전제: 처리 중인 이 행이 접수 상태로 돌아가 BACKOFF 동안 기다린다. */
+    protected void released(String commandId) {
+        CommandRecord r = record(commandId);
+        changed(new RowChange(r.rowId(), StoredState.CLAIMED, r.row().leaseToken(), pendingRow(r.row().leaseToken()),
+                new RowChange.Stamp.RetryAfter(BACKOFF)));
+    }
+
+    private void changed(RowChange change) {
+        if (!inTx(() -> store.compareAndSet(change))) {
+            throw new IllegalStateException("given 준비 실패: " + change + "가 반영되지 않았다");
+        }
+    }
+
+    protected void assertDue(String... commandIds) {
+        assertDueWithLimit(10, commandIds);
+    }
+
+    protected void assertDueWithLimit(int limit, String... commandIds) {
+        assertThat(dueIds(limit)).as("claim 후보(접수 순서, limit %d)", limit).containsExactly(commandIds);
+    }
+
+    protected void assertNothingDue() {
+        assertThat(dueIds(10)).as("claim 후보가 없기를 기대했다").isEmpty();
+    }
+
+    private List<String> dueIds(int limit) {
+        return inTx(() -> store.lockDue(limit)).stream().map(due -> due.command().commandId()).toList();
+    }
+
+    private void assertUnchanged(boolean changed, CommandRow expectedRow) {
+        assertThat(changed).as("반영되지 않기를 기대했다").isFalse();
+        assertThat(record("pay-1").row()).as("그대로 남은 행").isEqualTo(expectedRow);
     }
 
     /** 테스트가 일부러 던지는 롤백. */
