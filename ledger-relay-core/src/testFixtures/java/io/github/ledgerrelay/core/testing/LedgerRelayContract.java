@@ -1086,6 +1086,39 @@ public abstract class LedgerRelayContract {
         }
     }
 
+    @Nested
+    @Order(16)
+    @DisplayName("같은 앱 트랜잭션에서 예약을 접수하고 이어서 그 예약을 참조하면 — §5.1-3, P2b-1")
+    class ReferencingAReservationOfTheSameTransaction {
+
+        @Test
+        @DisplayName("확정은 거부된다 — 참조하는 예약은 이미 커밋되어 있어야 한다")
+        void thePostIsRefused() {
+            // when
+            ThrowingCallable postInTheSameTransaction = () -> storage.transactions().inTransaction(() -> {
+                relay.submit(reserve("hold-1", "order-1", 500));
+                return relay.submit(post("capture-1", "order-1", "hold-1"));
+            });
+
+            // then
+            assertRejectedAsMissingReservation(postInTheSameTransaction, "capture-1");
+            assertThat(relay.status("capture-1")).as("거부된 확정").isEmpty();
+        }
+
+        @Test
+        @DisplayName("예약이 커밋된 뒤 다음 트랜잭션에서 접수하면 받아들인다")
+        void aLaterTransactionMayReferenceIt() {
+            // given
+            submit(reserve("hold-1", "order-1", 500));
+
+            // when
+            submit(post("capture-1", "order-1", "hold-1"));
+
+            // then
+            assertQueryState("capture-1", State.ACCEPTED);
+        }
+    }
+
     // ── 명령을 만드는 말: 금액과 키는 숨기지 않는다 ──────────────────────
 
     protected static LedgerCommand transfer(String commandId, String orderingKey, long amount) {

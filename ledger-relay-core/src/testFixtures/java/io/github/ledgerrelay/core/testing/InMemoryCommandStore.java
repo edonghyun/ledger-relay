@@ -32,6 +32,8 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
     private Map<String, Long> rowIdByCommandId = new HashMap<>();
     private Map<String, Long> lastSeqByKey = new HashMap<>();
     private long lastRowId;
+    /** 바깥 트랜잭션을 열 때마다 오른다. 롤백해도 되돌리지 않는다(P2b-2) */
+    private long transactionNumber;
 
     public InMemoryCommandStore(Supplier<Instant> clock) {
         this.clock = clock;
@@ -43,6 +45,7 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
             return work.get(); // 합류. 바깥 트랜잭션이 롤백을 맡는다
         }
         lock.lock();
+        transactionNumber++;
         Snapshot before = snapshot();
         try {
             return work.get();
@@ -77,14 +80,14 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
         requireTransaction();
         Long existing = rowIdByCommandId.get(c.commandId());
         if (existing != null) {
-            return Optional.of(rows.get(existing).record());
+            return Optional.of(recordOf(rows.get(existing)));
         }
         long rowId = ++lastRowId;
         Instant now = clock.get();
         CommandRecord record = new CommandRecord(rowId, c.commandId(), c.orderingKey(), c.seq(),
                 c.reservationCommandId(), c.transferId(), c.contentHash(), c.body(), CommandRow.accepted(), now,
-                Optional.empty());
-        rows.put(rowId, new Row(record, null, now));
+                Optional.empty(), false);
+        rows.put(rowId, new Row(record, null, now, transactionNumber));
         rowIdByCommandId.put(c.commandId(), rowId);
         return Optional.empty();
     }
@@ -92,7 +95,7 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
     @Override
     public Optional<CommandRecord> find(String commandId) {
         requireTransaction();
-        return Optional.ofNullable(rowIdByCommandId.get(commandId)).map(rows::get).map(Row::record);
+        return Optional.ofNullable(rowIdByCommandId.get(commandId)).map(rows::get).map(this::recordOf);
     }
 
     @Override
@@ -115,7 +118,7 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
             CommandRecord r = row.record();
             boolean isHead = !r.row().state().isFinal() && headSeqByKey.get(r.orderingKey()) == r.seq();
             if (isHead && row.isDue(now)) {
-                due.add(new DueCommand(r, reservationOf(r)));
+                due.add(new DueCommand(recordOf(row), reservationOf(r)));
             }
         }
         return due;
@@ -159,6 +162,14 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
                         reservation.row().state()));
     }
 
+    /** 저장한 기록에 "지금 트랜잭션이 넣었는가"를 붙여 돌려준다 */
+    private CommandRecord recordOf(Row row) {
+        CommandRecord r = row.record();
+        return new CommandRecord(r.rowId(), r.commandId(), r.orderingKey(), r.seq(), r.reservationCommandId(),
+                r.transferId(), r.contentHash(), r.body(), r.row(), r.acceptedAt(), r.completedAt(),
+                row.acceptedIn() == transactionNumber);
+    }
+
     private void requireTransaction() {
         if (!lock.isHeldByCurrentThread()) {
             throw new IllegalStateException("버그: 저장소는 트랜잭션 안에서만 부른다");
@@ -186,8 +197,9 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
      *
      * @param leaseExpiresAt claim 전에는 null
      * @param nextAttemptAt  접수 상태의 행이 claim 후보가 되는 시각
+     * @param acceptedIn     넣은 트랜잭션의 번호
      */
-    private record Row(CommandRecord record, Instant leaseExpiresAt, Instant nextAttemptAt) {
+    private record Row(CommandRecord record, Instant leaseExpiresAt, Instant nextAttemptAt, long acceptedIn) {
 
         /** claim 후보가 될 시각이 됐는가(§5.2). 접수 상태는 다음 시도 시각이 됐을 때, 처리 중은 lease가 끝났을 때. */
         boolean isDue(Instant now) {
@@ -203,7 +215,7 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
             CommandRecord r = record;
             return new Row(new CommandRecord(r.rowId(), r.commandId(), r.orderingKey(), r.seq(),
                     r.reservationCommandId(), r.transferId(), r.contentHash(), r.body(), newRow, r.acceptedAt(),
-                    completedAt), newLeaseExpiresAt, newNextAttemptAt);
+                    completedAt, false), newLeaseExpiresAt, newNextAttemptAt, acceptedIn);
         }
     }
 }

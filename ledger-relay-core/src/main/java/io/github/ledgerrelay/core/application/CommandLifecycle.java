@@ -275,6 +275,7 @@ public final class CommandLifecycle implements LedgerRelay {
                 .filter(reservation -> !reservationId.equals(command.commandId()))
                 .filter(reservation -> reservation.orderingKey().equals(command.orderingKey()))
                 .filter(reservation -> reservation.kind() == CommandKind.RESERVE)
+                .filter(reservation -> !reservation.acceptedInThisTransaction())
                 .map(CommandRecord::transferId)
                 .orElseThrow(() -> new ReservationNotFoundException(command.commandId(), reservationId,
                         command.orderingKey()));

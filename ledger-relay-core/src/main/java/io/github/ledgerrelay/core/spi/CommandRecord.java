@@ -12,7 +12,8 @@ import java.util.Optional;
  * 쓰므로 싣지 않는다.
  *
  * @param row         상태 기계가 보는 부분
- * @param completedAt 끝나기 전에는 없다
+ * @param completedAt              끝나기 전에는 없다
+ * @param acceptedInThisTransaction 이 행을 지금 부른 쪽의 트랜잭션이 넣었는가. 커밋된 뒤 다시 읽으면 false(P2b-2)
  */
 public record CommandRecord(
         long rowId,
@@ -25,7 +26,8 @@ public record CommandRecord(
         TransferBody body,
         CommandRow row,
         Instant acceptedAt,
-        Optional<Instant> completedAt) {
+        Optional<Instant> completedAt,
+        boolean acceptedInThisTransaction) {
 
     public CommandRecord {
         Objects.requireNonNull(commandId, "commandId");

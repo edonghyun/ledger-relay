@@ -8,7 +8,7 @@ public class ReservationNotFoundException extends RuntimeException {
 
     public ReservationNotFoundException(String commandId, String reservationCommandId, String orderingKey) {
         super(commandId + "가 참조한 예약 " + reservationCommandId + "은(는) 같은 순서 키(" + orderingKey
-                + ")에 먼저 접수된 reserve 명령이 아닙니다");
+                + ")에 이미 커밋된 reserve 명령이 아닙니다");
         this.commandId = commandId;
         this.reservationCommandId = reservationCommandId;
     }

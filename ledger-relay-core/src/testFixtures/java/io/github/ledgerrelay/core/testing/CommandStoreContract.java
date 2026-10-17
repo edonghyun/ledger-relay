@@ -141,6 +141,20 @@ public abstract class CommandStoreContract {
             // then
             assertThat(found).as("넣은 적 없는 명령").isEmpty();
         }
+
+        @Test
+        @DisplayName("같은 트랜잭션에서는 방금 넣은 행으로 표시되고, 커밋한 뒤에는 그렇지 않다 — P2b-2")
+        void aRowIsMarkedAsAcceptedInThisTransactionUntilCommit() {
+            // when
+            boolean insideTheInsertingTransaction = inTx(() -> {
+                store.insertIfAbsent(newTransfer("pay-1", "order-1", 1));
+                return store.find("pay-1").orElseThrow().acceptedInThisTransaction();
+            });
+
+            // then
+            assertThat(insideTheInsertingTransaction).as("넣은 트랜잭션 안에서 본 표시").isTrue();
+            assertThat(record("pay-1").acceptedInThisTransaction()).as("커밋한 뒤에 본 표시").isFalse();
+        }
     }
 
     @Nested

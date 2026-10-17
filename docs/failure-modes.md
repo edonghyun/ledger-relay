@@ -6,7 +6,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - 처음부터 통과하는 테스트는 코드를 일부러 망가뜨려(대조군) 정말 실패하는지 확인한다. 대조군 결과도 적는다.
 - 수치는 실제로 잰 것만 적는다. 운영 지표와 실험(스펙 §9 E1~E10)은 해당 단계에서 채운다.
 
-## 1. 막은 장애 (02a, core)
+## 1. 막은 장애 (F1~F10은 02a core, F11부터 02b)
 
 ### F1. 막힌 키의 대기 명령이 claim 한도를 다 차지해 다른 키가 굶는다
 
@@ -81,6 +81,13 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **재현**: `LedgerRelayContract` › 확정이 참조한 예약 행이 없는 상태에서. 게이트는 `OrderingGateTest` › `haltsWhenTheReservationIsMissing`.
 - **구조**: F9와 같이 멈추고 HALTED로 주차한다. 멈춤이 이제 싸므로(한 번 알림, limit을 차지하지 않음, 포기 조치 있음) 보내는 쪽으로 바꿀 이유가 없다.
 - **확인**: OPEN으로 되돌린 대조군에서 3건이 실패한다. 02b에서는 `lockDue`가 참조 예약을 잠금과 상관없이 읽는지 동시성 장에서 확인한다(O1).
+
+### F11. 같은 트랜잭션에서 접수한 예약을 확정이 참조한다
+
+- **깨지는 것**: 스펙 §5.1-3은 확정·해제가 참조하는 예약이 "이미 커밋되어" 있기를 요구한다. 같은 앱 트랜잭션 안에서 예약과 확정을 함께 접수하면 두 명령의 운명이 한 트랜잭션에 묶인다. 그 트랜잭션의 다른 쿼리가 실패해 롤백되면 둘 다 사라지는 것은 괜찮지만, 앱이 저장점(savepoint)으로 예약만 되돌리면 참조할 곳이 없는 확정이 남는다. 그러면 F10처럼 멈춘다. 메모리 저장소는 이 경우를 받아들이고 있었다.
+- **재현**: `LedgerRelayContract` › 같은 앱 트랜잭션에서 예약을 접수하고 이어서 그 예약을 참조하면 › `thePostIsRefused`. 저장소 표시는 `CommandStoreContract` › `aRowIsMarkedAsAcceptedInThisTransactionUntilCommit`.
+- **구조**: 저장소는 사실만 알려 준다. `CommandRecord.acceptedInThisTransaction()`은 그 행을 지금 트랜잭션이 넣었는지를 나타낸다. PostgreSQL에서는 `accepted_xact xid8`과 `pg_current_xact_id_if_assigned()`를 비교한다. 거부는 서비스(`CommandLifecycle`)가 `ReservationNotFoundException`으로 한다(P2b-1·P2b-2).
+- **확인**: 두 테스트 모두 구현 전에 실패했다(표시가 false였고, 거부 예외가 없었다).
 
 ## 2. 열린 장애
 
