@@ -1,9 +1,10 @@
-package io.github.ledgerrelay.core;
+package io.github.ledgerrelay.core.domain;
 
 import static io.github.ledgerrelay.core.LedgerCommand.AMOUNT_MAX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.params.provider.Arguments.argumentSet;
 
+import io.github.ledgerrelay.core.LedgerCommand;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;

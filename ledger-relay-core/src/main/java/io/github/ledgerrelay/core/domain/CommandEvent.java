@@ -1,4 +1,6 @@
-package io.github.ledgerrelay.core;
+package io.github.ledgerrelay.core.domain;
+
+import io.github.ledgerrelay.core.ResultCategory;
 
 /** 전이표(스펙 §4.3)의 사건. claim은 게이트 결정(§5.2)에 따라 열림·닫힘으로 나뉘고, 건너뜀은 claim 뒤의 사건이다. */
 public enum CommandEvent {

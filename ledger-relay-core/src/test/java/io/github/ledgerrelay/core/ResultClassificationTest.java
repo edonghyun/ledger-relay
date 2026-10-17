@@ -127,18 +127,17 @@ class ResultClassificationTest {
     @DisplayName("분류마다")
     class Categories {
 
-        @ParameterizedTest(name = "{0} → 상태 {1}, 알림 {2}", quoteTextArguments = false)
+        @ParameterizedTest(name = "{0} → 알림 {1}", quoteTextArguments = false)
         @CsvSource(textBlock = """
-                APPLIED,       APPLIED,  false
-                CONFLICT,      CONFLICT, true
-                BUSINESS,      REJECTED, false
-                PRIOR_FAILURE, REJECTED, true
-                INVALID,       REJECTED, true
-                UNSUPPORTED,   CONFLICT, true
+                APPLIED,       false
+                CONFLICT,      true
+                BUSINESS,      false
+                PRIOR_FAILURE, true
+                INVALID,       true
+                UNSUPPORTED,   true
                 """)
-        @DisplayName("명령이 끝나는 상태와 알림 여부가 정해진다")
-        void decidesFinalStateAndAlert(ResultCategory category, CommandState state, boolean alerts) {
-            assertThat(category.finalState()).as("%s의 최종 상태", category).isEqualTo(state);
+        @DisplayName("사람에게 알릴지가 정해진다")
+        void decidesWhetherToAlert(ResultCategory category, boolean alerts) {
             assertThat(category.alerts()).as("%s의 알림 여부", category).isEqualTo(alerts);
         }
     }

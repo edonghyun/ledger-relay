@@ -1,0 +1,55 @@
+package io.github.ledgerrelay.core;
+
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+
+import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+/**
+ * 헥사고날 의존 방향(스펙 §7). 안쪽은 바깥을 모른다.
+ *
+ * <pre>
+ * 공개 API ◀── domain ◀── spi ◀── application
+ *    ▲______________________________│
+ * </pre>
+ */
+@DisplayName("헥사고날 경계 — 의존은 안쪽으로만 향한다 (스펙 §7)")
+class ArchitectureTest {
+
+    /** main 소스셋의 클래스만 본다. 테스트와 testFixtures는 경계 밖이다. */
+    static final JavaClasses MAIN = new ClassFileImporter()
+            .withImportOption(location -> location.contains("/classes/java/main/"))
+            .importPackages("io.github.ledgerrelay.core");
+
+    static final String PUBLIC = "io.github.ledgerrelay.core";
+    static final String DOMAIN = "io.github.ledgerrelay.core.domain..";
+    static final String APPLICATION = "io.github.ledgerrelay.core.application..";
+    static final String SPI = "io.github.ledgerrelay.core.spi..";
+
+    @Test
+    @DisplayName("공개 API는 도메인 규칙·서비스·포트를 모른다 — 앱 코드가 내부 타입에 묶이지 않게")
+    void thePublicApiKnowsNothingInside() {
+        noClasses().that().resideInAPackage(PUBLIC)
+                .should().dependOnClassesThat().resideInAnyPackage(DOMAIN, APPLICATION, SPI)
+                .check(MAIN);
+    }
+
+    @Test
+    @DisplayName("도메인 규칙은 서비스와 포트를 모른다 — 규칙은 저장 방식과 상관없이 참이다")
+    void theDomainKnowsNeitherServiceNorPorts() {
+        noClasses().that().resideInAPackage(DOMAIN)
+                .should().dependOnClassesThat().resideInAnyPackage(APPLICATION, SPI)
+                .check(MAIN);
+    }
+
+    @Test
+    @DisplayName("core는 JDK 말고 아무것도 쓰지 않는다 — Spring·PG·TB는 어댑터 모듈만 안다")
+    void coreUsesOnlyTheJdk() {
+        classes().that().resideInAPackage("io.github.ledgerrelay.core..")
+                .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "io.github.ledgerrelay.core..")
+                .check(MAIN);
+    }
+}

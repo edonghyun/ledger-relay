@@ -1,4 +1,4 @@
-package io.github.ledgerrelay.core;
+package io.github.ledgerrelay.core.domain;
 
 /** 순서 게이트의 결정(스펙 §5.2). */
 public enum GateDecision {

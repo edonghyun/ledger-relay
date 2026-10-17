@@ -1,5 +1,6 @@
-package io.github.ledgerrelay.core;
+package io.github.ledgerrelay.core.domain;
 
+import io.github.ledgerrelay.core.LedgerCommand;
 import java.util.List;
 import java.util.Optional;
 
@@ -7,7 +8,7 @@ import java.util.Optional;
  * 순서 게이트(스펙 G4, §5.2). 같은 순서 키에서 seq가 더 작은 명령이 모두 최종 상태일 때만 제출한다.
  * post·void는 참조한 예약이 APPLIED가 아닌 최종 상태로 끝났으면 건너뛴다.
  *
- * <p>2단계 jdbc는 이 규칙을 SQL로 옮긴다. 이 클래스가 그 규칙의 명세이며, 가짜 TB와 무작위 검증(E6a)이 직접 쓴다.
+ * <p>애플리케이션 서비스가 claim할 때 이 규칙을 실행한다. 저장소는 후보와 참조한 예약의 상태를 읽어 줄 뿐이다.
  */
 public final class OrderingGate {
 
@@ -38,8 +39,8 @@ public final class OrderingGate {
             // 그런데도 없다면 버그다. TB에 보내면 같은 TB ID의 엉뚱한 예약을 확정할 수 있으므로 멈추고 알린다.
             return GateDecision.HALT;
         }
-        CommandState state = reservation.get().state();
-        if (state == CommandState.APPLIED) {
+        StoredState state = reservation.get().state();
+        if (state == StoredState.APPLIED) {
             return GateDecision.OPEN;
         }
         if (state.isFinal()) {

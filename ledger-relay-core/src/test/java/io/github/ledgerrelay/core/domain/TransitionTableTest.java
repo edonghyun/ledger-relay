@@ -1,8 +1,9 @@
-package io.github.ledgerrelay.core;
+package io.github.ledgerrelay.core.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.ledgerrelay.core.Transition.Effect;
+import io.github.ledgerrelay.core.ResultCategory;
+import io.github.ledgerrelay.core.domain.Transition.Effect;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -99,7 +100,7 @@ class TransitionTableTest {
         @ParameterizedTest(name = "{0} + {1} → {2}", quoteTextArguments = false)
         @CsvSource(textBlock = TRANSITION_TABLE)
         @DisplayName("표에 적힌 결과가 나온다")
-        void producesTheTabledTransition(CommandState current, CommandEvent event, String expected) {
+        void producesTheTabledTransition(StoredState current, CommandEvent event, String expected) {
             // when
             Transition next = TransitionTable.next(current, event);
 
@@ -114,7 +115,7 @@ class TransitionTableTest {
             // given
             List<String> pairsInTheTable = rows().stream().map(row -> row[0] + "," + row[1]).toList();
             List<String> allPairs = new ArrayList<>();
-            for (CommandState state : CommandState.values()) {
+            for (StoredState state : StoredState.values()) {
                 for (CommandEvent event : CommandEvent.values()) {
                     allPairs.add(state + "," + event);
                 }
@@ -131,9 +132,9 @@ class TransitionTableTest {
     class TableWideRules {
 
         @ParameterizedTest(name = "{0}")
-        @EnumSource(value = CommandState.class, names = {"APPLIED", "REJECTED", "CONFLICT", "SKIPPED"})
+        @EnumSource(value = StoredState.class, names = {"APPLIED", "REJECTED", "CONFLICT", "SKIPPED"})
         @DisplayName("G5: 최종 상태는 어떤 사건에도 다른 상태로 바뀌지 않는다")
-        void finalStatesNeverMove(CommandState finalState) {
+        void finalStatesNeverMove(StoredState finalState) {
             for (CommandEvent event : CommandEvent.values()) {
                 assertThat(TransitionTable.next(finalState, event).outcome())
                         .as("%s 상태에서 %s 사건", finalState, event)
@@ -146,7 +147,7 @@ class TransitionTableTest {
         void pendingCommandsMoveOnlyByAClaimThatIncrementsTheToken() {
             for (CommandEvent event : CommandEvent.values()) {
                 // when
-                Transition next = TransitionTable.next(CommandState.PENDING, event);
+                Transition next = TransitionTable.next(StoredState.PENDING, event);
                 if (next.outcome() != Transition.Outcome.MOVE) {
                     continue;
                 }
@@ -154,7 +155,7 @@ class TransitionTableTest {
                 // then
                 assertThat(next)
                         .as("PENDING + %s: 처리 중(CLAIMED)으로 가며 토큰을 올리기를 기대했다", event)
-                        .isEqualTo(new Transition(Transition.Outcome.MOVE, CommandState.CLAIMED,
+                        .isEqualTo(new Transition(Transition.Outcome.MOVE, StoredState.CLAIMED,
                                 Set.of(Effect.INCREMENT_LEASE_TOKEN)));
             }
         }
@@ -162,7 +163,7 @@ class TransitionTableTest {
         @Test
         @DisplayName("G6: 핸들러는 최종 상태로 들어가는 전이에서만, 그리고 그때마다 실행된다")
         void handlerRunsExactlyOnEnteringAFinalState() {
-            for (CommandState state : CommandState.values()) {
+            for (StoredState state : StoredState.values()) {
                 for (CommandEvent event : CommandEvent.values()) {
                     // when
                     Transition next = TransitionTable.next(state, event);
@@ -189,11 +190,11 @@ class TransitionTableTest {
         @DisplayName("분류표(§4.4)가 정한 최종 상태와 전이표(§4.3)가 보내는 상태가 같다 — 두 표가 따로 고쳐져 어긋나지 않게")
         void classificationAndTransitionAgreeOnTheFinalState(ResultCategory category) {
             // when
-            Transition next = TransitionTable.next(CommandState.CLAIMED, CommandEvent.of(category));
+            Transition next = TransitionTable.next(StoredState.CLAIMED, CommandEvent.of(category));
 
             // then
             assertThat(next.to()).as("%s 결과를 받은 처리 중 명령이 끝나는 상태", category)
-                    .isEqualTo(category.finalState());
+                    .isEqualTo(StoredState.finalStateFor(category));
         }
     }
 
@@ -249,7 +250,7 @@ class TransitionTableTest {
                         default -> throw new IllegalArgumentException("표기 오류: " + parts[i]);
                     });
                 }
-                yield new Transition(Transition.Outcome.MOVE, CommandState.valueOf(parts[0]), effects);
+                yield new Transition(Transition.Outcome.MOVE, StoredState.valueOf(parts[0]), effects);
             }
         };
     }

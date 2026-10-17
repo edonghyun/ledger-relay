@@ -1,10 +1,12 @@
-package io.github.ledgerrelay.core;
+package io.github.ledgerrelay.core.domain;
 
-import static io.github.ledgerrelay.core.CommandState.APPLIED;
-import static io.github.ledgerrelay.core.CommandState.PENDING;
-import static io.github.ledgerrelay.core.CommandState.REJECTED;
+import static io.github.ledgerrelay.core.domain.StoredState.APPLIED;
+import static io.github.ledgerrelay.core.domain.StoredState.PENDING;
+import static io.github.ledgerrelay.core.domain.StoredState.REJECTED;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.ledgerrelay.core.CommandKind;
+import io.github.ledgerrelay.core.LedgerCommand;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -65,9 +67,9 @@ class OrderingGateTest {
     class UnfinishedEarlierCommand {
 
         @ParameterizedTest(name = "앞 명령이 {0}")
-        @EnumSource(value = CommandState.class, names = {"PENDING", "CLAIMED"})
+        @EnumSource(value = StoredState.class, names = {"PENDING", "CLAIMED"})
         @DisplayName("G2: 앞 명령이 끝날 때까지 기다린다 — 결과가 미확정이어도, 뒤 명령이 재시도여도")
-        void waitsForTheEarlierCommand(CommandState unfinished) {
+        void waitsForTheEarlierCommand(StoredState unfinished) {
             // given: pay-1(seq 1)이 아직 끝나지 않았다
             List<QueuedCommand> sameKey = sameKey(queued("pay-1", 1, unfinished));
 
@@ -85,9 +87,9 @@ class OrderingGateTest {
     class FinishedEarlierCommands {
 
         @ParameterizedTest(name = "앞 명령이 {0}")
-        @EnumSource(value = CommandState.class, names = {"APPLIED", "REJECTED", "CONFLICT", "SKIPPED"})
+        @EnumSource(value = StoredState.class, names = {"APPLIED", "REJECTED", "CONFLICT", "SKIPPED"})
         @DisplayName("결과와 관계없이 제출한다 — 거절된 앞 명령이 키를 막지 않는다")
-        void submitsWhateverTheEarlierOutcome(CommandState finished) {
+        void submitsWhateverTheEarlierOutcome(StoredState finished) {
             // given
             List<QueuedCommand> sameKey = sameKey(queued("pay-1", 1, finished));
 
@@ -177,7 +179,7 @@ class OrderingGateTest {
                 VOID, SKIPPED
                 """)
         @DisplayName("적용되지 않은 최종 상태로 끝났으면 TB에 보내지 않고 건너뛴다(SKIPPED)")
-        void skipsWhenTheReservationEndedUnapplied(CommandKind kind, CommandState unapplied) {
+        void skipsWhenTheReservationEndedUnapplied(CommandKind kind, StoredState unapplied) {
             // given
             List<QueuedCommand> sameKey = sameKey(queued("hold-1", 1, unapplied));
 
@@ -189,9 +191,9 @@ class OrderingGateTest {
         }
 
         @ParameterizedTest(name = "예약이 {0}")
-        @EnumSource(value = CommandState.class, names = {"PENDING", "CLAIMED"})
+        @EnumSource(value = StoredState.class, names = {"PENDING", "CLAIMED"})
         @DisplayName("아직 끝나지 않았으면 끝날 때까지 기다린다")
-        void waitsForAnUnfinishedReservation(CommandState unfinished) {
+        void waitsForAnUnfinishedReservation(StoredState unfinished) {
             // given
             List<QueuedCommand> sameKey = sameKey(queued("hold-1", 1, unfinished));
 
@@ -237,9 +239,9 @@ class OrderingGateTest {
         }
 
         @ParameterizedTest(name = "예약이 {0}")
-        @EnumSource(value = CommandState.class, names = {"PENDING", "CLAIMED"})
+        @EnumSource(value = StoredState.class, names = {"PENDING", "CLAIMED"})
         @DisplayName("참조한 예약이 자기보다 뒤 seq에서 아직 끝나지 않았으면 제출하지 않고 멈춘 뒤 알린다")
-        void haltsWhenTheReservationComesLater(CommandState unfinished) {
+        void haltsWhenTheReservationComesLater(StoredState unfinished) {
             // given: 예약 hold-1(seq 3)이 확정(seq 2)보다 뒤에 있다. 접수 검사(§5.1-3)가 막았어야 하는 순서다
             List<QueuedCommand> sameKey = sameKey(queued("hold-1", 3, unfinished));
 
@@ -301,7 +303,7 @@ class OrderingGateTest {
         return List.of(commands);
     }
 
-    private static QueuedCommand queued(String commandId, long seq, CommandState state) {
+    private static QueuedCommand queued(String commandId, long seq, StoredState state) {
         return new QueuedCommand(commandId, seq, state);
     }
 

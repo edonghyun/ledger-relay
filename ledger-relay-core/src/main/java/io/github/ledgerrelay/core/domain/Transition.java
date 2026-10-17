@@ -1,9 +1,9 @@
-package io.github.ledgerrelay.core;
+package io.github.ledgerrelay.core.domain;
 
 import java.util.Set;
 
 /** 전이표 한 칸의 결과(스펙 §4.3). */
-public record Transition(Outcome outcome, CommandState to, Set<Effect> effects) {
+public record Transition(Outcome outcome, StoredState to, Set<Effect> effects) {
 
     public enum Outcome {
         /** {@link #to()} 상태로 이동하고 {@link #effects()}를 낸다. */
@@ -33,7 +33,7 @@ public record Transition(Outcome outcome, CommandState to, Set<Effect> effects) 
         effects = Set.copyOf(effects);
     }
 
-    public static Transition moveTo(CommandState to, Effect... effects) {
+    public static Transition moveTo(StoredState to, Effect... effects) {
         return new Transition(Outcome.MOVE, to, Set.of(effects));
     }
 

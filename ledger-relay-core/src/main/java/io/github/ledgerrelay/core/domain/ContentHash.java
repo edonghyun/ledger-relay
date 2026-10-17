@@ -1,7 +1,8 @@
-package io.github.ledgerrelay.core;
+package io.github.ledgerrelay.core.domain;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+import io.github.ledgerrelay.core.LedgerCommand;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
