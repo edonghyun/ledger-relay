@@ -8,14 +8,17 @@ import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertN
 import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertPostedAndReleased;
 import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertReserved;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.tigerbeetle.UInt128;
 import io.github.ledgerrelay.core.CommandKind;
 import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.LedgerResultCode;
+import io.github.ledgerrelay.core.spi.LedgerUnavailableException;
 import io.github.ledgerrelay.core.spi.Submission;
 import io.github.ledgerrelay.core.spi.TransferBody;
 import io.github.ledgerrelay.tigerbeetle.testing.Account;
+import io.github.ledgerrelay.tigerbeetle.testing.StoredTransfer;
 import io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleContainer;
 import io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleTestLedger;
 import java.math.BigInteger;
@@ -35,7 +38,8 @@ import org.junit.jupiter.api.Test;
 class TigerBeetleLedgerClientTest {
 
     static final TigerBeetleContainer TB = new TigerBeetleContainer();
-    static final AtomicLong TRANSFER_IDS = new AtomicLong(System.nanoTime());
+    /** 컨테이너는 이 클래스만 쓰므로 고정된 양수에서 센다(System.nanoTime은 음수일 수 있다). */
+    static final AtomicLong TRANSFER_IDS = new AtomicLong(1_000_000);
     static TigerBeetleTestLedger ledger;
     static com.tigerbeetle.Client adapterClient;
     static TigerBeetleLedgerClient adapter;
@@ -176,6 +180,57 @@ class TigerBeetleLedgerClientTest {
             // then
             assertThat(results).as("TB 결과").containsExactly(Exists, Exists);
             assertMovedExactly(ledger, payer, payee, 3);
+        }
+    }
+
+    @Nested
+    @Order(3)
+    @DisplayName("부호 없는 큰 값과 user_data를 보내면")
+    class LargeValues {
+
+        @Test
+        @DisplayName("u32 최댓값(ledger, timeout)과 user_data_64·32 최댓값이 그대로 저장된다 — int로 자르지 않는다")
+        void nonZeroUserDataAndTheLargestU32ValuesRoundTrip() {
+            // given: ledger 2^32-1의 계좌 둘
+            Account from = ledger.openAccount("큰 ledger의 구매자", -1);
+            Account to = ledger.openAccount("큰 ledger의 가맹점", -1);
+            Submission hold = new Submission(nextTransferId(), BigInteger.ONE, new TransferBody(CommandKind.RESERVE,
+                    accountIdOf(from), accountIdOf(to), BigInteger.valueOf(1), 4_294_967_295L, 65_535,
+                    4_294_967_295L, Optional.empty(), -1L, -1));
+
+            // when
+            List<LedgerResultCode> results = submitted(hold);
+
+            // then
+            assertThat(results).as("TB 결과").containsExactly(Created);
+            StoredTransfer stored = ledger.stored(hold.transferId());
+            assertThat(Integer.toUnsignedLong(stored.ledger())).as("저장된 ledger").isEqualTo(4_294_967_295L);
+            assertThat(stored.timeoutSeconds()).as("저장된 timeout").isEqualTo(4_294_967_295L);
+            assertThat(stored.code()).as("저장된 code").isEqualTo(65_535);
+            assertThat(stored.userData64()).as("저장된 user_data_64").isEqualTo(-1L);
+            assertThat(stored.userData32()).as("저장된 user_data_32").isEqualTo(-1);
+        }
+    }
+
+    @Nested
+    @Order(4)
+    @DisplayName("닫힌 클라이언트로 보내면")
+    class ClosedClient {
+
+        @Test
+        @DisplayName("다시 써도 회복되지 않는 실패(LedgerUnavailableException)로 알린다 — 일시적 실패와 구분되게 (P2d-8)")
+        void aClosedClientIsReportedAsUnavailable() {
+            // given
+            com.tigerbeetle.Client closed = TB.newClient();
+            closed.close();
+            TigerBeetleLedgerClient onClosed = new TigerBeetleLedgerClient(closed);
+
+            // when
+            Throwable failure = catchThrowable(() -> onClosed.submit(List.of(transfer(1))).get(30, TimeUnit.SECONDS));
+
+            // then
+            Throwable cause = failure instanceof java.util.concurrent.ExecutionException ? failure.getCause() : failure;
+            assertThat(cause).as("닫힌 클라이언트로 보낸 결과").isInstanceOf(LedgerUnavailableException.class);
         }
     }
 
