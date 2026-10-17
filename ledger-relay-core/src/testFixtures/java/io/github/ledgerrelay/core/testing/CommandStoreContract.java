@@ -657,9 +657,11 @@ public abstract class CommandStoreContract {
                     () -> store.nextSeq("order-1"));
                  OtherTransaction<Long> second = startAfter(first, () -> store.nextSeq("order-1"))) {
 
-                // then: 두 번째는 첫 번째가 커밋할 때까지 막히고, 그 뒤 2를 받는다
+                // when: 두 번째는 첫 번째가 커밋할 때까지 막혀 있다
                 second.assertStillWorkingAfter(BLOCKED);
                 first.commit();
+
+                // then
                 assertThat(second.awaitWork()).as("두 번째 접수가 받은 순번").isEqualTo(2);
             }
         }
@@ -676,7 +678,7 @@ public abstract class CommandStoreContract {
                      return existing.map(CommandRecord::orderingKey).orElse("-") + "/" + nextOnAnotherKey;
                  })) {
 
-                // when
+                // when: 늦은 쪽은 먼저 넣은 쪽이 커밋할 때까지 막혀 있다
                 second.assertStillWorkingAfter(BLOCKED);
                 first.commit();
 
