@@ -52,7 +52,61 @@ CREATE TABLE ledger_command (
     CONSTRAINT ledger_command_reference_check CHECK (
         (kind IN ('POST','VOID')) = (reservation_command_id IS NOT NULL AND pending_transfer_id IS NOT NULL)),
     -- 처리 중인데 lease 만료 시각이 없으면 영원히 다시 잡히지 않는다
-    CONSTRAINT ledger_command_claimed_lease_check CHECK (state <> 'CLAIMED' OR lease_expires_at IS NOT NULL)
+    CONSTRAINT ledger_command_claimed_lease_check CHECK (state <> 'CLAIMED' OR lease_expires_at IS NOT NULL),
+    -- 결과 코드는 저장 이름(wireName) 68개 중 하나다. 모르는 값이 있으면 claim이 그 행을 읽다 전체가 멈춘다(F29).
+    -- TB를 올려 코드가 늘면 이 목록도 함께 고친다(JdbcCommandStoreTest의 everyWireNameIsAccepted가 어긋남을 잡는다, F8)
+    CONSTRAINT ledger_command_known_result_check CHECK (known_result IN (
+        'created', 'linked_event_failed', 'linked_event_chain_open', 'imported_event_expected',
+        'imported_event_not_expected', 'timestamp_must_be_zero', 'imported_event_timestamp_out_of_range',
+        'imported_event_timestamp_must_not_advance', 'reserved_flag', 'id_must_not_be_zero',
+        'id_must_not_be_int_max', 'exists_with_different_flags', 'exists_with_different_pending_id',
+        'exists_with_different_timeout', 'exists_with_different_debit_account_id',
+        'exists_with_different_credit_account_id', 'exists_with_different_amount',
+        'exists_with_different_user_data_128', 'exists_with_different_user_data_64',
+        'exists_with_different_user_data_32', 'exists_with_different_ledger', 'exists_with_different_code', 'exists',
+        'id_already_failed', 'flags_are_mutually_exclusive', 'debit_account_id_must_not_be_zero',
+        'debit_account_id_must_not_be_int_max', 'credit_account_id_must_not_be_zero',
+        'credit_account_id_must_not_be_int_max', 'accounts_must_be_different', 'pending_id_must_be_zero',
+        'pending_id_must_not_be_zero', 'pending_id_must_not_be_int_max', 'pending_id_must_be_different',
+        'timeout_reserved_for_pending_transfer', 'closing_transfer_must_be_pending', 'ledger_must_not_be_zero',
+        'code_must_not_be_zero', 'debit_account_not_found', 'credit_account_not_found',
+        'accounts_must_have_the_same_ledger', 'transfer_must_have_the_same_ledger_as_accounts',
+        'pending_transfer_not_found', 'pending_transfer_not_pending',
+        'pending_transfer_has_different_debit_account_id', 'pending_transfer_has_different_credit_account_id',
+        'pending_transfer_has_different_ledger', 'pending_transfer_has_different_code',
+        'exceeds_pending_transfer_amount', 'pending_transfer_has_different_amount',
+        'pending_transfer_already_posted', 'pending_transfer_already_voided', 'pending_transfer_expired',
+        'imported_event_timestamp_must_not_regress', 'imported_event_timestamp_must_postdate_debit_account',
+        'imported_event_timestamp_must_postdate_credit_account', 'imported_event_timeout_must_be_zero',
+        'debit_account_already_closed', 'credit_account_already_closed', 'overflows_debits_pending',
+        'overflows_credits_pending', 'overflows_debits_posted', 'overflows_credits_posted', 'overflows_debits',
+        'overflows_credits', 'overflows_timeout', 'exceeds_credits', 'exceeds_debits')),
+    CONSTRAINT ledger_command_result_code_check CHECK (result_code IN (
+        'created', 'linked_event_failed', 'linked_event_chain_open', 'imported_event_expected',
+        'imported_event_not_expected', 'timestamp_must_be_zero', 'imported_event_timestamp_out_of_range',
+        'imported_event_timestamp_must_not_advance', 'reserved_flag', 'id_must_not_be_zero',
+        'id_must_not_be_int_max', 'exists_with_different_flags', 'exists_with_different_pending_id',
+        'exists_with_different_timeout', 'exists_with_different_debit_account_id',
+        'exists_with_different_credit_account_id', 'exists_with_different_amount',
+        'exists_with_different_user_data_128', 'exists_with_different_user_data_64',
+        'exists_with_different_user_data_32', 'exists_with_different_ledger', 'exists_with_different_code', 'exists',
+        'id_already_failed', 'flags_are_mutually_exclusive', 'debit_account_id_must_not_be_zero',
+        'debit_account_id_must_not_be_int_max', 'credit_account_id_must_not_be_zero',
+        'credit_account_id_must_not_be_int_max', 'accounts_must_be_different', 'pending_id_must_be_zero',
+        'pending_id_must_not_be_zero', 'pending_id_must_not_be_int_max', 'pending_id_must_be_different',
+        'timeout_reserved_for_pending_transfer', 'closing_transfer_must_be_pending', 'ledger_must_not_be_zero',
+        'code_must_not_be_zero', 'debit_account_not_found', 'credit_account_not_found',
+        'accounts_must_have_the_same_ledger', 'transfer_must_have_the_same_ledger_as_accounts',
+        'pending_transfer_not_found', 'pending_transfer_not_pending',
+        'pending_transfer_has_different_debit_account_id', 'pending_transfer_has_different_credit_account_id',
+        'pending_transfer_has_different_ledger', 'pending_transfer_has_different_code',
+        'exceeds_pending_transfer_amount', 'pending_transfer_has_different_amount',
+        'pending_transfer_already_posted', 'pending_transfer_already_voided', 'pending_transfer_expired',
+        'imported_event_timestamp_must_not_regress', 'imported_event_timestamp_must_postdate_debit_account',
+        'imported_event_timestamp_must_postdate_credit_account', 'imported_event_timeout_must_be_zero',
+        'debit_account_already_closed', 'credit_account_already_closed', 'overflows_debits_pending',
+        'overflows_credits_pending', 'overflows_debits_posted', 'overflows_credits_posted', 'overflows_debits',
+        'overflows_credits', 'overflows_timeout', 'exceeds_credits', 'exceeds_debits'))
 );
 
 -- 미완료 명령의 키별 맨 앞 판정(§5.2, R7). HALTED도 키를 막으므로 넣는다(F9).

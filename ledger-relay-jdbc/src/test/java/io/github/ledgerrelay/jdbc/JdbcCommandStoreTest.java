@@ -191,6 +191,45 @@ class JdbcCommandStoreTest extends CommandStoreContract {
             assertThat(refused).as("%s를 막은 제약", meaning).hasMessageContaining(constraint);
         }
 
+        @ParameterizedTest(name = "{0}", quoteTextArguments = false)
+        @CsvSource(textBlock = """
+                known_result
+                result_code
+                """)
+        @DisplayName("결과 코드 칸에 모르는 저장 이름을 넣으면 거부된다 — claim이 그 행을 읽다 전체가 멈추지 않게 (F29)")
+        void anUnknownResultCodeIsRefused(String column) {
+            // given
+            storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(newTransfer("pay-1", "order-1", 1)));
+
+            // when
+            Throwable refused = catchThrowable(() -> storage.sql()
+                    .sql("UPDATE ledger_command SET " + column + " = 'made_up_code' WHERE command_id = 'pay-1'").update());
+
+            // then
+            assertThat(sqlState(refused)).as("%s에 모르는 값 (실패: %s)", column, refused).isEqualTo(CHECK_VIOLATION);
+        }
+
+        @Test
+        @DisplayName("결과 코드의 저장 이름은 모두 받아들인다 — TB를 올려 코드가 늘면 스키마도 함께 고치게")
+        void everyWireNameIsAccepted() {
+            // given
+            storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(newTransfer("pay-1", "order-1", 1)));
+
+            // when
+            List<String> refused = new java.util.ArrayList<>();
+            for (io.github.ledgerrelay.core.LedgerResultCode code : io.github.ledgerrelay.core.LedgerResultCode.values()) {
+                Throwable failure = catchThrowable(() -> storage.sql()
+                        .sql("UPDATE ledger_command SET known_result = :code, result_code = :code WHERE command_id = 'pay-1'")
+                        .param("code", code.wireName()).update());
+                if (failure != null) {
+                    refused.add(code.wireName());
+                }
+            }
+
+            // then
+            assertThat(refused).as("스키마가 거부한 저장 이름").isEmpty();
+        }
+
         @Test
         @DisplayName("같은 커넥션에서 준비 문장이 된 조회도 운영 중 ADD COLUMN 뒤에 깨지지 않는다 — SELECT * 를 쓰지 않는다")
         void findSurvivesAnAddedColumn() {
