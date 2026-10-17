@@ -55,7 +55,7 @@ public abstract class LedgerRelayContract {
     protected void givenAnEmptyRelay() {
         storage = createStorage();
         relay = new CommandLifecycle(storage.store(), storage.transactions(), new SequentialTransferIds(), handler,
-                new Backoff(BACKOFF, BACKOFF));
+                new Backoff(BACKOFF, BACKOFF.multipliedBy(4)));
     }
 
     @Nested
@@ -578,6 +578,27 @@ public abstract class LedgerRelayContract {
 
             // then
             assertThat(again.knownResult()).as("다시 잡은 명령이 싣고 온 결과").contains(ExceedsCredits);
+        }
+
+        @Test
+        @DisplayName("다시 실패하면 두 배를 기다린다 — 핸들러 실패 횟수가 남아 있어야 대기가 는다")
+        void aSecondFailureWaitsTwiceAsLong() {
+            // given
+            handler.failNextCalls(2);
+            relay.complete(pay1, ExceedsCredits);
+            storage.elapse(BACKOFF);
+            ClaimedCommand again = claimOnly("pay-1");
+            assertHandlerFailed(relay.complete(again, ExceedsCredits));
+
+            // when
+            storage.elapse(BACKOFF.multipliedBy(2).minusSeconds(1));
+            ClaimBatch tooEarly = relay.claim(10, LEASE);
+            storage.elapse(Duration.ofSeconds(1));
+            ClaimBatch onTime = relay.claim(10, LEASE);
+
+            // then
+            assertNothingClaimed(tooEarly);
+            assertClaimed(onTime, "pay-1");
         }
 
         @Test

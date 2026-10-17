@@ -395,6 +395,21 @@ public abstract class CommandStoreContract {
         }
 
         @Test
+        @DisplayName("행의 모든 칸이 그대로 남는다 — 제출 횟수, 아는 결과, 결과 코드, 핸들러 실패 횟수")
+        void everyColumnOfTheRowIsKept() {
+            // given
+            CommandRow failedTwiceKnowingExceedsCredits = new CommandRow(StoredState.PENDING, 3, 2,
+                    Optional.of(LedgerResultCode.ExceedsCredits), Optional.of(LedgerResultCode.ExceedsCredits), 3);
+
+            // when
+            inTx(() -> store.compareAndSet(new RowChange(pay1.rowId(), StoredState.CLAIMED, 3,
+                    failedTwiceKnowingExceedsCredits, new RowChange.Stamp.RetryAfter(BACKOFF))));
+
+            // then
+            assertThat(record("pay-1").row()).as("다시 읽은 행").isEqualTo(failedTwiceKnowingExceedsCredits);
+        }
+
+        @Test
         @DisplayName("토큰이 다르면 바뀌지 않는다")
         void anotherTokenIsRefused() {
             // when
