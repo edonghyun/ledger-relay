@@ -107,9 +107,9 @@ class LedgerCommandTest {
     @DisplayName("규칙을 어긴 명령을 만들면")
     class InvalidCommands {
 
-        @ParameterizedTest(name = "{argumentSetName}")
+        @ParameterizedTest(name = "{argumentSetName} → \"{1}\"", quoteTextArguments = false)
         @MethodSource("invalidCommands")
-        @DisplayName("InvalidCommandException으로 거부되고, 메시지에 무엇이 틀렸는지 적힌다")
+        @DisplayName("만들 수 없고, 무엇이 틀렸는지 알려 준다")
         void isRejectedWithTheReason(ThrowingCallable building, String reason) {
             assertRejectedAsInvalid(building, reason);
         }
@@ -117,80 +117,87 @@ class LedgerCommandTest {
         static Stream<Arguments> invalidCommands() {
             return Stream.of(
                     argumentSet("commandId가 비어 있으면",
-                            build(() -> LedgerCommand.transfer(" ").orderingKey("order-42")
-                                    .debit(1001).credit(2002).amount(500).ledger(1).code(10).build()),
+                            (ThrowingCallable) () -> aTransfer(" ").build(),
                             "commandId가 필요합니다"),
                     argumentSet("orderingKey가 없으면",
-                            build(() -> aTransfer().orderingKey(null).build()), "orderingKey가 필요합니다"),
+                            (ThrowingCallable) () -> aTransfer("pay-1").orderingKey(null).build(), "orderingKey가 필요합니다"),
                     argumentSet("보내는 계좌가 0(없음)이면",
-                            build(() -> aTransfer().debit(0).build()), "debitAccountId가 필요합니다"),
+                            (ThrowingCallable) () -> aTransfer("pay-1").debit(0).build(), "debitAccountId가 필요합니다"),
                     argumentSet("받는 계좌가 2^128-1(TB 예약값)이면",
-                            build(() -> aTransfer().credit(UINT128_MAX).build()),
+                            (ThrowingCallable) () -> aTransfer("pay-1").credit(UINT128_MAX).build(),
                             "creditAccountId는 1 이상 2^128-2 이하여야 합니다"),
                     argumentSet("보내는 계좌와 받는 계좌가 같으면",
-                            build(() -> aTransfer().credit(1001).build()), "같은 계좌일 수 없습니다"),
+                            (ThrowingCallable) () -> aTransfer("pay-1").credit(1001).build(), "같은 계좌일 수 없습니다"),
                     argumentSet("이체에 금액이 없으면",
-                            build(() -> LedgerCommand.transfer("pay-1").orderingKey("order-42")
-                                    .debit(1001).credit(2002).ledger(1).code(10).build()),
+                            (ThrowingCallable) () -> aTransferWithoutAmount().build(),
                             "amount가 필요합니다"),
                     argumentSet("금액이 음수면",
-                            build(() -> aTransfer().amount(-1).build()), "amount는 0 이상 2^128-1 이하여야 합니다"),
+                            (ThrowingCallable) () -> aTransfer("pay-1").amount(-1).build(), "amount는 0 이상 2^128-1 이하여야 합니다"),
                     argumentSet("금액이 2^128 이상이면",
-                            build(() -> aTransfer().amount(UINT128_MAX.add(BigInteger.ONE)).build()),
+                            (ThrowingCallable) () -> aTransfer("pay-1").amount(UINT128_MAX.add(BigInteger.ONE)).build(),
                             "amount는 0 이상 2^128-1 이하여야 합니다"),
                     argumentSet("ledger가 0이면",
-                            build(() -> aTransfer().ledger(0).build()), "ledger는 1 이상 2^32-1 이하여야 합니다"),
+                            (ThrowingCallable) () -> aTransfer("pay-1").ledger(0).build(), "ledger는 1 이상 2^32-1 이하여야 합니다"),
                     argumentSet("code가 65535를 넘으면",
-                            build(() -> aTransfer().code(65536).build()), "code는 1 이상 65535 이하여야 합니다"),
+                            (ThrowingCallable) () -> aTransfer("pay-1").code(65536).build(), "code는 1 이상 65535 이하여야 합니다"),
                     argumentSet("이체에 timeoutSeconds를 주면",
-                            build(() -> aTransfer().timeoutSeconds(30).build()), "timeoutSeconds는 reserve 전용입니다"),
+                            (ThrowingCallable) () -> aTransfer("pay-1").timeoutSeconds(30).build(), "timeoutSeconds는 reserve 전용입니다"),
                     argumentSet("예약의 timeoutSeconds가 2^32 이상이면",
-                            build(() -> aReserve().timeoutSeconds(1L << 32).build()),
+                            (ThrowingCallable) () -> aReserve().timeoutSeconds(1L << 32).build(),
                             "timeoutSeconds는 0 이상 2^32-1 이하여야 합니다"),
                     argumentSet("이체에 reservation을 주면",
-                            build(() -> aTransfer().reservation("hold-1").build()), "reservation은 post·void 전용입니다"),
+                            (ThrowingCallable) () -> aTransfer("pay-1").reservation("hold-1").build(), "reservation은 post·void 전용입니다"),
                     argumentSet("확정에 reservation이 없으면",
-                            build(() -> LedgerCommand.post("capture-1").orderingKey("order-42").build()),
+                            (ThrowingCallable) () -> LedgerCommand.post("capture-1").orderingKey("order-42").build(),
                             "post·void에는 reservation이 필요합니다"),
                     argumentSet("확정에 보내는 계좌를 주면",
-                            build(() -> aPost().debit(1001).build()), "post·void는 예약의 계좌·ledger·code를 따르므로"),
+                            (ThrowingCallable) () -> aPost().debit(1001).build(), "post·void는 예약의 계좌·ledger·code를 따르므로"),
                     argumentSet("확정 금액이 0이면 — TB는 0원 확정 후 나머지를 풀므로, 전액 확정을 기대한 사용자가 돈을 못 받는다",
-                            build(() -> aPost().amount(0).build()), "post의 amount는 0일 수 없습니다"),
+                            (ThrowingCallable) () -> aPost().amount(0).build(), "post의 amount는 0일 수 없습니다"),
                     argumentSet("orderingKey가 공백이면",
-                            build(() -> aTransfer().orderingKey(" ").build()), "orderingKey가 필요합니다"),
+                            (ThrowingCallable) () -> aTransfer("pay-1").orderingKey(" ").build(), "orderingKey가 필요합니다"),
                     argumentSet("보내는 계좌가 음수면",
-                            build(() -> aTransfer().debit(-5).build()), "debitAccountId는 1 이상 2^128-2 이하여야 합니다"),
+                            (ThrowingCallable) () -> aTransfer("pay-1").debit(-5).build(), "debitAccountId는 1 이상 2^128-2 이하여야 합니다"),
                     argumentSet("ledger가 2^32 이상이면",
-                            build(() -> aTransfer().ledger(1L << 32).build()), "ledger는 1 이상 2^32-1 이하여야 합니다"),
+                            (ThrowingCallable) () -> aTransfer("pay-1").ledger(1L << 32).build(), "ledger는 1 이상 2^32-1 이하여야 합니다"),
                     argumentSet("code가 0이면",
-                            build(() -> aTransfer().code(0).build()), "code는 1 이상 65535 이하여야 합니다"),
+                            (ThrowingCallable) () -> aTransfer("pay-1").code(0).build(), "code는 1 이상 65535 이하여야 합니다"),
                     argumentSet("예약의 timeoutSeconds가 음수면",
-                            build(() -> aReserve().timeoutSeconds(-1).build()),
+                            (ThrowingCallable) () -> aReserve().timeoutSeconds(-1).build(),
                             "timeoutSeconds는 0 이상 2^32-1 이하여야 합니다"),
                     argumentSet("확정에 timeoutSeconds를 주면",
-                            build(() -> aPost().timeoutSeconds(30).build()), "timeoutSeconds는 reserve 전용입니다"),
+                            (ThrowingCallable) () -> aPost().timeoutSeconds(30).build(), "timeoutSeconds는 reserve 전용입니다"),
                     argumentSet("확정에 받는 계좌를 주면",
-                            build(() -> aPost().credit(2002).build()), "post·void는 예약의 계좌·ledger·code를 따르므로"),
+                            (ThrowingCallable) () -> aPost().credit(2002).build(), "post·void는 예약의 계좌·ledger·code를 따르므로"),
                     argumentSet("확정에 ledger를 주면",
-                            build(() -> aPost().ledger(1).build()), "post·void는 예약의 계좌·ledger·code를 따르므로"),
+                            (ThrowingCallable) () -> aPost().ledger(1).build(), "post·void는 예약의 계좌·ledger·code를 따르므로"),
                     argumentSet("해제에 code를 주면",
-                            build(() -> aVoid().code(10).build()), "post·void는 예약의 계좌·ledger·code를 따르므로"),
+                            (ThrowingCallable) () -> aVoid().code(10).build(), "post·void는 예약의 계좌·ledger·code를 따르므로"),
                     argumentSet("해제에 reservation이 없으면",
-                            build(() -> LedgerCommand.voidReservation("release-1").orderingKey("order-42").build()),
+                            (ThrowingCallable) () -> LedgerCommand.voidReservation("release-1").orderingKey("order-42").build(),
                             "post·void에는 reservation이 필요합니다"),
                     argumentSet("확정의 reservation이 공백이면",
-                            build(() -> aPost().reservation(" ").build()), "post·void에는 reservation이 필요합니다"),
+                            (ThrowingCallable) () -> aPost().reservation(" ").build(), "post·void에는 reservation이 필요합니다"),
                     argumentSet("해제에 금액을 주면",
-                            build(() -> aVoid().amount(100).build()), "void는 amount를 받지 않습니다"));
+                            (ThrowingCallable) () -> aVoid().amount(100).build(), "void는 amount를 받지 않습니다"));
         }
     }
 
     // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
 
     /** 기준 이체: order-42 키에서 1001 → 2002로 500, ledger 1, code 10. 각 행은 여기서 한 가지만 바꾼다. */
-    private static LedgerCommand.Builder aTransfer() {
-        return LedgerCommand.transfer("pay-1").orderingKey("order-42")
-                .debit(1001).credit(2002).amount(500).ledger(1).code(10);
+    private static LedgerCommand.Builder aTransfer(String commandId) {
+        return aTransferWithoutAmount(commandId).amount(500);
+    }
+
+    /** 금액만 빠진 기준 이체. */
+    private static LedgerCommand.Builder aTransferWithoutAmount() {
+        return aTransferWithoutAmount("pay-1");
+    }
+
+    private static LedgerCommand.Builder aTransferWithoutAmount(String commandId) {
+        return LedgerCommand.transfer(commandId).orderingKey("order-42")
+                .debit(1001).credit(2002).ledger(1).code(10);
     }
 
     /** 기준 예약: 기준 이체와 같은 값에 만료 30초. */
@@ -209,17 +216,13 @@ class LedgerCommandTest {
         return LedgerCommand.voidReservation("release-1").orderingKey("order-42").reservation("hold-1");
     }
 
-    private static ThrowingCallable build(ThrowingCallable building) {
-        return building;
-    }
-
     private static BigInteger big(long value) {
         return BigInteger.valueOf(value);
     }
 
     private static void assertRejectedAsInvalid(ThrowingCallable building, String reason) {
         assertThatThrownBy(building)
-                .as("잘못된 명령으로 거부되기(InvalidCommandException: %s)", reason)
+                .as("명령을 만들 수 없기(InvalidCommandException: %s)", reason)
                 .isInstanceOf(InvalidCommandException.class)
                 .hasMessageContaining(reason);
     }
