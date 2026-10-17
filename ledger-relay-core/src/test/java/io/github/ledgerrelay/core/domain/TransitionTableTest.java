@@ -188,7 +188,8 @@ class TransitionTableTest {
 
                 // then: 멈출 명령만 멈춤(HALTED)으로 가고, 나머지는 처리 중(CLAIMED)으로 간다. 어느 쪽이든 토큰을 올린다
                 StoredState expectedTo = event == CommandEvent.CLAIM_WITH_GATE_HALTED ? StoredState.HALTED : StoredState.CLAIMED;
-                assertThat(event.name()).as("PENDING을 움직인 사건 %s", event).startsWith("CLAIM_");
+                assertThat(event).as("PENDING을 움직인 사건")
+                        .isIn(CommandEvent.CLAIM_WITH_GATE_OPEN, CommandEvent.CLAIM_WITH_GATE_HALTED);
                 assertThat(next)
                         .as("PENDING + %s: %s로 가며 토큰을 올리기를 기대했다", event, expectedTo)
                         .isEqualTo(new Transition(Transition.Outcome.MOVE, expectedTo, Set.of(Effect.INCREMENT_LEASE_TOKEN)));

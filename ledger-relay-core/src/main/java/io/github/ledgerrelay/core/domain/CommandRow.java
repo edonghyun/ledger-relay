@@ -26,9 +26,13 @@ public record CommandRow(
         Objects.requireNonNull(knownResult, "knownResult");
         Objects.requireNonNull(resultCode, "resultCode");
         Objects.requireNonNull(skipReason, "skipReason");
+        if (skipReason.isPresent() != (state == StoredState.SKIPPED)) {
+            throw new IllegalArgumentException(
+                    "skipReason은 SKIPPED일 때만, 그리고 그때는 반드시 있어야 합니다: state=" + state + ", skipReason=" + skipReason);
+        }
     }
 
-    /** 건너뜀으로 끝나지 않은 행. */
+    /** 건너뜀으로 끝나지 않은 행. 건너뜀(SKIPPED)에 쓰면 이유가 없어 만들어지지 않는다. */
     public CommandRow(StoredState state, long leaseToken, long submitCount, Optional<LedgerResultCode> knownResult,
             Optional<LedgerResultCode> resultCode, int handlerFailures) {
         this(state, leaseToken, submitCount, knownResult, resultCode, handlerFailures, Optional.empty());

@@ -28,6 +28,8 @@ public final class CommandStateMachine {
         CommandEvent event = switch (row.state()) {
             case PENDING -> claim.gate().claimEvent();
             // 처리 중 명령은 lease가 끝났을 때만 다시 claim된다. 살아 있으면 표의 "불가" 칸으로 간다.
+            // 게이트 결정은 보지 않는다. 처리 중 명령은 claim될 때 이미 게이트를 통과했고, 게이트 입력(같은 키의 앞 명령,
+            // 참조한 예약)은 그 뒤 앞으로만 움직인다. 이 행이 멈춤 대상이 되려면 DB를 직접 고쳐야 한다.
             case CLAIMED -> claim.leaseExpired() ? CommandEvent.LEASE_EXPIRED : CommandEvent.CLAIM_WITH_GATE_OPEN;
             case APPLIED, REJECTED, CONFLICT, SKIPPED, HALTED -> CommandEvent.CLAIM_WITH_GATE_OPEN;
         };

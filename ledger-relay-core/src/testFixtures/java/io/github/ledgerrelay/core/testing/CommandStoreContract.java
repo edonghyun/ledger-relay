@@ -527,6 +527,44 @@ public abstract class CommandStoreContract {
         }
     }
 
+    @Nested
+    @Order(6)
+    @DisplayName("접수된 행을 멈춤으로 바꾸면 — F9")
+    class Halting {
+
+        @BeforeEach
+        void givenPay1IsHalted() {
+            inserted(newTransfer("pay-1", "order-1", 1));
+            halted("pay-1");
+        }
+
+        @Test
+        @DisplayName("멈춤으로 읽히고 완료 시각은 비어 있다 — 멈춘 명령은 끝난 것이 아니다")
+        void aHaltedRowIsNotFinished() {
+            // when
+            CommandRecord found = record("pay-1");
+
+            // then
+            assertThat(found.row()).as("멈춘 행").isEqualTo(
+                    new CommandRow(StoredState.HALTED, 1, 0, Optional.empty(), Optional.empty(), 0));
+            assertThat(found.completedAt()).as("멈춘 행의 완료 시각").isEmpty();
+        }
+
+        @Test
+        @DisplayName("운영자가 포기해 건너뜀으로 끝내면 완료 시각이 생긴다")
+        void abandoningStampsTheCompletionTime() {
+            // when
+            boolean changed = inTx(() -> store.compareAndSet(new RowChange(record("pay-1").rowId(), StoredState.HALTED, 1,
+                    new CommandRow(StoredState.SKIPPED, 1, 0, Optional.empty(), Optional.empty(), 0,
+                            Optional.of(SkipReason.ABANDONED_BY_OPERATOR)),
+                    new RowChange.Stamp.Completion())));
+
+            // then
+            assertThat(changed).as("반영 여부").isTrue();
+            assertThat(record("pay-1").completedAt()).as("포기한 뒤의 완료 시각").isPresent();
+        }
+    }
+
     // ── 행을 만드는 말: 값은 숨기지 않는다. 이체 ID는 101부터, 해시는 "hash-of-<id>"다 ─────────
 
     protected static NewCommand newTransfer(String commandId, String orderingKey, long seq) {

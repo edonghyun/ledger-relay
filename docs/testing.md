@@ -134,6 +134,8 @@ core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다
 - `CommandStoreContract`: 저장소 포트의 의미. 넣기, 찾기, 순번, 잠그고 읽기, 조건부 쓰기, 트랜잭션. 행은 손으로 만든다. 상태 기계를 거치지 않으며, 저장소가 판단하지 않는다는 것을 보여 준다.
 - `LedgerRelayContract`: 서비스 `CommandLifecycle`의 행동. 접수, 참조 검사, G1, claim과 게이트, 결과, 늦은 워커, 핸들러 실패, 순서.
 
+정상 경로에서 나올 수 없는 행(순서가 뒤집힌 확정, 예약 행이 없는 확정)은 `acceptedPastTheChecks(postRow(…))`로 접수 검사를 거치지 않고 저장소에 바로 넣어 만든다. 그래서 멈춤(HALTED)과 포기 조치도 저장소마다 같은 장으로 확인한다.
+
 아직 두 계약 모두 한 스레드에서만 돈다. 메모리 저장소는 모든 트랜잭션을 잠금 하나로 줄 세우므로, 행 잠금을 다루는 장은 실패할 수가 없다. 그래서 02b의 첫 작업으로 동시성 장을 더한다. 확인할 것은 셋이다. 키의 맨 앞 명령을 다른 트랜잭션이 잠갔을 때 `lockDue`가 그 키의 2번을 내지 않는가(G4). `nextSeq`의 키 잠금이 커밋까지 가는가(R12). 같은 commandId의 동시 `insertIfAbsent`가 앱 트랜잭션을 깨지 않는가.
 
 | 쓰는 말 | 뜻 |
@@ -143,6 +145,8 @@ core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다
 | `assertDue(ids…)` / `assertDueWithLimit(n, ids…)` / `assertNothingDue()` | (저장소 계약) claim 후보가 정확히 이것(접수 순서) / 없음 |
 | `transfer("pay-1", "order-1", 500)`, `reserve(…)`, `post("capture-1", "order-1", "hold-1")`, `voidOf(…)` | (서비스 계약) 명령. 키와 금액을 숨기지 않는다 |
 | `submit(command)` | (서비스 계약) 앱처럼 트랜잭션 안에서 접수한다 |
+| `acceptedPastTheChecks(postRow("capture-1", "order-1", 1, "hold-1", 102))`, `reserveRow(…)` | (서비스 계약) **전제**: 접수 검사를 거치지 않은 행이 들어감 |
+| `assertHalted(batch, ids…)` / `assertNothingHalted(batch)` / `assertRow(id, haltedRow(1))` | 멈춘 명령으로 알림 / 알림 없음 / 저장된 행이 정확히 이것 |
 | `claimOnly("pay-1")` | **전제**: 이 명령 하나만 잡힌다. 아니면 "given 준비 실패" |
 | `finished("hold-1", ExceedsCredits)` | (서비스 계약) **전제**: 이 명령이 이 TB 결과로 끝났다 |
 | `storage.elapse(LEASE.plusSeconds(1))` | 저장소 시계를 돌린다(lease 만료, backoff 경과). sleep하지 않는다 |

@@ -238,7 +238,7 @@ public final class CommandLifecycle implements LedgerRelay {
      */
     private void requireOutsideTransaction() {
         if (transactions.isActive()) {
-            throw new IllegalStateException("버그: 워커 단계(claim, markSubmitted, complete, skip, release)는 "
+            throw new IllegalStateException("버그: 워커 단계(claim, markSubmitted, complete, skip, release)와 abandonHalted는 "
                     + "트랜잭션 밖에서 부른다. 바깥 트랜잭션에 합류하면 핸들러 실패가 롤백되지 않는다(G6)");
         }
     }

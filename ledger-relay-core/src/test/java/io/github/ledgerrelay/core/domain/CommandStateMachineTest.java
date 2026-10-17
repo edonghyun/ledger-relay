@@ -102,7 +102,7 @@ class CommandStateMachineTest {
         @DisplayName("끝났거나 멈춘 명령을 claim하면 버그로 거부된다")
         void claimingAFinishedCommandIsABug(StoredState finished) {
             // given
-            CommandRow done = new CommandRow(finished, 2, 1, Optional.empty(), Optional.empty(), 0);
+            CommandRow done = rowIn(finished, 2, 1);
 
             // when
             ThrowingCallable claiming = () -> CommandStateMachine.apply(done, new Step.Claim(GateDecision.OPEN, false));
@@ -340,7 +340,7 @@ class CommandStateMachineTest {
         @DisplayName("멈추지 않은 명령을 포기하면 버그로 거부된다 — 서비스가 먼저 막는다")
         void abandoningAnythingElseIsABug(StoredState notHalted) {
             // given
-            CommandRow row = new CommandRow(notHalted, 1, 0, Optional.empty(), Optional.empty(), 0);
+            CommandRow row = rowIn(notHalted, 1, 0);
 
             // when
             ThrowingCallable abandoning = () -> CommandStateMachine.apply(row, new Step.Abandon());
@@ -382,6 +382,14 @@ class CommandStateMachineTest {
     }
 
     // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+
+    /** 그 상태의 행. 건너뜀이면 '예약 미적용' 이유를 단다(이유 없는 건너뜀 행은 만들어지지 않는다). */
+    private static CommandRow rowIn(StoredState state, long token, long submitCount) {
+        Optional<SkipReason> why = state == StoredState.SKIPPED
+                ? Optional.of(SkipReason.RESERVATION_NOT_APPLIED)
+                : Optional.empty();
+        return new CommandRow(state, token, submitCount, Optional.empty(), Optional.empty(), 0, why);
+    }
 
     private static void assertMoved(StepResult actual, CommandRow expectedRow, Transition.Effect... expectedEffects) {
         assertThat(actual)
