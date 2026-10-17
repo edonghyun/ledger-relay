@@ -12,12 +12,17 @@ class PublicApiBoundaryTest {
 
     /** 공개 패키지의 최상위 공개 타입. 늘리거나 줄이는 것은 공개 API를 바꾸는 일이므로 손으로 고친다. */
     static final List<String> PUBLIC_TYPES = List.of(
+            "CommandConflictException",
             "CommandKind",
+            "CommandReceipt",
             "CommandStatus",
             "InvalidCommandException",
             "LedgerCommand",
+            "LedgerOutcomeHandler",
+            "LedgerRelay",
             "LedgerResultCode",
             "Rejection",
+            "ReservationNotFoundException",
             "ResultCategory");
 
     static final String PACKAGE = "io.github.ledgerrelay.core";
