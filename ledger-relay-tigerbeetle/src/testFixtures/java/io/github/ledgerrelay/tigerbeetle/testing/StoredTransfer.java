@@ -8,5 +8,5 @@ import java.math.BigInteger;
  * @param timestamp TB 클러스터가 이체를 적용한 시각(ns)
  */
 public record StoredTransfer(BigInteger amount, byte[] debitAccountId, byte[] creditAccountId, int ledger, int code,
-        long userData64, int userData32, long timeoutSeconds, long timestamp) {
+        BigInteger userData128, long userData64, int userData32, long timeoutSeconds, long timestamp) {
 }

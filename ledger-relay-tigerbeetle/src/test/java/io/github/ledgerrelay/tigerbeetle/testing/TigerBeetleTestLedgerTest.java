@@ -117,6 +117,7 @@ class TigerBeetleTestLedgerTest {
 
             assertThat(stored.amount()).as("저장된 금액").isEqualTo(BigInteger.valueOf(500));
             assertThat(stored.ledger()).as("저장된 ledger").isEqualTo(1);
+            assertThat(stored.userData128()).as("저장된 user_data_128").isEqualTo(BigInteger.ZERO);
         }
 
         @Test

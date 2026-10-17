@@ -10,6 +10,7 @@ import com.tigerbeetle.CreateTransferStatus;
 import com.tigerbeetle.IdBatch;
 import com.tigerbeetle.TransferBatch;
 import com.tigerbeetle.TransferFlags;
+import com.tigerbeetle.UInt128;
 import java.math.BigInteger;
 import java.time.Duration;
 
@@ -97,15 +98,25 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
 
     /** 원장에 실제로 저장된 이체를 읽는다. 확정·해제가 예약에서 물려받은 값을 확인할 때 쓴다. */
     public StoredTransfer stored(Transfer transfer) {
+        return stored(transfer.id(), transfer.toString());
+    }
+
+    /** 이체 ID로 원장에 저장된 이체를 읽는다. 모듈의 어댑터가 보낸 이체를 확인할 때 쓴다. */
+    public StoredTransfer stored(BigInteger transferId) {
+        return stored(UInt128.asBytes(transferId), "ID " + transferId);
+    }
+
+    private StoredTransfer stored(byte[] id, String shown) {
         IdBatch ids = new IdBatch(1);
-        ids.add(transfer.id());
+        ids.add(id);
         try {
             TransferBatch found = client.lookupTransfers(ids);
             if (!found.next()) {
-                throw new IllegalStateException(transfer + " 이체가 원장에 없습니다");
+                throw new IllegalStateException(shown + " 이체가 원장에 없습니다");
             }
             return new StoredTransfer(found.getAmount(), found.getDebitAccountId(), found.getCreditAccountId(),
-                    found.getLedger(), found.getCode(), found.getUserData64(), found.getUserData32(),
+                    found.getLedger(), found.getCode(), UInt128.asBigInteger(found.getUserData128()), found.getUserData64(),
+                    found.getUserData32(),
                     Integer.toUnsignedLong(found.getTimeout()), found.getTimestamp());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
