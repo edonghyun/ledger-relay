@@ -44,6 +44,7 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
 
     private final ToStringConsumer logs = new ToStringConsumer();
     private final List<String> scriptsPerAttempt;
+    private final List<int[]> attemptMarks = new java.util.ArrayList<>();
 
     public TigerBeetleContainer() {
         this(true);
@@ -95,28 +96,40 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
     public void start() {
         for (int attempt = 1; ; attempt++) {
             withCommand(new String[] {scriptsPerAttempt.get(Math.min(attempt, scriptsPerAttempt.size()) - 1)});
+            int attemptStart = logs.toUtf8String().length();
+            attemptMarks.add(new int[] {attempt, attemptStart});
             try {
                 super.start();
                 return;
             } catch (RuntimeException e) {
-                if (!diedRightAfterListening(e) || attempt == START_ATTEMPTS) {
-                    String tries = diedRightAfterListening(e) ? attempt + "번 시도 모두 listening 직후 종료. " : "";
+                // 어느 단계(Testcontainers의 기동 검사, 로그 대기, 안정 확인)가 죽음을 먼저 봤는지가 아니라, 이번 시도가
+                // listening까지 갔는지로 판단한다(02d P2d-9). Testcontainers는 실패한 컨테이너를 이미 지웠다
+                boolean listenedThenDied = listenedSince(attemptStart);
+                if (!listenedThenDied || attempt == START_ATTEMPTS) {
+                    String tries = listenedThenDied ? attempt + "번 시도 모두 listening 직후 종료. " : "";
                     throw new ContainerLaunchException("TigerBeetle 컨테이너 기동 실패. " + tries + "로그 끝부분:\n"
                             + logTail(), e);
                 }
                 // 재시도 빈도를 테스트 결과(XML의 system-err)에서 셀 수 있게 남긴다
                 System.err.println("O4: TigerBeetle가 listening 직후 종료되어 새 컨테이너로 다시 띄운다(시도 " + attempt + ")");
-                stop();
             }
         }
     }
 
-    private static boolean diedRightAfterListening(Throwable failure) {
-        for (Throwable t = failure; t != null; t = t.getCause()) {
-            if (t instanceof DiedRightAfterListening) {
+    /** 이번 시도의 로그에 listening이 찍혔는가. 로그는 따로 흘러오므로 잠깐 기다려 본다. */
+    private boolean listenedSince(int attemptStart) {
+        long deadline = System.nanoTime() + Duration.ofMillis(500).toNanos();
+        do {
+            if (logs.toUtf8String().substring(attemptStart).contains("listening on")) {
                 return true;
             }
-        }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        } while (System.nanoTime() < deadline);
         return false;
     }
 
@@ -143,12 +156,38 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
         }
     }
 
+    /**
+     * 호스트에 포트를 공개하지 않는다. 같은 Docker 네트워크의 프록시로만 접속할 때 쓴다. 공개 포트 경로의 접속이 listening
+     * 직후의 panic을 부르므로(F26), 공개할 필요가 없으면 공개하지 않는다.
+     */
+    public TigerBeetleContainer withoutPublishedPort() {
+        setExposedPorts(new java.util.ArrayList<>());
+        return this;
+    }
+
+    /** 테스트 전용: 모든 시도의 로그. 시도마다 구분선이 있다. */
+    String allLogs() {
+        return withAttemptMarks(logs.toUtf8String());
+    }
+
+    /** 시도마다 {@code --- TB 시작 시도 n ---} 구분선을 넣는다. 재시도 뒤의 로그에서 앞 시도의 panic을 지금 것으로 오해하지 않게. */
+    private String withAttemptMarks(String all) {
+        StringBuilder marked = new StringBuilder();
+        int from = 0;
+        for (int[] mark : attemptMarks) {
+            int at = Math.min(mark[1], all.length());
+            marked.append(all, from, at).append("--- TB 시작 시도 ").append(mark[0]).append(" ---\n");
+            from = at;
+        }
+        return marked.append(all.substring(from)).toString();
+    }
+
     private String logTail() {
-        String all = logs.toUtf8String();
+        String all = withAttemptMarks(logs.toUtf8String());
         return all.length() <= LOG_TAIL_CHARS ? all : all.substring(all.length() - LOG_TAIL_CHARS);
     }
 
-    /** 안정 확인 구간 안에 서버가 죽었다. 이 실패만 다시 띄울 이유가 된다. */
+    /** 안정 확인 구간 안에 서버가 죽었다. 다시 띄울지는 이 예외가 아니라 이번 시도의 로그로 정한다. */
     private static final class DiedRightAfterListening extends IllegalStateException {
         DiedRightAfterListening() {
             super("TigerBeetle가 listening 직후 종료되었습니다");

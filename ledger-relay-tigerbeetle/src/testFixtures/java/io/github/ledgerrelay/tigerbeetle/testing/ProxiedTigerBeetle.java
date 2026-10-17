@@ -41,7 +41,9 @@ public final class ProxiedTigerBeetle implements AutoCloseable {
     static ProxiedTigerBeetle start(Function<Network, ToxiproxyContainer> toxiproxyFactory) {
         Network network = Network.newNetwork();
         // 네트워크 별칭은 사용자 정의 네트워크에서만 유효하므로 여기서 붙인다(TigerBeetleContainer 단독 사용 시에는 없음)
+        // 클라이언트는 프록시로만 붙으므로 TB 포트를 호스트에 공개하지 않는다(F26의 원인 경로를 없앤다)
         TigerBeetleContainer tigerBeetle = new TigerBeetleContainer()
+                .withoutPublishedPort()
                 .withNetwork(network)
                 .withNetworkAliases(TigerBeetleContainer.NETWORK_ALIAS);
         ToxiproxyContainer toxiproxy = toxiproxyFactory.apply(network)

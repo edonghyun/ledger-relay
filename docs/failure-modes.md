@@ -189,7 +189,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: `WorkerSettings`는 `lease ≥ 2 × submitTimeout`이 아니면 거부한다. 결과 쓰기는 명령마다 핸들러를 포함한 트랜잭션 하나라서 batch-size에 비례한다. 큰 batch-size에서는 lease를 더 길게 잡아야 한다고 Javadoc에 적었다. 이 몫은 핸들러 속도에 달려 있어 설정 검증으로는 막지 못한다.
 - **확인**: 검사를 넣기 전에 그 행은 "예외가 없다"로 실패했다.
 
-### F26. TB 컨테이너가 listening 직후 들어온 TCP 접속에 panic한다 (열린 장애 O4를 원인까지 좁힘)
+### F26. TB 컨테이너가 listening 직후 들어온 TCP 접속에 panic한다 (완화. 열린 장애 O4를 원인까지 좁힘)
 
 - **깨지는 것**: TigerBeetle 0.17.9 컨테이너가 `listening on`을 찍고 2~130ms 뒤 `thread 1 panic: reached unreachable code`(exit 139)로 죽는다. 우리 클라이언트가 붙기 전이다. 테스트 클래스 하나가 통째로 `initializationError`로 실패한다. 2026-10-17에는 tigerbeetle 모듈 실행의 절반 이상에서 났다.
 - **재현과 원인 좁히기(2026-10-18, 픽스처와 같은 명령의 `docker run`)**:
@@ -199,8 +199,8 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
   - 같은 탐침을 3초 뒤에 하면 20번 중 0번이었다.
   - 메모리 부족은 아니다. VM에 5.9GiB가 남아 있었고 dmesg에 OOM 기록이 없었다.
   - 결론: listening 직후의 짧은 구간에 들어온 TCP 접속이 TB를 죽인다. 테스트에서 그 접속을 넣는 쪽은 Docker Desktop의 포트 공개 경로로 보인다. 우리 코드는 그 시점을 정할 수 없다. TB 쪽 버그로 보며, TB 소스로 확인하지는 않았다.
-- **구조(완화)**: `TigerBeetleContainer.start()`는 안정 확인 구간(1초) 안에 서버가 죽으면 새 컨테이너로 다시 띄운다. 최대 3번이다. 다른 기동 실패(io_uring 등)는 다시 띄우지 않는다. 다시 띄울 때마다 표준 오류에 `O4: …다시 띄운다(시도 n)`를 남겨, 테스트 결과 XML에서 빈도를 셀 수 있다. 1초가 지난 뒤의 사망은 지금처럼 `assertAlive`가 드러낸다.
-- **재현 테스트**: `TigerBeetleContainerGuardTest` › `startRetriesWhenTheServerDiesRightAfterListening`(한 번 죽고 다음엔 사는 가짜 서버), `startFailsWhenServerDiesRightAfterListening`(매번 죽으면 "3번 시도"와 panic 로그로 실패).
+- **구조(완화)**: `TigerBeetleContainer.start()`는 이번 시도의 로그에 `listening on`이 찍혔는데 기동이 실패하면 새 컨테이너로 다시 띄운다. 모두 3번 시도하므로 다시 띄우기는 최대 2번이다. 어느 단계가 죽음을 먼저 봤는지(Testcontainers의 기동 검사, 로그 대기, 1초 안정 확인)는 따지지 않는다. 처음 넣은 판정은 "안정 확인이 던진 예외"만 봤다. 그래서 listening 직후 바로 죽어 Testcontainers의 기동 검사가 먼저 보면 다시 띄우지 않았다(전체 리뷰 R-tb-I1, `aDeathSeenByTheStartupCheckIsRetried`로 재현). listening까지 못 간 실패(io_uring 등)는 다시 띄우지 않는다. 시도마다 로그에 `--- TB 시작 시도 n ---` 구분선이 들어가고, 다시 띄울 때마다 표준 오류에 `O4: …다시 띄운다(시도 n)`가 남는다. 프록시 구성(`ProxiedTigerBeetle`)의 TB는 포트를 공개하지 않는다. 클라이언트가 프록시로만 붙으므로 원인 경로 자체가 없다.
+- **재현 테스트**: `TigerBeetleContainerGuardTest` › `startRetriesWhenTheServerDiesRightAfterListening`(한 번 죽고 다음엔 사는 가짜 서버. 첫 시도의 panic과 둘째 시도 구분선이 로그에 있다), `aDeathSeenByTheStartupCheckIsRetried`(listening을 찍자마자 죽는 가짜 서버), `startFailsWhenServerDiesRightAfterListening`(매번 죽으면 "3번 시도"와 panic 로그로 실패).
 - **확인**: 시도 횟수를 1로 줄이는 대조군에서 두 테스트가 실패했다. 완화를 넣은 뒤 tigerbeetle 모듈을 5번 돌려 실패 0이었다. 다만 그 5번은 실제 TB의 재시도도 0번이었다(자연 발생 없음). 그래서 실제 panic에 대한 효과는 아직 관찰하지 못했다.
 
 ### F27. 이미 TB에 보낸 멈춘 명령을 운영자가 "보내지 않음"으로 포기한다 (전체 리뷰에서 발견)

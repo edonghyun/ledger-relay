@@ -16,6 +16,11 @@ class TigerBeetleContainerGuardTest {
                 + "; echo 'thread 1 panic: reached unreachable code'; exit 139";
     }
 
+    /** "listening on"을 찍자마자 죽는 가짜 서버. 컨테이너가 시작 직후에 이미 끝나 있을 수 있다. */
+    private static String instantlyCrashingServer() {
+        return "echo 'info(main): 0: cluster=0: listening on fake'; echo 'thread 1 panic: reached unreachable code'; exit 139";
+    }
+
     /** "listening on"을 찍고 계속 살아 있는 가짜 서버. */
     private static String healthyServer() {
         return "sleep 2; echo 'info(main): 0: cluster=0: listening on fake'; sleep 600";
@@ -35,6 +40,20 @@ class TigerBeetleContainerGuardTest {
     @DisplayName("§12 TB 크래시(O4): listening 직후 한 번 죽어도 새 컨테이너로 다시 띄워 기동에 성공한다")
     void startRetriesWhenTheServerDiesRightAfterListening() {
         try (TigerBeetleContainer tb = new TigerBeetleContainer(true, List.of(crashingServer("0.2"), healthyServer()))) {
+            // when
+            tb.start();
+
+            // then
+            tb.assertAlive();
+            assertThat(tb.allLogs()).as("두 시도의 로그")
+                    .contains("reached unreachable code").contains("--- TB 시작 시도 2 ---");
+        }
+    }
+
+    @Test
+    @DisplayName("§12 TB 크래시(O4): listening을 찍자마자 죽어 Testcontainers의 기동 검사가 먼저 봐도 다시 띄운다")
+    void aDeathSeenByTheStartupCheckIsRetried() {
+        try (TigerBeetleContainer tb = new TigerBeetleContainer(true, List.of(instantlyCrashingServer(), healthyServer()))) {
             // when
             tb.start();
 
