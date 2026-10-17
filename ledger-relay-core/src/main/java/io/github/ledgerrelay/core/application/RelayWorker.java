@@ -2,6 +2,7 @@ package io.github.ledgerrelay.core.application;
 
 import io.github.ledgerrelay.core.LedgerResultCode;
 import io.github.ledgerrelay.core.spi.LedgerClient;
+import io.github.ledgerrelay.core.spi.LedgerUnavailableException;
 import io.github.ledgerrelay.core.spi.Submission;
 import io.github.ledgerrelay.core.spi.WorkerEvents;
 import java.util.ArrayList;
@@ -69,7 +70,7 @@ public final class RelayWorker {
             try {
                 reply = ledger.submit(request);
             } catch (RuntimeException e) {
-                events.submitFailed(sent, e);
+                failed(sent, e);
                 return released(batch, sent, completed, sending);
             }
             // 보낸 몫의 슬롯은 요청이 실제로 끝날 때 돌아온다. timeout이 나도 요청은 TB 클라이언트 안에 남는다(§5.3-2)
@@ -85,7 +86,7 @@ public final class RelayWorker {
                 events.submitTimedOut(sent);
                 return released(batch, sent, completed, sending);
             } catch (ExecutionException e) {
-                events.submitFailed(sent, e.getCause());
+                failed(sent, e.getCause());
                 return released(batch, sent, completed, sending);
             } catch (InterruptedException e) {
                 CycleReport report = released(batch, sent, completed, sending);
@@ -106,6 +107,15 @@ public final class RelayWorker {
             return new CycleReport(batch.claimed().size(), sent, completed, 0);
         } finally {
             slots.giveBack(held);
+        }
+    }
+
+    /** 회복할 수 없는 클라이언트 실패는 일시적 실패와 따로 알린다(P2d-8). */
+    private void failed(int sent, Throwable cause) {
+        if (cause instanceof LedgerUnavailableException) {
+            events.ledgerUnavailable(cause);
+        } else {
+            events.submitFailed(sent, cause);
         }
     }
 

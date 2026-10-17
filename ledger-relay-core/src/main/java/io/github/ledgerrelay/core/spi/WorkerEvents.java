@@ -41,6 +41,10 @@ public interface WorkerEvents {
     default void submitFailed(int batchSize, Throwable cause) {
     }
 
+    /** TB 클라이언트를 더 쓸 수 없어({@link LedgerUnavailableException}) 이번 요청의 명령을 되돌렸다. 일시적 실패와 따로 센다. */
+    default void ledgerUnavailable(Throwable cause) {
+    }
+
     /** 결과 개수가 요청과 달라 아무것도 쓰지 않고 되돌렸다. 버그 신호다. */
     default void malformedReply(int expected, int actual) {
     }

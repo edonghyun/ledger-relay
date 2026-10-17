@@ -10,6 +10,7 @@ import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.spi.CommandRecord;
 import io.github.ledgerrelay.core.spi.CommandStore;
 import io.github.ledgerrelay.core.spi.DueCommand;
+import io.github.ledgerrelay.core.spi.LedgerUnavailableException;
 import io.github.ledgerrelay.core.spi.NewCommand;
 import io.github.ledgerrelay.core.spi.RowChange;
 import io.github.ledgerrelay.core.spi.Submission;
@@ -254,6 +255,7 @@ class RelayWorkerTest {
             // then
             assertThat(handler.completedFor("pay-1")).as("pay-1의 핸들러 실행").isEmpty();
             assertState("pay-1", State.IN_PROGRESS);
+            assertThat(events.events()).as("늦은 응답에 대한 쓰기 시도(있다면 0행으로 막혔을 것)").doesNotContain("fenced:pay-1");
         }
 
         @Test
@@ -312,6 +314,107 @@ class RelayWorkerTest {
             assertState("pay-2", State.IN_PROGRESS);
             assertThat(events.events()).as("워커 이벤트").contains("malformedReply:2:1");
         }
+
+        @Test
+        @DisplayName("결과 개수가 틀린 응답이면 보낸 명령을 모두 되돌린다 — 처리 중으로 방치하지 않는다")
+        void aMalformedReplyReleasesEveryCommand() {
+            // given
+            fake.replyWithCount(1);
+            accepted(transfer("pay-1", "order-1"));
+            accepted(transfer("pay-2", "order-2"));
+
+            // when
+            CycleReport report = worker.runOnce();
+
+            // then
+            assertThat(report.released()).as("되돌린 명령 수").isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("결과가 요청보다 많아도 아무것도 쓰지 않는다")
+        void aReplyWithTooManyResultsWritesNothing() {
+            // given
+            fake.replyWithCount(3);
+            accepted(transfer("pay-1", "order-1"));
+            accepted(transfer("pay-2", "order-2"));
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertThat(handler.completedFor("pay-1")).as("pay-1의 핸들러 실행").isEmpty();
+            assertThat(events.events()).as("워커 이벤트").contains("malformedReply:2:3");
+        }
+
+        @Test
+        @DisplayName("요청을 보내는 자리에서 바로 던지면 되돌리고, 슬롯은 모두 돌아온다")
+        void aSynchronousSubmitFailureReleasesAndReturnsSlots() {
+            // given
+            fake.throwOnNextSubmit(new IllegalStateException("배치를 채우다 실패했다"));
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            CycleReport report = worker.runOnce();
+
+            // then
+            assertThat(report.released()).as("되돌린 명령 수").isEqualTo(1);
+            assertThat(slots.available()).as("남은 슬롯").isEqualTo(1024);
+            assertThat(events.events()).as("워커 이벤트").contains("submitFailed:1");
+        }
+
+        @Test
+        @DisplayName("TB 클라이언트를 더 쓸 수 없다는 실패는 일시적 실패와 따로 알린다 — 운영자가 재시작이 필요함을 알게")
+        void anUnavailableLedgerIsReportedDistinctly() {
+            // given
+            fake.failNext(new LedgerUnavailableException("클라이언트가 닫혔다", new IllegalStateException()));
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertThat(events.events()).as("워커 이벤트").contains("ledgerUnavailable").doesNotContain("submitFailed:1");
+        }
+    }
+
+    @Nested
+    @Order(7)
+    @DisplayName("결과를 쓰다가 0행이거나 핸들러가 실패하면")
+    class WhenAResultWriteDoesNotLand {
+
+        @Test
+        @DisplayName("핸들러가 실패하면 그 명령을 알리고, 완료로 세지 않는다")
+        void aHandlerFailureIsReported() {
+            // given
+            handler.failNextCalls(1);
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            CycleReport report = worker.runOnce();
+
+            // then
+            assertThat(events.events()).as("워커 이벤트").contains("handlerFailed:pay-1");
+            assertThat(report.completed()).as("완료로 센 명령 수").isZero();
+        }
+
+        @Test
+        @DisplayName("응답을 기다리는 사이 다른 워커가 잡아 갔으면 0행으로 알리고, 완료로 세지 않는다")
+        void aFencedWriteIsReported() {
+            // given: TB에 보내는 사이 lease가 끝나 다른 워커가 같은 명령을 잡았다
+            accepted(transfer("pay-1", "order-1"));
+            RelayWorker overtaken = new RelayWorker(relay, batch -> {
+                storage.elapse(SETTINGS.lease().plusSeconds(1));
+                relay.claim(10, SETTINGS.lease());
+                return fake.submit(batch);
+            }, slots, SETTINGS, events);
+
+            // when
+            CycleReport report = overtaken.runOnce();
+
+            // then
+            assertThat(events.events()).as("워커 이벤트").contains("fenced:pay-1");
+            assertThat(report.completed()).as("완료로 센 명령 수").isZero();
+        }
     }
 
     @Nested
@@ -368,6 +471,7 @@ class RelayWorkerTest {
             storage.transactions().inTransaction(() -> onFlaky.submit(transfer("pay-1", "order-1")));
             fake.answer(storage.transactions().inTransaction(() -> onFlaky.submit(transfer("pay-2", "order-2")))
                     .transferId(), ExceedsCredits);
+            flaky.arm();
 
             // when
             flakyWorker.runOnce();
@@ -376,18 +480,46 @@ class RelayWorkerTest {
             assertThat(onFlaky.status("pay-2").orElseThrow().rejection().orElseThrow().tbCode())
                     .as("pay-2의 거절 코드").isEqualTo(ExceedsCredits);
             assertThat(events.events()).as("워커 이벤트").contains("writeFailed:pay-1");
+            assertThat(fake.requests().get(0)).as("TB에 간 요청(실패가 결과 쓰기에서 났다)").hasSize(2);
+        }
+
+        @Test
+        @DisplayName("제출 기록이 실패한 명령은 TB에 보내지 않는다 — 기록하지 못한 제출이 TB에 남지 않게")
+        void aCommandWhoseSubmissionWasNotRecordedIsNotSent() {
+            // given: pay-1의 제출을 기록할 때 저장소가 한 번 실패한다
+            FlakyStore flaky = new FlakyStore(storage.store(), "pay-1", 0);
+            CommandLifecycle onFlaky = new CommandLifecycle(flaky, storage.transactions(), new SequentialTransferIds(),
+                    handler, new Backoff(Duration.ofMillis(200), BACKOFF_MAX));
+            RelayWorker flakyWorker = new RelayWorker(onFlaky, fake, slots, SETTINGS, events);
+            storage.transactions().inTransaction(() -> onFlaky.submit(transfer("pay-1", "order-1")));
+            flaky.arm();
+
+            // when
+            flakyWorker.runOnce();
+
+            // then
+            assertThat(fake.requests()).as("TB 요청").isEmpty();
+            assertThat(events.events()).as("워커 이벤트").contains("writeFailed:pay-1");
         }
     }
 
     // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
 
-    /** 이 commandId를 skip번 조회한 다음의 조회 한 번에서 던지는 저장소. 나머지는 그대로 전한다. */
+    /**
+     * {@link #arm()} 뒤에 이 commandId를 skip번 조회한 다음의 조회 한 번에서 던지는 저장소. 나머지는 그대로 전한다. 접수가 하는
+     * 조회는 세지 않도록 접수를 마친 뒤 켠다.
+     */
     private static final class FlakyStore implements CommandStore {
 
         private final CommandStore real;
         private final String commandId;
         private int skip;
         private boolean failed;
+        private boolean armed;
+
+        void arm() {
+            armed = true;
+        }
 
         FlakyStore(CommandStore real, String commandId, int skip) {
             this.real = real;
@@ -407,7 +539,7 @@ class RelayWorkerTest {
 
         @Override
         public Optional<CommandRecord> find(String id) {
-            if (id.equals(commandId) && !failed && skip-- <= 0) {
+            if (armed && id.equals(commandId) && !failed && skip-- <= 0) {
                 failed = true;
                 throw new IllegalStateException("DB 연결이 잠깐 끊겼다");
             }

@@ -100,6 +100,33 @@ class FakeLedgerTest {
         }
 
         @Test
+        @DisplayName("결과 개수를 요청보다 많게 정하면 남는 몫은 Created로 채운다")
+        void aReplyCanCarryTooManyResults() {
+            // given
+            ledger.replyWithCount(3);
+
+            // when
+            CompletableFuture<List<LedgerResultCode>> reply = ledger.submit(List.of(submission(101)));
+
+            // then
+            assertThat(reply).as("개수를 늘린 응답").isCompletedWithValue(List.of(Created, Created, Created));
+        }
+
+        @Test
+        @DisplayName("다음 요청을 보내는 자리에서 던지게 하면 future 없이 그 예외가 난다")
+        void aSubmitCanThrowSynchronously() {
+            // given
+            IllegalStateException failure = new IllegalStateException("배치를 채우다 실패했다");
+            ledger.throwOnNextSubmit(failure);
+
+            // when
+            Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(() -> ledger.submit(List.of(submission(101))));
+
+            // then
+            assertThat(thrown).as("보내는 자리의 예외").isSameAs(failure);
+        }
+
+        @Test
         @DisplayName("받은 요청을 순서대로 남긴다 — 붙잡힌 요청도 남는다")
         void requestsAreRecordedInOrder() {
             // given
@@ -129,9 +156,11 @@ class FakeLedgerTest {
             // when
             events.halted("capture-1");
             events.submitted(3);
+            events.ledgerUnavailable(new IllegalStateException());
 
             // then
-            assertThat(events.events()).as("남은 이벤트").containsExactly("halted:capture-1", "submitted:3");
+            assertThat(events.events()).as("남은 이벤트")
+                    .containsExactly("halted:capture-1", "submitted:3", "ledgerUnavailable");
         }
     }
 

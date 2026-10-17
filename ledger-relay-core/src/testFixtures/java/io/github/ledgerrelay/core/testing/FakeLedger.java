@@ -24,6 +24,7 @@ public final class FakeLedger implements LedgerClient {
     private boolean holding;
     private RuntimeException nextFailure;
     private Integer nextCount;
+    private RuntimeException nextThrow;
 
     /** 이 이체 ID에는 이 결과를 낸다. */
     public synchronized void answer(BigInteger transferId, LedgerResultCode code) {
@@ -51,7 +52,12 @@ public final class FakeLedger implements LedgerClient {
         nextFailure = cause;
     }
 
-    /** 다음 요청 하나에 결과를 n개만 낸다. */
+    /** 다음 요청 하나는 future를 돌려주지 않고 보내는 자리에서 이 예외를 던진다(닫힌 클라이언트, 배치 채우기 실패). */
+    public synchronized void throwOnNextSubmit(RuntimeException failure) {
+        nextThrow = failure;
+    }
+
+    /** 다음 요청 하나에 결과를 n개만 낸다. 요청보다 많으면 남는 몫은 Created다. */
     public synchronized void replyWithCount(int n) {
         nextCount = n;
     }
@@ -63,6 +69,11 @@ public final class FakeLedger implements LedgerClient {
     @Override
     public synchronized CompletableFuture<List<LedgerResultCode>> submit(List<Submission> batch) {
         requests.add(List.copyOf(batch));
+        if (nextThrow != null) {
+            RuntimeException failure = nextThrow;
+            nextThrow = null;
+            throw failure;
+        }
         if (nextFailure != null) {
             RuntimeException failure = nextFailure;
             nextFailure = null;
@@ -74,6 +85,9 @@ public final class FakeLedger implements LedgerClient {
         }
         if (nextCount != null) {
             results = new ArrayList<>(results.subList(0, Math.min(nextCount, results.size())));
+            while (results.size() < nextCount) {
+                results.add(LedgerResultCode.Created);
+            }
             nextCount = null;
         }
         CompletableFuture<List<LedgerResultCode>> reply = new CompletableFuture<>();

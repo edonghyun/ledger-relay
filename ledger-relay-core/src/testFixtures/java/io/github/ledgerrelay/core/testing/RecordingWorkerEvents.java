@@ -49,6 +49,11 @@ public final class RecordingWorkerEvents implements WorkerEvents {
     }
 
     @Override
+    public synchronized void ledgerUnavailable(Throwable cause) {
+        events.add("ledgerUnavailable");
+    }
+
+    @Override
     public synchronized void malformedReply(int expected, int actual) {
         events.add("malformedReply:" + expected + ":" + actual);
     }
