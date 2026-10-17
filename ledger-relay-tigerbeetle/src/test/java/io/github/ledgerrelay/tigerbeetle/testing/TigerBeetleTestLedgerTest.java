@@ -3,17 +3,22 @@ package io.github.ledgerrelay.tigerbeetle.testing;
 import static com.tigerbeetle.CreateTransferStatus.ExceedsCredits;
 import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertMovedExactly;
 import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertNothingMoved;
+import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertPostedAndReleased;
+import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertReserved;
 import static io.github.ledgerrelay.tigerbeetle.testing.LedgerAssertions.assertStillWaitingAfter;
+import static io.github.ledgerrelay.tigerbeetle.testing.Transfer.reservation;
 import static io.github.ledgerrelay.tigerbeetle.testing.Transfer.transfer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.math.BigInteger;
 import java.time.Duration;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("원장 어휘 — docs/testing.md §3·§5: 전제와 효과 확인이 틀린 상황에서 제대로 멈추는가")
@@ -42,6 +47,7 @@ class TigerBeetleTestLedgerTest {
     }
 
     @Nested
+    @Order(1)
     @DisplayName("given 전제 메서드는")
     class Preconditions {
 
@@ -68,9 +74,66 @@ class TigerBeetleTestLedgerTest {
                     .hasMessageStartingWith("given 준비 실패")
                     .hasMessageContaining("Created");
         }
+
+        @Test
+        @DisplayName("closeAccount: 이미 닫은 계좌를 다시 닫으면 준비 단계에서 멈춘다")
+        void closeAccountRefusesAnAlreadyClosedAccount() {
+            Account payer = ledger.openAccount("닫을 계좌");
+            ledger.closeAccount(payer);
+
+            assertThatThrownBy(() -> ledger.closeAccount(payer))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageStartingWith("given 준비 실패")
+                    .hasMessageContaining("닫을 계좌");
+        }
     }
 
     @Nested
+    @Order(2)
+    @DisplayName("예약 이체를 보내면")
+    class Reservations {
+
+        @Test
+        @DisplayName("reservation: 금액이 보류될 뿐 확정되지 않는다")
+        void reservingHoldsTheAmountWithoutPosting() {
+            Account payer = ledger.openAccount("구매자");
+            Account payee = ledger.openAccount("가맹점");
+
+            ledger.recorded(reservation(500).from(payer).to(payee));
+
+            Balance balance = ledger.balanceOf(payer);
+            assertThat(balance.debitsPosted()).as("구매자의 확정 출금").isZero();
+            assertThat(balance.debitsPending()).as("구매자의 보류 출금").isEqualTo(500);
+        }
+
+        @Test
+        @DisplayName("stored: TB가 저장한 값을 읽는다")
+        void storedReadsWhatTigerBeetleKept() {
+            Account payer = ledger.openAccount("구매자");
+            Account payee = ledger.openAccount("가맹점");
+            Transfer payment = ledger.recorded(transfer(500).from(payer).to(payee));
+
+            StoredTransfer stored = ledger.stored(payment);
+
+            assertThat(stored.amount()).as("저장된 금액").isEqualTo(BigInteger.valueOf(500));
+            assertThat(stored.ledger()).as("저장된 ledger").isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("stored: 원장에 없는 이체를 읽으면 실패한다")
+        void storedFailsForAnUnknownTransfer() {
+            Account payer = ledger.openAccount("구매자");
+            Account payee = ledger.openAccount("가맹점");
+            Transfer neverSent = transfer(500).from(payer).to(payee);
+
+            assertThatThrownBy(() -> ledger.stored(neverSent))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("원장에 없습니다");
+        }
+    }
+
+    @Nested
+    @Order(3)
     @DisplayName("나중에 여는 계좌는")
     class AccountsOpenedLater {
 
@@ -100,6 +163,7 @@ class TigerBeetleTestLedgerTest {
     }
 
     @Nested
+    @Order(4)
     @DisplayName("효과를 확인하는 assert는")
     class EffectAssertions {
 
@@ -140,6 +204,31 @@ class TigerBeetleTestLedgerTest {
             assertThatThrownBy(() -> assertStillWaitingAfter(pending, Duration.ofMillis(100)))
                     .isInstanceOf(AssertionError.class)
                     .hasMessageContaining("응답");
+        }
+
+        @Test
+        @DisplayName("assertReserved: 보류가 아니라 확정된 금액이면 실패한다")
+        void assertReservedFailsWhenTheAmountWasPosted() {
+            Account payer = ledger.openAccount("구매자");
+            Account payee = ledger.openAccount("가맹점");
+            ledger.recorded(transfer(500).from(payer).to(payee));
+
+            assertThatThrownBy(() -> assertReserved(ledger, payer, payee, 500))
+                    .isInstanceOf(AssertionError.class)
+                    .hasMessageContaining("보류")
+                    .hasMessageContaining("출금 500");
+        }
+
+        @Test
+        @DisplayName("assertPostedAndReleased: 아직 보류 중인 금액이 있으면 실패한다")
+        void assertPostedAndReleasedFailsWhileStillReserved() {
+            Account payer = ledger.openAccount("구매자");
+            Account payee = ledger.openAccount("가맹점");
+            ledger.recorded(reservation(500).from(payer).to(payee));
+
+            assertThatThrownBy(() -> assertPostedAndReleased(ledger, payer, payee, 0))
+                    .isInstanceOf(AssertionError.class)
+                    .hasMessageContaining("보류 출금 500");
         }
     }
 }

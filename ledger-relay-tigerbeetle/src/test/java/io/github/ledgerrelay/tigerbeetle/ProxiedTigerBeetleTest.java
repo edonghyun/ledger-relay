@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Toxiproxy 뒤의 TigerBeetle — 스펙 §1.2·§8.2")
@@ -64,6 +65,7 @@ class ProxiedTigerBeetleTest {
     }
 
     @Nested
+    @Order(1)
     @DisplayName("연결이 끊긴 동안 보낸 이체는 (TB 클라이언트에는 timeout이 없다)")
     class SentWhileDisconnected {
 

@@ -61,6 +61,28 @@ public final class LedgerAssertions {
         }
     }
 
+    /** from에서 to로 정확히 amount가 보류되어 있고, 아직 아무것도 확정되지 않았다. */
+    public static void assertReserved(TigerBeetleTestLedger ledger, Account from, Account to, long amount) {
+        Balance source = ledger.balanceOf(from);
+        Balance destination = ledger.balanceOf(to);
+        if (source.debitsPending() != amount || destination.creditsPending() != amount
+                || source.debitsPosted() != 0 || destination.creditsPosted() != 0) {
+            throw new AssertionError(from + " → " + to + "로 정확히 " + amount + "이 보류만 되어 있기를 기대했지만, "
+                    + from + "은 [" + source + "], " + to + "은 [" + destination + "]입니다");
+        }
+    }
+
+    /** from에서 to로 정확히 posted가 확정되었고, 두 계좌에 보류된 금액은 남지 않았다. */
+    public static void assertPostedAndReleased(TigerBeetleTestLedger ledger, Account from, Account to, long posted) {
+        Balance source = ledger.balanceOf(from);
+        Balance destination = ledger.balanceOf(to);
+        if (source.debitsPosted() != posted || destination.creditsPosted() != posted
+                || source.debitsPending() != 0 || destination.creditsPending() != 0) {
+            throw new AssertionError(from + " → " + to + "로 정확히 " + posted + "이 확정되고 보류가 모두 풀리기를 "
+                    + "기대했지만, " + from + "은 [" + source + "], " + to + "은 [" + destination + "]입니다");
+        }
+    }
+
     /** "아무 일도 없어야 한다"를 관찰하므로 고정된 관찰 시간을 쓴다(docs/testing.md §8). */
     public static void assertStillWaitingAfter(PendingTransfer pending, Duration window) {
         try {

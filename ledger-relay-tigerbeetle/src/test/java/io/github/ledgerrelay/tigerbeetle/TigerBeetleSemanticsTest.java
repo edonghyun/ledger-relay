@@ -30,6 +30,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -64,6 +65,7 @@ class TigerBeetleSemanticsTest {
     }
 
     @Nested
+    @Order(1)
     @DisplayName("500원 결제가 이미 기록된 상태에서")
     class AfterAPaymentIsRecorded {
 
@@ -138,6 +140,7 @@ class TigerBeetleSemanticsTest {
     }
 
     @Nested
+    @Order(2)
     @DisplayName("잔액이 부족한 지갑에서 결제하면")
     class PayingFromAnEmptyWallet {
 
@@ -195,6 +198,7 @@ class TigerBeetleSemanticsTest {
     }
 
     @Nested
+    @Order(3)
     @DisplayName("존재하지 않는 계좌에서 출금하면 (P4)")
     class PayingFromAnUnknownAccount {
 

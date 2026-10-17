@@ -76,6 +76,12 @@ class AfterAPaymentIsRecorded {
 | `Account.notOpened("계좌")` / `ledger.open(account)` | 아직 원장에 없는 계좌 / 그 계좌를 같은 ID 그대로 연다(이미 있으면 "given 준비 실패") |
 | `ledger.recorded(t)` | **전제**: 이 이체가 이미 기록되어 있다 |
 | `ledger.rejected(t, ExceedsCredits)` | **전제**: 이 이체가 이 사유로 거부된 적이 있다 |
+| `reservation(500).from(payer).to(payee)` | 예약 한 건(금액을 보류만 한다). `.withTimeout(1)`로 만료를 준다 |
+| `postOf(hold)` / `postOf(hold).withAmount(300)` | 예약을 금액 없이(전액) 확정 / 일부만 확정. 계좌·ledger·code는 비워 보내 예약의 값을 물려받는다 |
+| `voidOf(hold)` | 예약 해제 |
+| `ledger.closeAccount(account)` | **전제**: 이 계좌를 닫았다(0원 닫기 예약). 이미 닫혀 있으면 "given 준비 실패" |
+| `ledger.waitUntilExpired(hold)` | **전제**: 예약이 만료되어 보류 금액이 풀릴 때까지 기다린다(상한 2초) |
+| `ledger.stored(t)` | TB가 실제로 저장한 이체(`StoredTransfer`): 물려받은 계좌·user_data, 전액 확정의 실제 금액, timeout |
 
 - **전제 메서드는 전제가 깨지면 그 자리에서 멈춘다.** 메시지는 `"given 준비 실패: …"`로 시작한다. then까지 가서 엉뚱한 이유로 실패하지 않게 하기 위해서다.
 - 핵심 값(금액, 방향, 사유)은 숨기지 않는다. `recordedPaymentOf500()`처럼 값을 메서드 이름 속에 감추지 않는다.
@@ -99,6 +105,8 @@ class AfterAPaymentIsRecorded {
 | `assertRejectedFor(result, reason)` | 이 사유로 거부됨 |
 | `assertMovedExactly(ledger, from, to, amount)` | from에서 정확히 amount가 나가고, to에 정확히 amount가 들어옴 |
 | `assertNothingMoved(ledger, account)` | 그 계좌에는 출금·입금·보류가 하나도 없음 |
+| `assertReserved(ledger, from, to, amount)` | from에서 to로 정확히 amount가 보류되어 있고, 확정된 것은 없음 |
+| `assertPostedAndReleased(ledger, from, to, posted)` | 정확히 posted가 확정되었고, 두 계좌에 보류 금액이 남지 않음 |
 | `assertStillWaitingAfter(pending, 3s)` | 그 시간 동안 응답도 오류도 오지 않음 |
 
 - 이름은 `assert` + **일어난 효과**로 짓는다. `assertPayerPaidPayee`처럼 역할을 이름에 넣지 않는다. 역할은 인자로 넘기고, 인자 순서는 문장 순서(어디서 → 어디로 → 얼마)를 따른다.

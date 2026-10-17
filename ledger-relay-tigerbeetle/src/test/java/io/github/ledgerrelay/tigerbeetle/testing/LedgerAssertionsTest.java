@@ -18,12 +18,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("결과 확인 어휘 — docs/testing.md §5")
 class LedgerAssertionsTest {
 
     @Nested
+    @Order(1)
     @DisplayName("결과 코드를 확인하는 assert는")
     class ResultAssertions {
 
@@ -58,6 +60,7 @@ class LedgerAssertionsTest {
     }
 
     @Nested
+    @Order(2)
     @DisplayName("내용 충돌을 확인하는 assertContentConflict는")
     class ContentConflict {
 
