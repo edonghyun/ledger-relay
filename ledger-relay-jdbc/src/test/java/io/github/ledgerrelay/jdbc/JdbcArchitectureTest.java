@@ -1,11 +1,13 @@
 package io.github.ledgerrelay.jdbc;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
-import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
+import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -17,18 +19,23 @@ class JdbcArchitectureTest {
             .withImportOption(new ImportOption.DoNotIncludeTests())
             .importPackages("io.github.ledgerrelay.jdbc");
 
+    /** jdbc가 읽고 쓰는 도메인 값. 판단(상태 기계, 게이트, 전이표, 해시, 서비스)은 여기에 없다. */
+    static final Set<String> DOMAIN_VALUES = Set.of(
+            "io.github.ledgerrelay.core.domain.CommandRow",
+            "io.github.ledgerrelay.core.domain.QueuedCommand",
+            "io.github.ledgerrelay.core.domain.StoredState");
+
     @Test
-    @DisplayName("어댑터는 상태 기계·게이트·전이표·해시·서비스를 쓰지 않는다 — SQL에 업무 규칙이 새지 않게")
+    @DisplayName("어댑터가 쓰는 core는 공개 API·포트·도메인 값뿐이다 — 판단 클래스가 새로 생겨도 SQL에 새지 않게")
     void theAdapterMakesNoDecisions() {
         // then
-        noClasses().that().resideInAPackage("io.github.ledgerrelay.jdbc..")
-                .should().dependOnClassesThat().resideInAPackage("io.github.ledgerrelay.core.application..")
-                .orShould().dependOnClassesThat().haveFullyQualifiedName("io.github.ledgerrelay.core.domain.CommandStateMachine")
-                .orShould().dependOnClassesThat().haveFullyQualifiedName("io.github.ledgerrelay.core.domain.OrderingGate")
-                .orShould().dependOnClassesThat().haveFullyQualifiedName("io.github.ledgerrelay.core.domain.TransitionTable")
-                .orShould().dependOnClassesThat().haveFullyQualifiedName("io.github.ledgerrelay.core.domain.ContentHash")
-                .orShould().dependOnClassesThat().haveFullyQualifiedName("io.github.ledgerrelay.core.domain.Step")
-                .orShould().dependOnClassesThat().haveFullyQualifiedName("io.github.ledgerrelay.core.domain.StepResult")
+        classes().that().resideInAPackage("io.github.ledgerrelay.jdbc..")
+                .should().onlyDependOnClassesThat(DescribedPredicate.describe(
+                        "core 밖, core 공개 API, core.spi, 도메인 값(" + DOMAIN_VALUES + ")",
+                        (JavaClass c) -> !c.getPackageName().startsWith("io.github.ledgerrelay.core")
+                                || c.getPackageName().equals("io.github.ledgerrelay.core")
+                                || c.getPackageName().startsWith("io.github.ledgerrelay.core.spi")
+                                || DOMAIN_VALUES.contains(c.getName())))
                 .check(MAIN);
     }
 
