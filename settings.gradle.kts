@@ -6,3 +6,4 @@ rootProject.name = "ledger-relay"
 
 include("ledger-relay-core")
 include("ledger-relay-tigerbeetle")
+include("ledger-relay-jdbc")
