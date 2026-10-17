@@ -13,7 +13,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **깨지는 것**: 한 키의 앞 명령이 처리 중이면 뒤 명령들은 기다린다. 저장소가 이 대기 명령들까지 후보로 내면, 한 번에 잡는 한도(limit)가 대기 명령으로 차서 다른 키가 영영 잡히지 않는다.
 - **재현**: `CommandStoreContract` › claim 후보를 잠그면 › `aBlockedKeyDoesNotUseUpTheLimit`. 키 a에 명령 셋이 있고 맨 앞이 처리 중일 때, limit 1로 잠그면 키 b의 명령이 나와야 한다.
 - **구조**: 저장소는 순서 키마다 맨 앞의 미완료 명령만 후보로 낸다(P2a-19). 게이트 판단은 서비스가 다시 한다.
-- **확인**: 맨 앞 거르기를 지운 대조군에서 3건이 실패한다. jdbc에서 행 잠금과 함께 다시 확인한다(02b, 아래 O1).
+- **확인**: 맨 앞 거르기를 지운 대조군에서 3건이 실패한다. jdbc에서 행 잠금과 함께 다시 확인했다(F12).
 
 ### F2. lease가 끝나 다른 워커가 가져간 명령에 앞 워커가 결과를 쓴다
 
@@ -80,7 +80,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **판단의 변화**: 한때 "예약의 TB 이체 ID를 접수 때 고정하므로(P2a-20) 엉뚱한 예약을 확정할 길이 없다. 보관 정책이 끝난 예약을 지운 것이니 TB에 맡기자"고 판단해 게이트를 OPEN으로 바꿨다. 리뷰에서 두 가지가 틀렸음이 드러났다. 첫째, ID가 고정돼도 그 ID에 TB가 가진 이체가 우리 것이라는 보장이 없다(CONFLICT). 둘째, 스펙의 보관 정책은 미완료 확정이 참조하는 예약을 지우지 않으므로 "행이 없음"은 정상 경로가 아니다. 그래서 되돌렸다.
 - **재현**: `LedgerRelayContract` › 확정이 참조한 예약 행이 없는 상태에서. 게이트는 `OrderingGateTest` › `haltsWhenTheReservationIsMissing`.
 - **구조**: F9와 같이 멈추고 HALTED로 주차한다. 멈춤이 이제 싸므로(한 번 알림, limit을 차지하지 않음, 포기 조치 있음) 보내는 쪽으로 바꿀 이유가 없다.
-- **확인**: OPEN으로 되돌린 대조군에서 3건이 실패한다. 02b에서는 `lockDue`가 참조 예약을 잠금과 상관없이 읽는지 동시성 장에서 확인한다(O1).
+- **확인**: OPEN으로 되돌린 대조군에서 3건이 실패한다. `lockDue`가 참조 예약을 잠금과 상관없이 읽는지는 02b 동시성 장에서 확인했다(F13).
 
 ### F11. 같은 트랜잭션에서 접수한 예약을 확정이 참조한다
 
@@ -89,11 +89,38 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: 저장소는 사실만 알려 준다. `CommandRecord.acceptedInThisTransaction()`은 그 행을 지금 트랜잭션이 넣었는지를 나타낸다. PostgreSQL에서는 `accepted_xact xid8`과 `pg_current_xact_id_if_assigned()`를 비교한다. 거부는 서비스(`CommandLifecycle`)가 `ReservationNotFoundException`으로 한다(P2b-1·P2b-2).
 - **확인**: 두 테스트 모두 구현 전에 실패했다(표시가 false였고, 거부 예외가 없었다).
 
+### F12. 잠긴 맨 앞 명령을 건너뛰고 그 키의 다음 명령을 낸다
+
+- **깨지는 것**: 워커 A가 키 order-1의 1번을 잡고 TB에 보내는 중이다. 워커 B가 `lockDue`를 하면서 "맨 앞인가"를 판정할 때 잠긴 1번까지 건너뛰면, 2번이 맨 앞으로 보여 함께 나간다. 키 안의 순서(G4)가 깨진다. 확정이 예약보다 먼저 가는 F9가 동시성으로 다시 생긴다.
+- **재현**: `CommandStoreContract` › 다른 트랜잭션이 행을 잡고 있으면 › `aLockedHeadHidesItsWholeKey`. 다른 트랜잭션(`OtherTransaction`)이 1번을 잠근 채로 두고 `lockDue`를 부른다.
+- **구조**: 후보 행만 `FOR UPDATE OF c SKIP LOCKED`로 잠근다. 맨 앞 판정(`NOT EXISTS` 앞 순번 미완료)은 잠그지 않고 읽으므로, 잠긴 1번도 "미완료"로 보인다(P2b-10).
+- **확인**: 대조군으로 `NOT EXISTS` 하위 질의에 `FOR UPDATE SKIP LOCKED`를 붙이면 이 테스트만 실패한다.
+
+### F13. 잠긴 예약 행 때문에 확정이 예약을 "없음"으로 본다
+
+- **깨지는 것**: 다른 트랜잭션이 예약 행을 쓰는 중이라 잠겨 있을 때, 확정 후보가 그 예약을 잠가서 읽으려 하면 예약이 건너뛰어져 "참조 예약 없음"이 된다. 게이트는 F10에 따라 멈춘다(HALTED). 돈은 안전하지만, 멀쩡한 확정이 운영자 조치가 필요한 상태로 빠진다.
+- **재현**: `CommandStoreContract` › `aLockedReservationIsStillReported`.
+- **구조**: 예약은 `LEFT JOIN`으로 잠그지 않고 읽는다. 잠금은 후보 행(`OF c`)에만 건다(P2b-10).
+- **확인**: 대조군으로 예약을 `LEFT JOIN LATERAL (… FOR UPDATE SKIP LOCKED)`로 읽게 바꾸면 이 테스트만 실패한다("잠긴 예약을 읽은 결과"가 비어 있다). 단순히 `FOR UPDATE SKIP LOCKED`로 넓히는 실수는 PostgreSQL이 문법 단계에서 거부한다(외부 조인의 nullable 쪽은 잠글 수 없다). 그래서 의미를 보여 주는 대조군으로 쓸 수 없었다.
+
+### F14. 접수 커밋 순서와 순번 순서가 어긋난다 (R12)
+
+- **깨지는 것**: 같은 키에 두 접수가 겹칠 때 순번을 `max(seq)+1`로 내면, 둘이 같은 번호를 보거나 늦게 커밋한 쪽이 작은 번호를 가진다. 워커가 작은 번호를 먼저 처리했다고 믿는 동안 그 번호의 행이 나중에 나타난다. 맨 앞 판정(F12)은 "나보다 앞선 명령이 나중에 생기지 않는다"는 전제에 기대므로 그 전제가 무너진다.
+- **재현**: `CommandStoreContract` › `theKeyLockHoldsUntilCommit`. 첫 접수가 순번 1을 받고 커밋하지 않은 동안 두 번째 접수는 막혀 있어야 하고, 첫 접수가 커밋한 뒤 2를 받아야 한다.
+- **구조**: 키 행(`ledger_ordering_key`)을 upsert해 잠그고 번호를 낸다. 잠금은 커밋까지 유지되므로 같은 키의 접수는 줄을 선다(P2b-8). 잠글 행이 없는 집합 판단을 잠글 행 하나로 바꾼 것이다(4절 "격리 수준과 무관한 이유").
+- **확인**: 대조군으로 `max(seq)+1`로 바꾸면 이 테스트와 `eachKeyCountsFromOne`이 실패한다(두 번째가 막히지 않는다).
+
+### F15. 같은 commandId의 동시 접수가 앱 트랜잭션을 깬다 (G7)
+
+- **깨지는 것**: 유일성 위반 예외를 잡아 "이미 있다"로 처리하면, PostgreSQL은 그 트랜잭션 전체를 중단 상태로 만든다. 그 뒤의 모든 질의가 `current transaction is aborted`로 실패하고 앱 트랜잭션이 통째로 롤백된다. 재시도한 사용자의 주문 저장이 함께 날아간다.
+- **재현**: `CommandStoreContract` › `aConcurrentDuplicateLeavesTheAppTransactionUsable`. 늦은 쪽은 먼저 커밋된 행을 돌려받고, 이어서 다른 키의 순번을 받을 수 있어야 한다.
+- **구조**: `INSERT … ON CONFLICT (command_id) DO NOTHING RETURNING id`. 넣지 못했으면 같은 트랜잭션에서 기존 행을 읽는다(P2b-9). 에러를 내지 않으므로 트랜잭션이 산다.
+- **확인**: 대조군으로 `ON CONFLICT`를 지우고 `DuplicateKeyException`을 잡게 하면 이 테스트와 `aSecondInsertReturnsTheFirstRow`가 `current transaction is aborted`로 실패한다.
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |
 |---|---|---|
-| O1 | 맨 앞 명령을 다른 트랜잭션이 잠갔을 때 `lockDue`가 그 키의 다음 명령을 낸다. 참조 예약 행이 잠겨 있어 `lockDue`가 예약을 비워 낸다(F10이 멈추지만 원인은 막아야 한다). `nextSeq` 키 잠금이 커밋 전에 풀린다. 같은 commandId의 동시 접수가 앱 트랜잭션을 깬다 | 02b. 두 계약에 동시성 장 |
 | O2 | 워커가 어느 지점에서 죽어도 중복 없이 복구되는가(kill -9) | 4단계 E1 |
 | O3 | TB 응답이 유실된 명령(미확정)을 같은 이체 ID로만 다시 보내는가 | 3~4단계 |
 | O4 | TB 컨테이너가 기동 중 `panic: reached unreachable code`로 가끔 죽는다. main에서도 재현된다 | 조사 필요(테스트 환경) |
