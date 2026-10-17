@@ -168,12 +168,18 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: `RelayWorker`가 결과 개수를 요청 개수와 비교한다(P3a-6). 다르면 모두 `release`한다. 다시 보낼 때는 같은 이체 ID이므로 TB가 이미 기록한 것은 `exists`로 돌아온다. 어댑터는 개수를 검사하지 않는다. 판단은 core에 있다.
 - **확인**: 처리를 넣기 전에는 `results.get(i)`가 범위를 벗어나 바퀴가 예외로 끝났다(테스트 실패).
 
+### F23. 응답이 유실된 명령을 새 이체 ID로 다시 보내 돈이 두 번 움직인다 (03a, 열린 장애 O3를 닫음)
+
+- **깨지는 것**: TB는 ID당 한 번만 실행한다. 그래서 같은 명령을 다시 보낼 때 이체 ID가 바뀌면 TB는 그것을 새 이체로 기록한다. 응답이 유실된 첫 요청이 이미 기록됐다면 돈이 두 번 나간다.
+- **재현**: `RelayOnTigerBeetleTest` › TB 응답이 유실되면 › `aLostReplyIsRetriedWithTheSameTransferIdAndMovesMoneyOnce`. 첫 요청은 실제 TB에 기록되지만 워커에게는 응답이 가지 않는다(테스트 대역 `ReplyLosingLedger`). 워커가 timeout으로 되돌리고 backoff 뒤 다시 보내면, 두 요청의 이체 ID가 같고, 두 번째 TB 결과는 `Exists`이며, 돈은 500만 움직인다. 연결이 끊긴 경우(`aCutConnectionIsRetriedAfterItIsRestored`, Toxiproxy)도 복구 뒤 적용됨으로 끝나고 돈은 한 번만 움직인다.
+- **구조**: 이체 ID는 접수 때 생성기가 내서 행(`transfer_id`)에 박는다(§5.1-5, D7). 워커는 claim한 행의 ID만 보내고 새 ID를 만들지 않는다. TB 쪽의 같은 ID 재전송은 `exists`(같은 본문, A1·A3)나 `id_already_failed`(일시적 실패, PRIOR_FAILURE 알림)로 돌아온다.
+- **확인**: 대조군으로 두 번째 요청의 이체 ID를 새로 바꾸자 돈이 1000 움직여 테스트가 실패했다.
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |
 |---|---|---|
 | O2 | 워커가 어느 지점에서 죽어도 중복 없이 복구되는가(kill -9) | 4단계 E1 |
-| O3 | TB 응답이 유실된 명령(미확정)을 같은 이체 ID로만 다시 보내는가 | 3~4단계 |
 | O4 | TB 컨테이너가 기동 중 `panic: reached unreachable code`로 가끔 죽는다. main에서도 재현된다 | 조사 필요(테스트 환경) |
 | O5 | 멈춘 명령을 목록으로 볼 방법이 없다. 알림을 놓치면 `abandonHalted`에 넘길 commandId를 SQL로 찾아야 한다 | 3단계. 멈춘 명령 조회 |
 | O7 | 덤프·복원이나 다른 클러스터로 옮긴 DB에서는 옮겨 온 `accepted_xact`가 새 트랜잭션 ID와 우연히 같아져, 이미 커밋된 예약을 참조한 정상 확정이 `ReservationNotFoundException`으로 거부될 수 있다. 재현 테스트는 두지 않았다. 클러스터 이전을 재현하는 비용이 절차 한 줄보다 크다 | 이전 절차: 복원 직후 `UPDATE ledger_command SET accepted_xact = '0'`(docs/development.md) |
