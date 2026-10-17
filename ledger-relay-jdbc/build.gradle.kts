@@ -40,7 +40,10 @@ dependencies {
 }
 
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        // 측정용 테스트는 기본 실행에서 뺀다(:ledger-relay-jdbc:measurement)
+        excludeTags("measurement")
+    }
     // 개별 테스트 2분 timeout(아래)을 빠져나가는 매달림까지 막는 전체 상한
     timeout = Duration.ofMinutes(15)
     // 잠금을 기다리다 매달린 동시성 테스트를 실패로 바꾸는 안전망
@@ -50,4 +53,12 @@ tasks.test {
         showStandardStreams = false
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
+}
+
+// 측정용 테스트만 돈다(02d Task 9). 판정하지 않고 실행 계획을 표준 출력에 남긴다.
+tasks.register<Test>("measurement") {
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnitPlatform { includeTags("measurement") }
+    testLogging { showStandardStreams = true }
 }
