@@ -78,6 +78,9 @@ public final class CommandLifecycle implements LedgerRelay {
 
     @Override
     public Optional<CommandStatus> status(String commandId) {
+        if (!LedgerCommand.isAcceptableId(commandId)) {
+            return Optional.empty();
+        }
         return transactions.inTransaction(() -> store.find(commandId)).map(CommandLifecycle::statusOf);
     }
 
@@ -157,6 +160,9 @@ public final class CommandLifecycle implements LedgerRelay {
      */
     public WriteResult abandonHalted(String commandId) {
         requireOutsideTransaction();
+        if (!LedgerCommand.isAcceptableId(commandId)) {
+            throw new IllegalArgumentException("접수한 적 없는 명령입니다: " + commandId);
+        }
         try {
             return transactions.inTransaction(() -> {
                 CommandRecord current = store.find(commandId)

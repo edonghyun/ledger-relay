@@ -149,8 +149,10 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 
 - **깨지는 것**: PG `text`는 0x00 바이트를 받지 않는다. commandId·순서 키·reservation에 U+0000이 있으면 접수의 INSERT가 SQL 오류로 끝나고, PG에서는 그 앱 트랜잭션 전체가 중단된다. 짝 없는 서로게이트(예: `\uD800`)는 `getBytes(UTF_8)`에서 `?`로 바뀐다. 그래서 `"order-\uD800"`과 `"order-?"`의 내용 해시가 같아져, 다른 명령이 같은 내용으로 인정될 수 있다(G7).
 - **재현**: `LedgerCommandTest` › 규칙을 어긴 명령을 만들면 › "commandId에 U+0000이 있으면", "순서 키에 짝 없는 서로게이트가 있으면", "확정의 reservation에 U+0000이 있으면". 짝이 맞는 서로게이트(이모지)는 `aTransferWithAPairedSurrogateIsAccepted`가 허용함을 확인한다.
-- **구조**: `LedgerCommand` 생성자의 `requireWellFormed`가 세 문자열 필드를 검사하고 `InvalidCommandException`으로 거부한다. 판단이 core에 있으므로 저장소는 이런 값을 받지 않는다.
-- **확인**: 검사를 넣기 전에 세 행이 "예외가 없다"로 실패했다.
+- **조회·포기 경로 (리뷰에서 발견)**: 접수만 막으면 `status(commandId)`와 `abandonHalted(commandId)`가 같은 문자열을 그대로 PG에 보낸다. `status`는 앱 트랜잭션에 합류하므로, 외부 키(HTTP 경로의 멱등 키 등)로 조회한 앱 트랜잭션이 U+0000 하나로 통째로 깨진다. 짝 없는 서로게이트는 pgjdbc가 `?`로 바꿔 보내므로, `status("pay-\uD800")`가 `pay-?`라는 다른 명령의 상태를 돌려주고, `abandonHalted`는 다른 명령을 포기하려 든다. commandId는 해시에 들어가지 않으므로 이쪽 위험은 해시 충돌이 아니라 다른 명령과 맞는 것이다.
+- **재현**: `LedgerCommandTest` › 규칙을 어긴 명령을 만들면 › 위 세 행. `LedgerRelayContract` › 명령을 접수하면 › `aMalformedIdIsNotFoundAndTheAppTransactionStaysUsable`, `aLoneSurrogateDoesNotMatchAnotherCommand`, 멈추지 않은 명령을 포기하려 하면 › `aLoneSurrogateIdIsRefusedAsUnknown`. 메모리 저장소에서는 실패할 수 없고 PG 위(DataSource·JPA 두 계약)에서만 실패한다.
+- **구조**: `LedgerCommand` 생성자의 `requireWellFormed`가 세 문자열 필드를 검사하고 `InvalidCommandException`으로 거부한다. 같은 판정을 공개 정적 메서드 `LedgerCommand.isAcceptableId`로 내고, 서비스의 `status`는 접수될 수 없는 id면 DB에 묻지 않고 "없음"을, `abandonHalted`는 "접수한 적 없는 명령"을 돌려준다. 판단이 core에 있으므로 저장소는 이런 값을 받지 않는다.
+- **확인**: 검사를 넣기 전에 생성자 세 행이 "예외가 없다"로, 계약 세 테스트가 PG 위에서 6건(SQL 오류, `pay-?`의 상태, 다른 명령의 HALTED 검사) 실패했다.
 
 ## 2. 열린 장애
 

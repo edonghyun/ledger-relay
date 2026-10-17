@@ -100,13 +100,28 @@ public record LedgerCommand(
      * '?'가 되어 다른 값과 해시가 같아진다(docs/failure-modes.md F20).
      */
     private static void requireWellFormed(String field, String value) {
+        require(isWellFormed(value), field + "에 U+0000이나 짝 없는 서로게이트를 쓸 수 없습니다");
+    }
+
+    /**
+     * 이 문자열이 commandId로 접수될 수 있는가. 아니면 그 id로 접수된 명령은 있을 수 없다. 서비스는 조회·포기 전에 이것으로
+     * 걸러 DB에 보내지 않는다. PG에서 U+0000은 앱 트랜잭션을 깨고, 짝 없는 서로게이트는 '?'로 바뀌어 다른 명령과 맞는다(F20).
+     */
+    public static boolean isAcceptableId(String commandId) {
+        return commandId != null && !commandId.isBlank() && isWellFormed(commandId);
+    }
+
+    private static boolean isWellFormed(String value) {
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
             boolean lone = Character.isHighSurrogate(c)
                     ? i + 1 >= value.length() || !Character.isLowSurrogate(value.charAt(++i))
                     : Character.isLowSurrogate(c);
-            require(c != '\u0000' && !lone, field + "에 U+0000이나 짝 없는 서로게이트를 쓸 수 없습니다");
+            if (c == '\u0000' || lone) {
+                return false;
+            }
         }
+        return true;
     }
 
     private static void require(boolean satisfied, String reason) {

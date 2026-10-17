@@ -36,7 +36,7 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 
 ## 알려진 문제
 
-- **TB 서버 크래시 (원인 미상)**: 2026-10-16 전체 테스트 5회 중 2회(리뷰어 실행 포함), 한 실행 안에서 세 번째로 띄운 TB 컨테이너가 기동 직후(`listening on` 뒤 2~130ms) `thread 1 panic: reached unreachable code`(exit 139)로 종료됐다. OOM은 아니었다. 새 컨테이너에 바로 요청을 보내는 단독 재현 시도 12회에서는 재현되지 않았다.
+- **TB 서버 크래시 (원인 미상)**: 2026-10-16 전체 테스트 5회 중 2회(리뷰어 실행 포함), 한 실행 안에서 세 번째로 띄운 TB 컨테이너가 기동 직후(`listening on` 뒤 2~130ms) `thread 1 panic: reached unreachable code`(exit 139)로 종료됐다. OOM은 아니었다. 새 컨테이너에 바로 요청을 보내는 단독 재현 시도 12회에서는 재현되지 않았다. 2026-10-17(02c 작업 중): 브랜치의 tigerbeetle 모듈 실행 10회 중 6회에 한 번 이상 났다(테스트 클래스가 하나 늘어 실행마다 띄우는 TB 컨테이너가 많다). 같은 시각 main에서는 3회 중 1회였다. 이때 Docker VM 메모리는 8GiB였고, 다른 프로젝트 컨테이너 11개가 떠 있었다(하나는 재시작 반복). TB 컨테이너는 기동 때 약 1.4GiB를 잡는다. 메모리 압박과의 관계는 확인하지 않았다.
 - TB 클라이언트에는 timeout이 없어서, 서버가 죽으면 요청이 영원히 대기한다. 픽스처의 대응은 다음과 같다.
   - `TigerBeetleContainer`는 컨테이너 로그를 항상 보관한다. 기동 실패는 로그 끝부분을 담은 `ContainerLaunchException`으로 다시 던진다.
   - `listening on` 뒤 1초 동안 살아 있는지 확인한다. 이 구간 안에 죽으면 그 자리에서 실패한다.

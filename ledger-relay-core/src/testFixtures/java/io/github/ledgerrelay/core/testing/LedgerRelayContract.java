@@ -103,6 +103,34 @@ public abstract class LedgerRelayContract {
             // then
             assertThat(found).as("접수한 적 없는 명령의 조회 결과").isEmpty();
         }
+
+        @Test
+        @DisplayName("U+0000이 든 commandId로 조회하면 아무것도 없고, 같은 앱 트랜잭션은 계속 쓸 수 있다 (F20)")
+        void aMalformedIdIsNotFoundAndTheAppTransactionStaysUsable() {
+            // when: 앱 트랜잭션 안에서 외부 키로 조회한 뒤 이어서 접수한다
+            Optional<CommandStatus> found = storage.transactions().inTransaction(() -> {
+                Optional<CommandStatus> looked = relay.status("pay\u00001");
+                relay.submit(transfer("pay-2", "order-1", 500));
+                return looked;
+            });
+
+            // then
+            assertThat(found).as("U+0000이 든 commandId의 조회 결과").isEmpty();
+            assertThat(relay.status("pay-2")).as("같은 트랜잭션에서 이어서 접수한 명령").isPresent();
+        }
+
+        @Test
+        @DisplayName("짝 없는 서로게이트가 든 commandId로 조회하면 '?'로 바뀐 다른 명령이 나오지 않는다 (F20)")
+        void aLoneSurrogateDoesNotMatchAnotherCommand() {
+            // given
+            submit(transfer("pay-?", "order-1", 500));
+
+            // when
+            Optional<CommandStatus> found = relay.status("pay-\uD800");
+
+            // then
+            assertThat(found).as("짝 없는 서로게이트가 든 commandId의 조회 결과").isEmpty();
+        }
     }
 
     @Nested
@@ -1071,6 +1099,21 @@ public abstract class LedgerRelayContract {
             // then
             assertThatThrownBy(abandoning).as("없는 명령이라 거부되기를 기대했다")
                     .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("never-accepted");
+        }
+
+        @Test
+        @DisplayName("짝 없는 서로게이트가 든 commandId면 접수한 적 없는 명령으로 거부되고, '?'로 바뀐 다른 명령은 그대로다 (F20)")
+        void aLoneSurrogateIdIsRefusedAsUnknown() {
+            // given
+            submit(transfer("pay-?", "order-1", 500));
+
+            // when
+            ThrowingCallable abandoning = () -> relay.abandonHalted("pay-\uD800");
+
+            // then
+            assertThatThrownBy(abandoning).as("접수될 수 없는 id라 없는 명령으로 거부되기를 기대했다")
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("접수한 적 없는 명령");
+            assertRow("pay-?", CommandRow.accepted());
         }
 
         @Test

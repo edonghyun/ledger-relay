@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 @DisplayName("명령 모델 — 스펙 §6 빌더와 §5.1 정규화")
@@ -209,6 +210,30 @@ class LedgerCommandTest {
                             (ThrowingCallable) () -> LedgerCommand.post("capture-1").orderingKey("order-42")
                                     .reservation("capture-1").build(),
                             "post·void는 자기 자신을 reservation으로 참조할 수 없습니다"));
+        }
+    }
+
+    @Nested
+    @Order(3)
+    @DisplayName("문자열이 commandId로 접수될 수 있는지 물으면 — 조회·포기가 DB에 보내기 전에 쓴다 (F20)")
+    class AcceptableIds {
+
+        @ParameterizedTest(name = "{0} → {1}", quoteTextArguments = false)
+        @CsvSource(delimiter = '|', nullValues = "null", textBlock = """
+                pay-1        | true
+                주문-😀      | true
+                null         | false
+                ' '          | false
+                pay\u00001   | false
+                pay-\uD800   | false
+                \uDC00-pay   | false
+                pay\uD800x   | false
+                """)
+        @DisplayName("공백이 아니고 U+0000과 짝 없는 서로게이트가 없을 때만 그렇다")
+        void answersWhetherTheIdCouldHaveBeenAccepted(String commandId, boolean acceptable) {
+            // 표의 \\uXXXX는 컴파일러가 실제 문자(U+0000, 서로게이트 반쪽)로 바꾼다
+            assertThat(LedgerCommand.isAcceptableId(commandId)).as("%s를 commandId로 접수할 수 있는가", commandId)
+                    .isEqualTo(acceptable);
         }
     }
 
