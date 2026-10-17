@@ -298,6 +298,18 @@ public abstract class CommandStoreContract {
         }
 
         @Test
+        @DisplayName("lease가 끝나는 바로 그 시각에는 아직 후보가 아니다 — lease_expires_at < now일 때만 다시 잡는다")
+        void theLeaseIsStillLiveAtItsExpiryInstant() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            claimed("pay-1", 1);
+            storage.elapse(LEASE);
+
+            // then
+            assertNothingDue();
+        }
+
+        @Test
         @DisplayName("lease가 끝나면 처리 중 명령이 다시 후보다")
         void anExpiredLeaseIsDue() {
             // given
