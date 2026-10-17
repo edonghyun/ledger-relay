@@ -10,6 +10,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * 워커 한 바퀴(스펙 §5.3, 03a P3a-1·P3a-4). 스레드·주기·종료는 부르는 쪽(03b)이 맡는다. 여러 스레드가 같은 인스턴스의
@@ -52,10 +53,10 @@ public final class RelayWorker {
             List<ClaimedCommand> sending = new ArrayList<>();
             for (ClaimedCommand claimed : batch.claimed()) {
                 if (claimed.skip()) {
-                    completed += written(claimed, lifecycle.skip(claimed));
+                    completed += attempt(claimed, () -> lifecycle.skip(claimed));
                 } else if (claimed.knownResult().isPresent()) {
-                    completed += written(claimed, lifecycle.complete(claimed, claimed.knownResult().get()));
-                } else if (written(claimed, lifecycle.markSubmitted(claimed)) == 1) {
+                    completed += attempt(claimed, () -> lifecycle.complete(claimed, claimed.knownResult().get()));
+                } else if (attempt(claimed, () -> lifecycle.markSubmitted(claimed)) == 1) {
                     sending.add(claimed);
                 }
             }
@@ -97,7 +98,10 @@ public final class RelayWorker {
                 return released(batch, sent, completed, sending);
             }
             for (int i = 0; i < sending.size(); i++) {
-                completed += written(sending.get(i), lifecycle.complete(sending.get(i), results.get(i)));
+                ClaimedCommand claimed = sending.get(i);
+                LedgerResultCode code = results.get(i);
+                // 명령마다 따로 쓴다. 하나가 실패해도 나머지가 받은 결과를 잃지 않게(§5.3-3)
+                completed += attempt(claimed, () -> lifecycle.complete(claimed, code));
             }
             return new CycleReport(batch.claimed().size(), sent, completed, 0);
         } finally {
@@ -109,13 +113,25 @@ public final class RelayWorker {
     private CycleReport released(ClaimBatch batch, int sent, int completed, List<ClaimedCommand> sending) {
         int released = 0;
         for (ClaimedCommand claimed : sending) {
-            released += written(claimed, lifecycle.release(claimed));
+            released += attempt(claimed, () -> lifecycle.release(claimed));
         }
         return new CycleReport(batch.claimed().size(), sent, completed, released);
     }
 
-    /** @return 반영됐으면 1. 0행이나 핸들러 실패는 알리고 0이다 */
-    private int written(ClaimedCommand claimed, WriteResult result) {
+    /**
+     * 쓰기 하나를 한다. 예외로 끝나면 그 명령만 알리고 0이다. 그 명령은 lease가 끝날 때까지 처리 중으로 남고 같은 이체
+     * ID로 다시 잡힌다. 같은 바퀴의 다른 명령은 계속 쓴다. Error는 삼키지 않는다.
+     *
+     * @return 반영됐으면 1. 0행, 핸들러 실패, 쓰기 실패는 알리고 0이다
+     */
+    private int attempt(ClaimedCommand claimed, Supplier<WriteResult> write) {
+        WriteResult result;
+        try {
+            result = write.get();
+        } catch (RuntimeException e) {
+            events.writeFailed(claimed.commandId(), e);
+            return 0;
+        }
         return switch (result) {
             case WriteResult.Written written -> 1;
             case WriteResult.Fenced fenced -> {

@@ -7,7 +7,11 @@ import io.github.ledgerrelay.core.CommandKind;
 import io.github.ledgerrelay.core.CommandReceipt;
 import io.github.ledgerrelay.core.CommandStatus.State;
 import io.github.ledgerrelay.core.LedgerCommand;
+import io.github.ledgerrelay.core.spi.CommandRecord;
+import io.github.ledgerrelay.core.spi.CommandStore;
+import io.github.ledgerrelay.core.spi.DueCommand;
 import io.github.ledgerrelay.core.spi.NewCommand;
+import io.github.ledgerrelay.core.spi.RowChange;
 import io.github.ledgerrelay.core.spi.Submission;
 import io.github.ledgerrelay.core.spi.TransferBody;
 import io.github.ledgerrelay.core.testing.FakeLedger;
@@ -348,7 +352,78 @@ class RelayWorkerTest {
         }
     }
 
+    @Nested
+    @Order(6)
+    @DisplayName("결과를 쓰는 중에 저장소가 한 명령에서 실패하면")
+    class WhenAWriteFails {
+
+        @Test
+        @DisplayName("그 명령만 알리고 나머지 명령의 결과는 그대로 쓴다 — 받은 거절 사유가 IdAlreadyFailed로 덮이지 않게 (§5.3-3)")
+        void theOtherResultsOfTheBatchAreStillWritten() {
+            // given: pay-1의 결과를 쓸 때 저장소가 한 번 실패한다(제출 기록 때의 조회는 지나간다)
+            FlakyStore flaky = new FlakyStore(storage.store(), "pay-1", 1);
+            CommandLifecycle onFlaky = new CommandLifecycle(flaky, storage.transactions(), new SequentialTransferIds(),
+                    handler, new Backoff(Duration.ofMillis(200), BACKOFF_MAX));
+            RelayWorker flakyWorker = new RelayWorker(onFlaky, fake, slots, SETTINGS, events);
+            storage.transactions().inTransaction(() -> onFlaky.submit(transfer("pay-1", "order-1")));
+            fake.answer(storage.transactions().inTransaction(() -> onFlaky.submit(transfer("pay-2", "order-2")))
+                    .transferId(), ExceedsCredits);
+
+            // when
+            flakyWorker.runOnce();
+
+            // then
+            assertThat(onFlaky.status("pay-2").orElseThrow().rejection().orElseThrow().tbCode())
+                    .as("pay-2의 거절 코드").isEqualTo(ExceedsCredits);
+            assertThat(events.events()).as("워커 이벤트").contains("writeFailed:pay-1");
+        }
+    }
+
     // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+
+    /** 이 commandId를 skip번 조회한 다음의 조회 한 번에서 던지는 저장소. 나머지는 그대로 전한다. */
+    private static final class FlakyStore implements CommandStore {
+
+        private final CommandStore real;
+        private final String commandId;
+        private int skip;
+        private boolean failed;
+
+        FlakyStore(CommandStore real, String commandId, int skip) {
+            this.real = real;
+            this.commandId = commandId;
+            this.skip = skip;
+        }
+
+        @Override
+        public long nextSeq(String orderingKey) {
+            return real.nextSeq(orderingKey);
+        }
+
+        @Override
+        public Optional<CommandRecord> insertIfAbsent(NewCommand command) {
+            return real.insertIfAbsent(command);
+        }
+
+        @Override
+        public Optional<CommandRecord> find(String id) {
+            if (id.equals(commandId) && !failed && skip-- <= 0) {
+                failed = true;
+                throw new IllegalStateException("DB 연결이 잠깐 끊겼다");
+            }
+            return real.find(id);
+        }
+
+        @Override
+        public List<DueCommand> lockDue(int limit) {
+            return real.lockDue(limit);
+        }
+
+        @Override
+        public boolean compareAndSet(RowChange change) {
+            return real.compareAndSet(change);
+        }
+    }
 
     private CommandReceipt accepted(LedgerCommand command) {
         return storage.transactions().inTransaction(() -> relay.submit(command));

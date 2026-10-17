@@ -24,6 +24,11 @@ public final class RecordingWorkerEvents implements WorkerEvents {
     }
 
     @Override
+    public synchronized void writeFailed(String commandId, RuntimeException cause) {
+        events.add("writeFailed:" + commandId);
+    }
+
+    @Override
     public synchronized void handlerFailed(String commandId, RuntimeException cause) {
         events.add("handlerFailed:" + commandId);
     }

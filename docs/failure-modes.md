@@ -175,6 +175,20 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: 이체 ID는 접수 때 생성기가 내서 행(`transfer_id`)에 박는다(§5.1-5, D7). 워커는 claim한 행의 ID만 보내고 새 ID를 만들지 않는다. TB 쪽의 같은 ID 재전송은 `exists`(같은 본문, A1·A3)나 `id_already_failed`(일시적 실패, PRIOR_FAILURE 알림)로 돌아온다.
 - **확인**: 대조군으로 두 번째 요청의 이체 ID를 새로 바꾸자 돈이 1000 움직여 테스트가 실패했다.
 
+### F24. 결과를 쓰는 중 한 명령의 저장소 오류가 같은 배치의 나머지 결과를 버린다 (03a, 리뷰에서 발견)
+
+- **깨지는 것**: 워커는 TB 결과를 받은 뒤 명령마다 따로 쓴다. 그런데 한 명령의 쓰기가 저장소 예외(DB 연결 끊김 등)로 끝났을 때 바퀴 전체가 멈추면, 뒤 명령들은 받은 결과를 남기지 못한 채 lease가 끝날 때까지 처리 중으로 남는다. lease가 끝나면 같은 이체 ID로 다시 보내진다. TB가 기억하는 거절(`exceeds_credits` 등)은 그때 `id_already_failed`로 돌아와, 원래 사유를 잃고 PRIOR_FAILURE로 끝난다. §5.4와 F3·F4가 막으려던 결과가 다른 길로 생긴다.
+- **재현**: `RelayWorkerTest` › 결과를 쓰는 중에 저장소가 한 명령에서 실패하면 › `theOtherResultsOfTheBatchAreStillWritten`. 배치는 [pay-1 Created, pay-2 ExceedsCredits]이고, pay-1의 결과를 쓸 때 저장소가 한 번 던진다. pay-2는 `ExceedsCredits`로 거절됨이 되어야 하고, `writeFailed:pay-1`을 알려야 한다.
+- **구조**: `RelayWorker.attempt`가 쓰기(제출 기록, 건너뛰기, 결과, 되돌리기) 하나하나의 `RuntimeException`을 잡아 `WorkerEvents.writeFailed`로 알리고 다음 명령으로 넘어간다. 실패한 명령은 lease 만료 뒤 같은 이체 ID로 다시 잡힌다. Error는 삼키지 않는다.
+- **확인**: 고치기 전에는 바퀴가 예외로 끝나 테스트가 실패했다.
+
+### F25. lease가 응답 기다림보다 짧아 다른 워커가 같은 명령을 다시 보낸다 (03a, 리뷰에서 발견)
+
+- **깨지는 것**: lease는 claim에서 시작한다. 그래서 제출 기록, 응답 기다림(submit-timeout), 명령마다의 결과 쓰기를 모두 덮어야 한다. lease가 submit-timeout보다 짧으면 첫 워커가 응답을 기다리는 동안 다른 워커가 같은 명령을 다시 잡아 보낸다. fencing 덕분에 돈이 두 번 움직이지는 않는다. 하지만 두 번째 요청은 TB가 기억하는 거절에 `id_already_failed`를 받고, 첫 워커의 진짜 결과 쓰기는 0행으로 막혀 원래 사유를 잃는다.
+- **재현**: `WorkerSettingsTest` › 잘못 주면 › "lease가 submit-timeout의 두 배보다 짧으면".
+- **구조**: `WorkerSettings`는 `lease ≥ 2 × submitTimeout`이 아니면 거부한다. 결과 쓰기는 명령마다 핸들러를 포함한 트랜잭션 하나라서 batch-size에 비례한다. 큰 batch-size에서는 lease를 더 길게 잡아야 한다고 Javadoc에 적었다. 이 몫은 핸들러 속도에 달려 있어 설정 검증으로는 막지 못한다.
+- **확인**: 검사를 넣기 전에 그 행은 "예외가 없다"로 실패했다.
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |

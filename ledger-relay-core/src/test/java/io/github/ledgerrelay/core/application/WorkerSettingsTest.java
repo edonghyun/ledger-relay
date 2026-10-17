@@ -64,6 +64,8 @@ class WorkerSettingsTest {
                     argumentSet("submit-timeout이 음수면",
                             (ThrowingCallable) () -> new WorkerSettings(128, 1024, S30, Duration.ofSeconds(-1), S1),
                             "submitTimeout"),
+                    argumentSet("lease가 submit-timeout의 두 배보다 짧으면 — 기다리는 동안 다른 워커가 같은 명령을 다시 잡는다",
+                            (ThrowingCallable) () -> new WorkerSettings(128, 1024, Duration.ofSeconds(9), S5, S1), "lease"),
                     argumentSet("poll-timeout이 0이면",
                             (ThrowingCallable) () -> new WorkerSettings(128, 1024, S30, S5, Duration.ZERO),
                             "pollTimeout"));

@@ -18,6 +18,13 @@ public interface WorkerEvents {
     default void fenced(String commandId) {
     }
 
+    /**
+     * 이 명령의 쓰기가 예외로 끝났다(저장소 오류 등). 그 명령만 lease가 끝날 때까지 처리 중으로 남고, 같은 바퀴의 다른 명령은
+     * 계속 쓴다. TB 결과를 받은 뒤였다면 그 결과는 이 바퀴에서 남지 못한다.
+     */
+    default void writeFailed(String commandId, RuntimeException cause) {
+    }
+
     /** 결과 반영 핸들러가 던졌다. 받은 결과를 남기고 backoff 뒤 다시 잡힌다(§5.4). */
     default void handlerFailed(String commandId, RuntimeException cause) {
     }
