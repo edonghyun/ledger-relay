@@ -25,7 +25,8 @@ class TransitionTableTest {
      * 상태 이름(+토큰 +핸들러 +backoff +결과보존 +제출기록 +실패집계) = 그 상태로 이동하며 해당 효과를 낸다.
      * 그대로 = 게이트가 닫혀 아무 일도 없다. 0행 = fenced UPDATE가 0행을 갱신한다.
      * 불가(모듈 버그) = 모듈이 이 사건을 만들면 버그다. 해당없음(생길 수 없는 사건) = 이 상태에서는 개념상 생길 수 없다.
-     * 두 표기는 왜 일어날 수 없는지의 설명이고 처리는 같다. 상태 기계는 둘 다 버그로 거부한다(CommandStateMachineTest).
+     * 두 표기는 왜 일어날 수 없는지의 설명이다. 불가 칸에 닿으면 상태 기계가 버그로 거부하고, 해당없음 칸은 상태 기계의
+     * 입력으로는 닿을 수 없다(CommandStateMachineTest › 전이표와 견주면).
      */
     static final String TRANSITION_TABLE = """
             # PENDING

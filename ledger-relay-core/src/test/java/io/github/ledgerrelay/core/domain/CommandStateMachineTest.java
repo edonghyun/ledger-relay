@@ -12,9 +12,11 @@ import static io.github.ledgerrelay.core.domain.Transition.Effect.RECORD_SUBMISS
 import static io.github.ledgerrelay.core.domain.Transition.Effect.RUN_HANDLER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import io.github.ledgerrelay.core.LedgerResultCode;
 import io.github.ledgerrelay.core.SkipReason;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -378,6 +380,44 @@ class CommandStateMachineTest {
             StepResult.Moved moved = (StepResult.Moved) result;
             assertThat(moved.row().state()).as("%s 뒤의 상태", write).isEqualTo(tabled.to());
             assertThat(moved.effects()).as("%s의 효과", write).isEqualTo(tabled.effects());
+        }
+
+        /**
+         * 빈 가지 17: 표의 "불가"와 "해당없음"은 처리가 다른가. 둘 다 닿으면 버그로 거부되지만, 해당없음 칸은 상태 기계의 입력으로는
+         * 닿을 수조차 없다. 사건을 만드는 코드(claim의 상태별 사건, 처리 중 행에만 반영되는 쓰기)가 그 칸을 피한다.
+         * 불가 칸에 닿으면 버그로 거부되는 것은 claim하면 장의 두 테스트가 확인한다.
+         */
+        @Test
+        @DisplayName("어떤 상태에 어떤 입력을 줘도 '해당없음' 칸에는 닿지 않는다 — 해당없음은 처리가 아니라 설명이다")
+        void noInputReachesANotApplicableCell() {
+            for (StoredState state : StoredState.values()) {
+                for (Step step : everyInputWithToken(3)) {
+                    // given
+                    CommandRow row = rowIn(state, 3, 1);
+
+                    // when
+                    Throwable refused = catchThrowable(() -> CommandStateMachine.apply(row, step));
+
+                    // then
+                    assertThat(refused == null ? "" : refused.getMessage())
+                            .as("%s 상태에 %s를 주면", state, step).doesNotContain("NOT_APPLICABLE");
+                }
+            }
+        }
+
+        private static List<Step> everyInputWithToken(long token) {
+            List<Step> inputs = new ArrayList<>();
+            for (GateDecision gate : GateDecision.values()) {
+                inputs.add(new Step.Claim(gate, false));
+                inputs.add(new Step.Claim(gate, true));
+            }
+            inputs.add(new Step.MarkSubmitted(token));
+            inputs.add(new Step.Complete(token, LedgerResultCode.Created));
+            inputs.add(new Step.Skip(token));
+            inputs.add(new Step.Release(token));
+            inputs.add(new Step.HandlerFailed(token, Optional.of(LedgerResultCode.Created)));
+            inputs.add(new Step.Abandon());
+            return inputs;
         }
     }
 
