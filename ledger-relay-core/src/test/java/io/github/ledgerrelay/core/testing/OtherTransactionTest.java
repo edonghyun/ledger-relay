@@ -84,6 +84,28 @@ class OtherTransactionTest {
         }
     }
 
+    @Nested
+    @Order(2)
+    @DisplayName("끝내라는 지시가 상한 안에 오지 않으면")
+    class WhenNeverToldHowToEnd {
+
+        @Test
+        @DisplayName("스스로 롤백한다 — 실패한 테스트가 다음 테스트에 행을 남기지 않게")
+        void itRollsBackOnItsOwn() throws InterruptedException {
+            // given: 상한 200ms로 연 트랜잭션이 pay-1을 넣었다
+            OtherTransaction<Optional<CommandRecord>> forgotten = OtherTransaction.start(storage.transactions(),
+                    () -> storage.store().insertIfAbsent(pay1()), Duration.ofMillis(200));
+            forgotten.awaitWork();
+
+            // when: commit()도 rollback()도 부르지 않고 상한이 지나도록 둔다
+            Thread.sleep(1_000);
+
+            // then
+            assertThat(storage.transactions().inTransaction(() -> storage.store().find("pay-1")))
+                    .as("지시 없이 끝난 트랜잭션이 넣은 행").isEmpty();
+        }
+    }
+
     /** {@code CommandStoreContract.newTransfer("pay-1", "order-1", 1)}과 같은 값 */
     private static NewCommand pay1() {
         return new NewCommand("pay-1", "order-1", 1, Optional.empty(), BigInteger.valueOf(101), "hash-of-pay-1",

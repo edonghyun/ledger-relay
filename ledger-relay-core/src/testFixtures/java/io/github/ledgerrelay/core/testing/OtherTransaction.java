@@ -9,7 +9,7 @@ import java.util.function.Supplier;
 /**
  * 다른 스레드에서 연 트랜잭션. 동시성 장이 "다른 워커·다른 앱 트랜잭션"을 결정적으로 만들 때 쓴다(P2b-4).
  * 일을 마친 뒤에도 {@link #commit()}이나 {@link #rollback()}을 부를 때까지 트랜잭션을 연 채로 기다린다.
- * 그래서 그 트랜잭션이 잡은 행 잠금이 테스트가 정한 순간까지 살아 있다.
+ * 그래서 그 트랜잭션이 잡은 행 잠금이 테스트가 정한 순간까지 살아 있다. 상한(10초) 안에 지시가 없으면 롤백한다.
  */
 public final class OtherTransaction<T> implements AutoCloseable {
 
@@ -23,12 +23,20 @@ public final class OtherTransaction<T> implements AutoCloseable {
     private volatile Throwable workFailure;
     private volatile Throwable endFailure;
 
-    private OtherTransaction() {
+    private final Duration limit;
+
+    private OtherTransaction(Duration limit) {
+        this.limit = limit;
     }
 
     /** 새 스레드에서 트랜잭션을 열어 {@code work}를 실행한다. 바로 돌아온다. */
     public static <T> OtherTransaction<T> start(Transactions transactions, Supplier<T> work) {
-        OtherTransaction<T> other = new OtherTransaction<>();
+        return start(transactions, work, LIMIT);
+    }
+
+    /** 상한을 정해 연다. 이 클래스의 테스트가 상한이 지난 뒤의 동작을 짧게 확인할 때 쓴다. */
+    static <T> OtherTransaction<T> start(Transactions transactions, Supplier<T> work, Duration limit) {
+        OtherTransaction<T> other = new OtherTransaction<>(limit);
         Thread thread = new Thread(() -> other.run(transactions, work), "other-transaction");
         thread.setDaemon(true);
         thread.start();
@@ -95,7 +103,10 @@ public final class OtherTransaction<T> implements AutoCloseable {
                 } finally {
                     workDone.countDown();
                 }
-                awaitQuietly(finish);
+                // 상한 안에 지시가 없으면 롤백한다. 실패한 테스트가 다음 테스트에 행을 남기지 않게
+                if (!awaitQuietly(finish)) {
+                    rollingBack = true;
+                }
                 if (rollingBack) {
                     throw new RollbackSignal();
                 }
@@ -122,10 +133,10 @@ public final class OtherTransaction<T> implements AutoCloseable {
         }
     }
 
-    private static void await(CountDownLatch latch, String what) {
+    private void await(CountDownLatch latch, String what) {
         try {
-            if (!latch.await(LIMIT.toMillis(), TimeUnit.MILLISECONDS)) {
-                throw new AssertionError(what + " " + LIMIT.toSeconds() + "초 안에 끝나지 않았다");
+            if (!latch.await(limit.toMillis(), TimeUnit.MILLISECONDS)) {
+                throw new AssertionError(what + " " + limit.toMillis() + "ms 안에 끝나지 않았다");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -133,11 +144,13 @@ public final class OtherTransaction<T> implements AutoCloseable {
         }
     }
 
-    private static void awaitQuietly(CountDownLatch latch) {
+    /** @return 상한 안에 latch가 열렸는지 */
+    private boolean awaitQuietly(CountDownLatch latch) {
         try {
-            latch.await(LIMIT.toMillis(), TimeUnit.MILLISECONDS);
+            return latch.await(limit.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            return false;
         }
     }
 
