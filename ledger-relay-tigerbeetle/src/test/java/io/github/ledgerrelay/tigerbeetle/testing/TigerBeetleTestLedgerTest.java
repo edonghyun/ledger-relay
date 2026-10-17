@@ -151,6 +151,18 @@ class TigerBeetleTestLedgerTest {
         }
 
         @Test
+        @DisplayName("openAccount(이름, ledger): 그 ledger에 계좌를 연다 — 다른 ledger 계좌로는 이체할 수 없다")
+        void openAccountOnAnotherLedger() {
+            Account payer = ledger.openAccount("구매자");
+            Account elsewhere = ledger.openAccount("다른 ledger의 가맹점", 2);
+
+            assertThatThrownBy(() -> ledger.recorded(transfer(1).from(payer).to(elsewhere)))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageStartingWith("given 준비 실패")
+                    .hasMessageContaining("Ledger");
+        }
+
+        @Test
         @DisplayName("open: 이미 열린 계좌를 다시 열면 준비 단계에서 멈춘다")
         void openStopsWhenTheAccountAlreadyExists() {
             Account opened = ledger.openAccount("이미 연 계좌");

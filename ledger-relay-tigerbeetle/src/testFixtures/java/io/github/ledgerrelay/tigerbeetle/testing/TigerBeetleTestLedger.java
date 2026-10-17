@@ -37,6 +37,11 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
         return open(Account.notOpened(name), AccountFlags.NONE);
     }
 
+    /** {@code ledger}에 계좌를 연다. 다른 ledger의 계좌끼리는 이체할 수 없다. */
+    public Account openAccount(String name, int ledger) {
+        return open(Account.notOpened(name), AccountFlags.NONE, ledger);
+    }
+
     /** 잔액보다 많이 출금할 수 없는 계좌(지갑). 새 계좌의 잔액은 0이다. */
     public Account openAccountThatCannotOverdraw(String name) {
         return open(Account.notOpened(name), AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS);
@@ -174,10 +179,14 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
     }
 
     private Account open(Account account, int flags) {
+        return open(account, flags, LEDGER);
+    }
+
+    private Account open(Account account, int flags, int ledger) {
         AccountBatch batch = new AccountBatch(1);
         batch.add();
         batch.setId(account.id());
-        batch.setLedger(LEDGER);
+        batch.setLedger(ledger);
         batch.setCode(CODE);
         batch.setFlags(flags);
         try {
