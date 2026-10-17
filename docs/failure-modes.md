@@ -27,7 +27,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **깨지는 것**: 핸들러가 던진 뒤에도 최종 상태가 커밋되면, 앱의 업무 상태(주문, 지갑)가 원장 결과를 영영 따라가지 못한다(G6).
 - **재현**: `LedgerRelayContract` › 결과 반영 핸들러가 실패하면 › `theResultIsRolledBackWithTheHandler`. 저장소 쪽은 `CommandStoreContract` › `aThrowingTransactionUndoesTheWrite`.
 - **구조**: 최종 쓰기와 핸들러를 한 트랜잭션에서 실행한다. 핸들러가 던지면 롤백하고, 새 트랜잭션에서 실패를 기록한다(P2a-22).
-- **확인**: 핸들러 예외에도 커밋하는 대조군에서 4건이 실패한다.
+- **확인**: 핸들러 예외에도 커밋하는 대조군에서 4건이 실패한다. PostgreSQL에서 DB에 쓰는 핸들러로 다시 확인했다(`HandlerAtomicityTest`). 핸들러가 트랜잭션 밖 별도 커넥션(auto-commit)으로 쓰는 대조군에서 2건이 실패한다. 쓴 뒤 던지면 앱 테이블에 기록이 남고(`neitherTheResultNorTheAppRowRemains`), 재시도는 기본 키 위반으로 다시 실패해 적용으로 끝나지 못한다(`retryingLeavesExactlyOneAppRow`). 처음 쓴 재시도 테스트는 기록 수만 봐서 이 대조군을 놓쳤고, 최종 상태 확인을 더해 고쳤다.
 
 ### F4. 핸들러 실패 뒤 다시 보내면 원래 거절 사유가 사라진다
 
@@ -117,6 +117,13 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: `INSERT … ON CONFLICT (command_id) DO NOTHING RETURNING id`. 넣지 못했으면 같은 트랜잭션에서 기존 행을 읽는다(P2b-9). 에러를 내지 않으므로 트랜잭션이 산다.
 - **확인**: 대조군으로 `ON CONFLICT`를 지우고 `DuplicateKeyException`을 잡게 하면 이 테스트와 `aSecondInsertReturnsTheFirstRow`가 `current transaction is aborted`로 실패한다.
 
+### F17. 워커가 커넥션 풀의 기본 격리 수준을 따라가 직렬화 실패로 터진다
+
+- **깨지는 것**: 앱이 커넥션 풀 기본값을 REPEATABLE READ로 두면, 워커 단계(claim, 결과 쓰기)도 그 수준으로 열린다. 그러면 다른 워커와 같은 행을 건드릴 때 기다리지 않고 직렬화 실패(40001)로 끝난다. 워커는 이 실패를 예상하지 않으므로, 결과를 쓰지 못한 명령이 lease 만료까지 묶인다.
+- **재현**: `JdbcTransactionsTest` › 커넥션 풀의 기본 격리 수준이 REPEATABLE READ이면 › `aNewTransactionRunsAtReadCommitted`.
+- **구조**: `JdbcTransactions`가 새로 여는 트랜잭션은 READ COMMITTED로 명시한다. 앱 트랜잭션에 합류할 때는 앱의 수준을 바꾸지 않는다(`joiningKeepsTheAppsLevel`, P2b-16).
+- **확인**: 격리 수준을 명시하기 전에 이 테스트가 실패했다("repeatable read"를 읽었다).
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |
@@ -136,3 +143,29 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 | 처리 | 바로 멈춤, 재시도 없음 | backoff로 계속 재시도. 그동안 그 키는 막힘 |
 | 드러내는 지표 | 멈춘 키 수 | `handler_failures` |
 | 사람이 할 일 | 원인 수정 후 `abandonHalted`로 포기 | 핸들러 수정 |
+
+## 4. 격리 수준과 무관한 이유
+
+"동시성 문제면 격리 수준을 SERIALIZABLE로 올리면 되지 않나?"에 대한 답이다.
+
+**잠금으로 못 막는 문제가 있다.** 대표가 write skew다. "당직 의사가 최소 한 명은 남아야 한다"는 규칙에서 두 의사가 동시에 "나 빼고 한 명 이상 남는가?"를 확인하고 둘 다 빠지면 0명이 된다. 각자 자기 행만 고쳤으므로 행 잠금끼리 부딪히지 않는다. 판단의 근거가 "조건을 만족하는 행들의 집합"이고 그 집합을 잠글 행이 없기 때문이다. 이런 문제는 SERIALIZABLE이어야 DB가 잡는다.
+
+**우리 설계는 집합 판단마다 잠글 행을 만들어 두었다**(충돌의 실체화). 그래서 READ COMMITTED에서 잠금만으로 충분하다.
+
+| 집합 판단 | 막는 장치 | 기록 |
+|---|---|---|
+| 이 commandId가 이미 있나 | 유니크 제약 + `ON CONFLICT DO NOTHING` | F15 |
+| 이 키에서 내 순번은 몇 번인가 | 키 행 잠금(커밋까지 유지). 그리고 `UNIQUE (ordering_key, seq)` | F14 |
+| 이 키의 맨 앞 명령이 나인가(`NOT EXISTS`) | 키 행 잠금 덕분에 나보다 앞 순번이 나중에 생길 수 없다 | F12 |
+| 이 명령을 내가 가져가도 되나 (행 하나) | `FOR UPDATE OF c SKIP LOCKED` | F12, F13 |
+| 결과를 써도 되나 (행 하나) | 상태·토큰 조건부 쓰기 | F1 |
+
+**DB 기본값을 바꾸는 방식은 쓰지 않는다.** `default_transaction_isolation`은 기본값일 뿐이다. 실제 수준은 트랜잭션을 여는 쪽이 매번 정한다. 라이브러리가 DB 전체 설정을 바꾸면 같은 DB를 쓰는 앱의 다른 코드까지 바뀌고, 바꿔도 앱이 트랜잭션마다 덮어쓴다. 그래서 약속은 "어떤 격리 수준에서도 데이터는 깨지지 않는다"이다. "에러가 없다"가 아니다.
+
+**높은 수준에서 바뀌는 것은 기다림이 에러가 된다는 것뿐이다.**
+
+- 워커 단계는 우리가 새로 여는 트랜잭션이라 READ COMMITTED로 명시한다(F17, P2b-16).
+- 접수는 앱 트랜잭션에 합류하므로 앱의 수준을 따른다(P2b-17). REPEATABLE READ·SERIALIZABLE에서 같은 키나 같은 commandId의 동시 접수는 늦은 쪽이 직렬화 실패(SQLSTATE 40001)로 끝난다. 행은 하나만 남고 순번은 꼬이지 않는다. 앱은 40001을 보고 재시도한다. 확인: `HigherIsolationSubmitTest`의 두 장, 두 수준. 모두 4건이다.
+- 대조군: 순번을 키 잠금 없이 `max(seq)+1`로 내면 4건 중 1건(같은 키, REPEATABLE READ)만 실패한다. 늦은 쪽이 재시도 가능한 40001이 아니라 유일성 위반(23505)으로 끝난다. 나머지 3건이 통과하는 이유는 `UNIQUE (ordering_key, seq)`가 순번 공유를 막고, SERIALIZABLE에서는 PostgreSQL이 동시 트랜잭션의 유일성 위반을 40001로 바꾸기 때문이다. 높은 수준에서는 키 잠금 말고 방어선이 하나 더 있는 셈이다. READ COMMITTED에서 키 잠금이 빠진 것은 F14가 잡는다.
+
+모든 트랜잭션을 SERIALIZABLE로 강제하지 않는 이유: 워커끼리 부딪힐 때마다 재시도가 생겨 처리량이 떨어진다. 이미 잠금으로 막은 문제를 비싸게 한 번 더 막는 셈이다.
