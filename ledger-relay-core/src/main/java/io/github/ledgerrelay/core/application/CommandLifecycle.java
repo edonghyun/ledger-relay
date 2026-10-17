@@ -10,15 +10,26 @@ import io.github.ledgerrelay.core.LedgerRelay;
 import io.github.ledgerrelay.core.Rejection;
 import io.github.ledgerrelay.core.ReservationNotFoundException;
 import io.github.ledgerrelay.core.domain.CommandRow;
+import io.github.ledgerrelay.core.domain.CommandStateMachine;
 import io.github.ledgerrelay.core.domain.ContentHash;
+import io.github.ledgerrelay.core.domain.GateDecision;
+import io.github.ledgerrelay.core.domain.OrderingGate;
+import io.github.ledgerrelay.core.domain.Step;
+import io.github.ledgerrelay.core.domain.StepResult;
 import io.github.ledgerrelay.core.domain.StoredState;
 import io.github.ledgerrelay.core.spi.CommandRecord;
 import io.github.ledgerrelay.core.spi.CommandStore;
+import io.github.ledgerrelay.core.spi.DueCommand;
 import io.github.ledgerrelay.core.spi.NewCommand;
+import io.github.ledgerrelay.core.spi.RowChange;
+import io.github.ledgerrelay.core.spi.Submission;
 import io.github.ledgerrelay.core.spi.Transactions;
 import io.github.ledgerrelay.core.spi.TransferBody;
 import io.github.ledgerrelay.core.spi.TransferIdGenerator;
 import java.math.BigInteger;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /** 명령의 일생을 맡는 서비스. 업무 판단은 모두 여기와 domain에서 한다. 저장소는 저장만 한다. */
@@ -63,6 +74,37 @@ public final class CommandLifecycle implements LedgerRelay {
     @Override
     public Optional<CommandStatus> status(String commandId) {
         return transactions.inTransaction(() -> store.find(commandId)).map(CommandLifecycle::statusOf);
+    }
+
+    /** 게이트(§5.2)를 통과한 명령을 접수 순서로 limit개까지 잡는다. 트랜잭션 밖에서 부른다. */
+    public ClaimBatch claim(int limit, Duration lease) {
+        return transactions.inTransaction(() -> {
+            List<ClaimedCommand> claimed = new ArrayList<>();
+            List<String> halted = new ArrayList<>();
+            for (DueCommand due : store.lockDue(limit)) {
+                CommandRecord candidate = due.command();
+                GateDecision gate = OrderingGate.decide(candidate.kind(), candidate.reservationCommandId(),
+                        candidate.seq(), due.reservation().stream().toList());
+                // lockDue가 처리 중 명령을 내는 것은 lease가 끝났을 때뿐이다
+                boolean leaseExpired = candidate.row().state() == StoredState.CLAIMED;
+                StepResult result = CommandStateMachine.apply(candidate.row(), new Step.Claim(gate, leaseExpired));
+                if (result instanceof StepResult.Moved moved && store.compareAndSet(new RowChange(candidate.rowId(),
+                        candidate.row().state(), candidate.row().leaseToken(), moved.row(),
+                        new RowChange.Stamp.LeaseFor(lease)))) {
+                    claimed.add(claimedOf(candidate, moved.row(), gate == GateDecision.SKIP));
+                } else if (gate == GateDecision.HALT) {
+                    halted.add(candidate.commandId());
+                }
+            }
+            return new ClaimBatch(claimed, halted);
+        });
+    }
+
+    private static ClaimedCommand claimedOf(CommandRecord command, CommandRow claimedRow, boolean skip) {
+        Submission submission = new Submission(command.transferId(), BigInteger.valueOf(command.rowId()),
+                command.body());
+        return new ClaimedCommand(command.rowId(), command.commandId(), command.orderingKey(),
+                claimedRow.leaseToken(), skip, claimedRow.knownResult(), submission);
     }
 
     private BigInteger reservationTransferId(LedgerCommand command, String reservationId) {

@@ -4,13 +4,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ledgerrelay.core.CommandConflictException;
+import io.github.ledgerrelay.core.CommandKind;
 import io.github.ledgerrelay.core.CommandReceipt;
-import io.github.ledgerrelay.core.CommandStatus;
 import io.github.ledgerrelay.core.CommandStatus.State;
+import io.github.ledgerrelay.core.CommandStatus;
 import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.ReservationNotFoundException;
+import io.github.ledgerrelay.core.application.ClaimBatch;
+import io.github.ledgerrelay.core.application.ClaimedCommand;
 import io.github.ledgerrelay.core.application.CommandLifecycle;
+import io.github.ledgerrelay.core.spi.Submission;
+import io.github.ledgerrelay.core.spi.TransferBody;
 import java.math.BigInteger;
+import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Optional;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -23,6 +32,8 @@ import org.junit.jupiter.api.Test;
  * 구현마다 이 클래스를 상속한 테스트 하나를 둔다. 메모리 저장소(core)와 PostgreSQL 저장소(jdbc)가 같은 장을 읽는다.
  */
 public abstract class LedgerRelayContract {
+
+    protected static final Duration LEASE = Duration.ofSeconds(30);
 
     protected final RecordingHandler handler = new RecordingHandler();
     protected StorageUnderTest storage;
@@ -200,6 +211,123 @@ public abstract class LedgerRelayContract {
         }
     }
 
+    @Nested
+    @Order(4)
+    @DisplayName("claim하면 — §5.2")
+    class Claiming {
+
+        @Test
+        @DisplayName("접수된 명령은 토큰 1과 함께 잡히고, TB에 보내기 전이라 여전히 접수됨으로 조회된다")
+        void anAcceptedCommandIsClaimedWithToken1() {
+            // given
+            submit(transfer("pay-1", "order-1", 500));
+
+            // when
+            ClaimBatch batch = relay.claim(10, LEASE);
+
+            // then
+            assertClaimed(batch, "pay-1");
+            ClaimedCommand claimed = batch.claimed().get(0);
+            assertThat(claimed.leaseToken()).as("첫 claim의 토큰").isEqualTo(1);
+            assertThat(claimed.skip()).as("건너뛸 대상인가").isFalse();
+            assertThat(claimed.knownResult()).as("이미 아는 결과").isEmpty();
+            assertQueryState("pay-1", State.ACCEPTED);
+        }
+
+        @Test
+        @DisplayName("잡힌 명령은 TB에 보낼 이체 내용을 싣는다 — 이체 ID, 계좌, 금액, 그리고 역참조용 행 ID")
+        void aClaimedCommandCarriesItsTransfer() {
+            // given
+            submit(transfer("pay-1", "order-1", 500));
+
+            // when
+            ClaimedCommand claimed = claimOnly("pay-1");
+
+            // then
+            assertThat(claimed.submission()).isEqualTo(new Submission(BigInteger.ONE,
+                    BigInteger.valueOf(claimed.rowId()),
+                    new TransferBody(CommandKind.TRANSFER, BigInteger.valueOf(1), BigInteger.valueOf(2),
+                            BigInteger.valueOf(500), 1, 1, 0, Optional.empty(), 0, 0)));
+        }
+
+        @Test
+        @DisplayName("G4: 같은 키의 앞 명령이 끝나지 않았으면 뒤 명령은 잡히지 않는다")
+        void aLaterCommandWaitsForTheEarlierOne() {
+            // given
+            submit(transfer("pay-1", "order-1", 500));
+            submit(transfer("pay-2", "order-1", 300));
+            claimOnly("pay-1");
+
+            // when
+            ClaimBatch batch = relay.claim(10, LEASE);
+
+            // then
+            assertNothingClaimed(batch);
+        }
+
+        @Test
+        @DisplayName("다른 순서 키의 명령은 서로 기다리지 않는다")
+        void differentKeysDoNotWaitForEachOther() {
+            // given
+            submit(transfer("pay-1", "order-1", 500));
+            submit(transfer("pay-2", "order-2", 300));
+
+            // when
+            ClaimBatch batch = relay.claim(10, LEASE);
+
+            // then
+            assertClaimed(batch, "pay-1", "pay-2");
+        }
+
+        @Test
+        @DisplayName("lease가 살아 있는 동안에는 다시 잡히지 않는다")
+        void aLiveLeaseIsNotClaimedAgain() {
+            // given
+            submit(transfer("pay-1", "order-1", 500));
+            claimOnly("pay-1");
+            storage.elapse(LEASE.minusSeconds(1));
+
+            // when
+            ClaimBatch batch = relay.claim(10, LEASE);
+
+            // then
+            assertNothingClaimed(batch);
+        }
+
+        @Test
+        @DisplayName("lease가 끝나면 다른 워커가 다시 잡고, 토큰이 2로 오른다")
+        void anExpiredLeaseIsClaimedAgainWithANewToken() {
+            // given
+            submit(transfer("pay-1", "order-1", 500));
+            claimOnly("pay-1");
+            storage.elapse(LEASE.plusSeconds(1));
+
+            // when
+            ClaimBatch batch = relay.claim(10, LEASE);
+
+            // then
+            assertClaimed(batch, "pay-1");
+            assertThat(batch.claimed().get(0).leaseToken()).as("다시 잡은 claim의 토큰").isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("한 번에 limit개까지만 잡고, 접수한 순서대로 고른다")
+        void claimsAtMostLimitInAcceptanceOrder() {
+            // given
+            submit(transfer("pay-1", "order-1", 500));
+            submit(transfer("pay-2", "order-2", 300));
+            submit(transfer("pay-3", "order-3", 100));
+
+            // when
+            ClaimBatch first = relay.claim(2, LEASE);
+            ClaimBatch second = relay.claim(2, LEASE);
+
+            // then
+            assertClaimed(first, "pay-1", "pay-2");
+            assertClaimed(second, "pay-3");
+        }
+    }
+
     // ── 명령을 만드는 말: 금액과 키는 숨기지 않는다 ──────────────────────
 
     protected static LedgerCommand transfer(String commandId, String orderingKey, long amount) {
@@ -248,6 +376,28 @@ public abstract class LedgerRelayContract {
                 .as("%s가 참조한 예약을 찾지 못해 거부되기를 기대했다", commandId)
                 .isInstanceOf(ReservationNotFoundException.class)
                 .satisfies(e -> assertThat(((ReservationNotFoundException) e).commandId()).isEqualTo(commandId));
+    }
+
+    /** 전제: 이 명령 하나만 잡힌다. 아니면 given 준비 실패로 멈춘다. */
+    protected ClaimedCommand claimOnly(String commandId) {
+        ClaimBatch batch = relay.claim(10, LEASE);
+        if (batch.claimed().size() != 1 || !batch.claimed().get(0).commandId().equals(commandId)) {
+            throw new IllegalStateException("given 준비 실패: " + commandId + " 하나만 잡히기를 기대했지만 실제로는 "
+                    + idsOf(batch));
+        }
+        return batch.claimed().get(0);
+    }
+
+    protected static void assertClaimed(ClaimBatch batch, String... commandIds) {
+        assertThat(idsOf(batch)).as("잡힌 명령(접수 순서)").isEqualTo(Arrays.asList(commandIds));
+    }
+
+    protected static void assertNothingClaimed(ClaimBatch batch) {
+        assertThat(idsOf(batch)).as("아무것도 잡히지 않기를 기대했다").isEmpty();
+    }
+
+    private static List<String> idsOf(ClaimBatch batch) {
+        return batch.claimed().stream().map(ClaimedCommand::commandId).toList();
     }
 
     /** 앱 트랜잭션이 일부러 실패한다. */

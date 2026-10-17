@@ -1,5 +1,6 @@
 package io.github.ledgerrelay.core.domain;
 
+import io.github.ledgerrelay.core.CommandKind;
 import io.github.ledgerrelay.core.LedgerCommand;
 import java.util.List;
 import java.util.Optional;
@@ -22,15 +23,27 @@ public final class OrderingGate {
      *                보관 정책으로 지워진 명령은 없을 수 있다.
      */
     public static GateDecision decide(LedgerCommand candidate, long candidateSeq, List<QueuedCommand> sameKey) {
+        return decide(candidate.kind(), candidate.reservation(), candidateSeq, sameKey);
+    }
+
+    /**
+     * @param kind                 제출하려는 명령의 종류
+     * @param reservationCommandId post·void가 참조한 예약. 그 밖에는 비어 있다
+     * @param candidateSeq         그 명령의 키 내 순번
+     * @param sameKey              같은 순서 키의 명령들. 순서는 상관없다. 후보 자신이 들어 있어도 되고,
+     *                             보관 정책으로 지워진 명령은 없을 수 있다.
+     */
+    public static GateDecision decide(CommandKind kind, Optional<String> reservationCommandId, long candidateSeq,
+            List<QueuedCommand> sameKey) {
         boolean earlierUnfinished = sameKey.stream()
                 .anyMatch(q -> q.seq() < candidateSeq && !q.state().isFinal());
         if (earlierUnfinished) {
             return GateDecision.CLOSED;
         }
-        if (!candidate.kind().referencesReservation()) {
+        if (!kind.referencesReservation()) {
             return GateDecision.OPEN;
         }
-        String reservationId = candidate.reservation().orElseThrow();
+        String reservationId = reservationCommandId.orElseThrow();
         Optional<QueuedCommand> reservation = sameKey.stream()
                 .filter(q -> q.commandId().equals(reservationId))
                 .findFirst();
