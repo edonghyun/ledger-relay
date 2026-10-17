@@ -122,7 +122,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **깨지는 것**: 앱이 `JpaTransactionManager`를 쓰는데 그 트랜잭션이 JDBC 커넥션을 노출하지 않으면, `JdbcClient`는 DataSource에서 별도 커넥션을 받아 auto-commit으로 쓴다. 트랜잭션은 활성으로 보이므로(`requireActive` 통과) 아무 경고도 없다. 앱이 롤백해도 명령은 남는다. 주문은 없는데 원장 이체가 나간다.
 - **재현**: `JpaLedgerRelayTest` › 앱이 JPA로 주문을 저장하는 트랜잭션에서 접수하면 › `anAppEntityAndItsCommandRollBackTogether`. 상속한 서비스 계약 67건도 JPA 매니저 위에서 돈다.
 - **구조**: `JpaTransactionManager`에 같은 DataSource를 주고(`setDataSource`), `HibernateJpaDialect`가 JDBC 커넥션을 노출한다(P2b-13).
-- **확인**: 격리 수준은 받아들이지만 커넥션을 노출하지 않는 dialect로 바꾼 대조군에서 12건이 실패한다. 이 테스트("롤백된 명령"이 남아 있다)와 계약의 롤백 관련 장 11건(G1, G6, P2b-1)이다. 처음에 계획한 대조군 `DefaultJpaDialect`는 격리 수준 지정을 거부해서(P2b-16) 69건 전부가 트랜잭션 시작에서 실패했다. 이 실패는 합류 문제를 보여 주지 않으므로 대조군으로 쓰지 않았다.
+- **확인**: 격리 수준은 받아들이지만 커넥션을 노출하지 않는 dialect로 바꾼 대조군에서 12건이 실패한다(이 대조군은 F18 이전 기록이다. 지금은 그 설정 자체가 접수에서 거부된다). 이 테스트("롤백된 명령"이 남아 있다)와 계약의 롤백 관련 장 11건(G1, G6, P2b-1)이다. 처음에 계획한 대조군 `DefaultJpaDialect`는 격리 수준 지정을 거부해서(P2b-16) 69건 전부가 트랜잭션 시작에서 실패했다. 이 실패는 합류 문제를 보여 주지 않으므로 대조군으로 쓰지 않았다.
 
 ### F17. 워커가 커넥션 풀의 기본 격리 수준을 따라가 직렬화 실패로 터진다
 
@@ -130,6 +130,20 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **재현**: `JdbcTransactionsTest` › 커넥션 풀의 기본 격리 수준이 REPEATABLE READ이면 › `aNewTransactionRunsAtReadCommitted`.
 - **구조**: `JdbcTransactions`가 새로 여는 트랜잭션은 READ COMMITTED로 명시한다. 앱 트랜잭션에 합류할 때는 앱의 수준을 바꾸지 않는다(`joiningKeepsTheAppsLevel`, P2b-16).
 - **확인**: 격리 수준을 명시하기 전에 이 테스트가 실패했다("repeatable read"를 읽었다).
+
+### F18. 저장소의 커넥션이 묶이지 않은 트랜잭션에서 접수가 따로 커밋된다 (G1, 리뷰에서 발견)
+
+- **깨지는 것**: F16의 대조군 상황이 실제 설정에서도 생긴다. JDBC 커넥션을 노출하지 않는 JPA dialect를 쓰거나, 트랜잭션 매니저와 저장소가 서로 다른 DataSource 객체를 쥔 경우다(p6spy·datasource-proxy 같은 프록시). 그러면 트랜잭션은 열려 있어도 `JdbcClient`가 별도 커넥션으로 auto-commit한다. 주문은 롤백되는데 이체가 나가고, 키 잠금도 커밋까지 가지 않아 R12도 깨진다. 처음에는 열린 장애 O6으로 미뤘지만, 조용히 돈이 나가는 경로라 02b에서 막았다.
+- **재현**: `JdbcTransactionsTest` › 열린 트랜잭션에 저장소의 커넥션이 묶여 있지 않으면 › `aJpaTransactionHidingTheConnectionIsRefused`, `aTransactionOnAnotherDataSourceIsRefused`.
+- **구조**: `JdbcTransactions(transactionManager, dataSource)`가 저장소와 같은 DataSource를 받는다. `requireActive`는 트랜잭션이 열려 있는지와 함께 그 DataSource의 커넥션이 트랜잭션에 묶여 있는지(`TransactionSynchronizationManager.getResource`)를 확인하고, 아니면 `IllegalTransactionStateException`으로 거부한다.
+- **확인**: 확인을 넣기 전에 두 테스트 모두 "예외가 없다"로 실패했다.
+
+### F19. claim 폴링 비용이 끝난 이력 크기에 비례한다 (리뷰에서 발견)
+
+- **깨지는 것**: `lockDue`는 접수 순서(`ORDER BY c.id LIMIT n`)로 후보를 고른다. 이 조건을 받치는 인덱스가 없으면 플래너가 기본 키 순서로 훑으면서 끝난 행을 하나씩 걸러 낸다. 워커가 짧은 간격으로 폴링하므로 DB 부하가 이력 크기에 비례해 커진다. 보관 정책은 기본값이 꺼져 있다.
+- **재현**: `LockDueScanTest` › 끝난 명령 20만 건 뒤에 접수된 명령 100건이 있으면 › `theDueQueryDoesNotFilterThroughFinishedRows`. 같은 질의의 `EXPLAIN ANALYZE`에서 "Rows Removed by Filter"를 더한 값이 100 이하여야 한다. 접수된 명령이 1건뿐이면 기존 부분 인덱스(`ledger_command_unfinished`)가 쓰여 재현되지 않았다. 100건으로 늘리자 기본 키 스캔이 골라졌다.
+- **구조**: 부분 인덱스 `ledger_command_due ON (id) WHERE state IN ('PENDING','CLAIMED')`.
+- **확인**: 인덱스 전에는 걸러 낸 행이 200,000, 실행 21.8ms였다. 인덱스 뒤에는 테스트가 통과한다(리뷰어 측정: 100만 건에서 151ms → 0.047ms).
 
 ## 2. 열린 장애
 
@@ -139,7 +153,6 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 | O3 | TB 응답이 유실된 명령(미확정)을 같은 이체 ID로만 다시 보내는가 | 3~4단계 |
 | O4 | TB 컨테이너가 기동 중 `panic: reached unreachable code`로 가끔 죽는다. main에서도 재현된다 | 조사 필요(테스트 환경) |
 | O5 | 멈춘 명령을 목록으로 볼 방법이 없다. 알림을 놓치면 `abandonHalted`에 넘길 commandId를 SQL로 찾아야 한다 | 3단계. 멈춘 명령 조회 |
-| O6 | 커넥션을 노출하지 않는 JPA dialect에서 접수가 앱 트랜잭션에 합류하지 못해도 접수는 알아채지 못한다(F16의 대조군 상황). 워커 단계는 격리 수준 지정에서 실패해 드러나지만 접수는 조용히 따로 커밋된다. 접수할 때 JDBC 커넥션이 트랜잭션에 묶여 있는지 확인하면 막을 수 있다 | 3단계 자동 설정에서 검사하거나 접수 시 확인 |
 
 ## 3. 데드레터큐를 쓰지 않는 이유
 

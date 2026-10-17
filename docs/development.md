@@ -26,8 +26,9 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 
 ### 앱이 JPA를 쓸 때
 
+- `JdbcTransactions(transactionManager, dataSource)`와 `JdbcCommandStore(dataSource)`에는 트랜잭션 매니저가 쥔 것과 같은 DataSource 객체를 준다. 다르면 접수가 거부된다(F18).
 - `JpaTransactionManager`에 같은 DataSource를 알려 주고(`setDataSource`), JPA dialect는 `HibernateJpaDialect`(Spring이 Hibernate에 쓰는 기본)를 바꾸지 않는다. 이 dialect가 JDBC 커넥션을 트랜잭션에 노출해야 `JdbcClient`가 같은 트랜잭션에 합류한다(F16).
-- `DefaultJpaDialect`는 격리 수준 지정을 거부한다(`InvalidIsolationLevelException`). 워커 단계는 READ COMMITTED를 명시하므로(P2b-16) 이 dialect에서는 시작하지 못한다.
+- `DefaultJpaDialect`는 격리 수준 지정을 거부한다(`InvalidIsolationLevelException`). 워커 단계는 READ COMMITTED를 명시하므로(P2b-16) 이 dialect에서는 시작하지 못한다. `JtaTransactionManager`도 `allowCustomIsolationLevels=true`가 아니면 같다.
 
 ## 알려진 문제
 

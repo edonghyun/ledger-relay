@@ -50,7 +50,7 @@ final class PostgresStorage implements StorageUnderTest {
     private PostgresStorage(DataSource dataSource, PlatformTransactionManager transactionManager) {
         this.dataSource = dataSource;
         this.transactionManager = transactionManager;
-        this.transactions = new JdbcTransactions(transactionManager);
+        this.transactions = new JdbcTransactions(transactionManager, dataSource);
         this.store = new JdbcCommandStore(dataSource);
     }
 

@@ -621,8 +621,11 @@ public abstract class CommandStoreContract {
                     () -> store.lockDue(10))) {
                 worker1.awaitWork();
 
+                // when: 다른 워커가 claim 후보를 찾는다
+                List<DueCommand> due = inTx(() -> store.lockDue(10));
+
                 // then
-                assertNothingDue();
+                assertThat(due).as("잡힌 맨 앞 명령 뒤의 claim 후보").isEmpty();
             }
         }
 

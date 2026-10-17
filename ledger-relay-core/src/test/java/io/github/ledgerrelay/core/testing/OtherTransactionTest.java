@@ -41,12 +41,12 @@ class OtherTransactionTest {
             try (OtherTransaction<String> first = OtherTransaction.start(storage.transactions(), () -> "first")) {
                 first.awaitWork();
 
-                // when
+                // when: 두 번째는 첫 번째가 커밋할 때까지 막혀 있다
                 try (OtherTransaction<String> second = OtherTransaction.start(storage.transactions(), () -> "second")) {
-
-                    // then
                     second.assertStillWorkingAfter(BLOCKED);
                     first.commit();
+
+                    // then
                     assertThat(second.awaitWork()).as("두 번째 트랜잭션의 결과").isEqualTo("second");
                 }
             }
