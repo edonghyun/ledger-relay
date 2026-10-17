@@ -218,25 +218,25 @@ class OrderingGateTest {
             // then
             assertWaits(decision);
         }
-    }
-
-    @Nested
-    @Order(6)
-    @DisplayName("정상 경로에서 나올 수 없는 입력이면")
-    class Anomalies {
 
         @Test
-        @DisplayName("참조한 예약이 같은 키 명령들 속에 없으면 제출하지 않고 멈춘 뒤 알린다 — 같은 ID의 엉뚱한 예약을 확정하지 않게")
-        void haltsWhenTheReservationIsMissing() {
-            // given: hold-1은 없고, 거절된 다른 명령 pay-5만 있다
+        @DisplayName("보관 정책으로 지워져 같은 키 명령들 속에 없으면 TB에 보내 TB가 판정하게 한다 — 예약의 이체 ID는 접수 때 고정됐다(P2a-20)")
+        void submitsWhenTheReservationRowIsGone() {
+            // given: hold-1은 끝난 뒤 지워졌고, 거절된 다른 명령 pay-5만 남아 있다
             List<QueuedCommand> sameKey = sameKey(queued("pay-5", 5, REJECTED));
 
             // when
             GateDecision decision = OrderingGate.decide(referencing(CommandKind.POST, "hold-1"), 9, sameKey);
 
             // then
-            assertHalts(decision);
+            assertSubmits(decision);
         }
+    }
+
+    @Nested
+    @Order(6)
+    @DisplayName("정상 경로에서 나올 수 없는 입력이면")
+    class Anomalies {
 
         @ParameterizedTest(name = "예약이 {0}")
         @EnumSource(value = StoredState.class, names = {"PENDING", "CLAIMED"})

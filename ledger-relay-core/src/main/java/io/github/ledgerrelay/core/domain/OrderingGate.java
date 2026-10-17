@@ -48,9 +48,10 @@ public final class OrderingGate {
                 .filter(q -> q.commandId().equals(reservationId))
                 .findFirst();
         if (reservation.isEmpty()) {
-            // 접수 때 참조 검사(§5.1)를 통과했고, 보관 정책은 미완료 post·void가 참조하는 예약을 지우지 않는다(2단계).
-            // 그런데도 없다면 버그다. TB에 보내면 같은 TB ID의 엉뚱한 예약을 확정할 수 있으므로 멈추고 알린다.
-            return GateDecision.HALT;
+            // 접수 때 참조 검사(§5.1)를 통과했으므로, 없다면 보관 정책이 끝난 예약 행을 지운 것이다. 예약의 TB 이체 ID는
+            // 접수 때 이 명령에 고정됐으므로(P2a-20) 엉뚱한 예약을 확정할 길이 없다. TB에 보내 TB가 판정하게 한다
+            // (적용된 예약이면 확정되고, 실패했거나 만료됐으면 TB가 거절한다).
+            return GateDecision.OPEN;
         }
         StoredState state = reservation.get().state();
         if (state == StoredState.APPLIED) {
