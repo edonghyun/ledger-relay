@@ -603,7 +603,7 @@ public abstract class CommandStoreContract {
 
     @Nested
     @Order(7)
-    @DisplayName("다른 트랜잭션이 행을 잡고 있으면 — O1, R12, G4, G7")
+    @DisplayName("다른 트랜잭션이 행을 잡고 있으면 — R12, G4, G7 (F11~F15)")
     class WhileAnotherTransactionHoldsRows {
 
         @BeforeEach

@@ -13,7 +13,9 @@ public interface LedgerRelay {
      * 같은 명령을 다시 접수하면 처음 접수증을 그대로 돌려받는다.
      *
      * @throws CommandConflictException     같은 commandId로 다른 내용이 이미 접수됨(G7)
-     * @throws ReservationNotFoundException post·void의 참조가 같은 키에 접수된 다른 reserve 명령이 아님
+     * @throws ReservationNotFoundException post·void의 참조가 같은 키에 이미 커밋된 reserve 명령이 아님. 같은 앱
+     *                                      트랜잭션에서 접수한 예약도 여기에 든다(P2b-1)
+     * @throws InvalidCommandException      U+0000·짝 없는 서로게이트가 들었거나 512바이트를 넘는 ID 등 명령을 만들 수 없음
      */
     CommandReceipt submit(LedgerCommand command);
 

@@ -18,8 +18,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  * 둔다(Spring은 합류 시 격리 수준을 바꾸지 않는다). 높은 수준의 앱 트랜잭션에서는 동시 접수가 직렬화 실패로 끝날 수
  * 있으며 재시도는 앱이 한다(P2b-17).
  *
- * <p>JTA 트랜잭션 매니저는 기본적으로 격리 수준 지정을 거부한다. {@code JtaTransactionManager.setAllowCustomIsolationLevels(true)}가
- * 없으면 워커 트랜잭션이 시작하지 못한다. JPA의 {@code DefaultJpaDialect}도 같다(docs/development.md).
+ * <p>JTA({@code JtaTransactionManager})는 지원하지 않는다. 트랜잭션이 시작될 때 DataSource 커넥션이 묶이지 않아 {@link #requireActive()}가
+ * 접수를 거부한다. JPA의 {@code DefaultJpaDialect}는 격리 수준 지정을 거부하므로 워커 트랜잭션이 시작하지 못한다(docs/development.md).
  */
 public final class JdbcTransactions implements Transactions {
 

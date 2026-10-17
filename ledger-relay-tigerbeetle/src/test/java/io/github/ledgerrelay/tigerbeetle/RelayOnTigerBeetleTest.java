@@ -40,7 +40,7 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 /** 메모리 저장소 + 실제 TB 위에서 접수부터 결과까지(03a P3a-11). PG와 TB를 함께 띄우는 확인은 03b 샘플 앱에서 한다. */
-@DisplayName("실제 TB 위의 워커 한 바퀴 — 스펙 §5.3, D7, 열린 장애 O3")
+@DisplayName("실제 TB 위의 워커 한 바퀴 — 스펙 §5.3, D7, F23")
 class RelayOnTigerBeetleTest {
 
     static final Duration BACKOFF_MAX = Duration.ofSeconds(1);
@@ -151,7 +151,7 @@ class RelayOnTigerBeetleTest {
 
     @Nested
     @Order(2)
-    @DisplayName("TB 응답이 유실되면 (O3)")
+    @DisplayName("TB 응답이 유실되면 — F23")
     class LostReplies {
 
         ProxiedTigerBeetle proxied;

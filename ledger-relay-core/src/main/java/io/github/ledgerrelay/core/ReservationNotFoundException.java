@@ -1,6 +1,9 @@
 package io.github.ledgerrelay.core;
 
-/** post·void가 참조한 예약이 같은 순서 키에 접수된 다른 reserve 명령이 아니다(스펙 §5.1-3, P2). */
+/**
+ * post·void가 참조한 예약이 같은 순서 키에 이미 커밋된 reserve 명령이 아니다(스펙 §5.1-4, P2). 같은 앱 트랜잭션에서 방금 접수한
+ * 예약도 아직 커밋되지 않았으므로 여기에 든다(02b P2b-1).
+ */
 public class ReservationNotFoundException extends RuntimeException {
 
     private final String commandId;

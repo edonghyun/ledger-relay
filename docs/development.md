@@ -28,7 +28,7 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 
 - `JdbcTransactions(transactionManager, dataSource)`와 `JdbcCommandStore(dataSource)`에는 트랜잭션 매니저가 쥔 것과 같은 DataSource 객체를 준다. 다르면 접수가 거부된다(F18).
 - `JpaTransactionManager`에 같은 DataSource를 알려 주고(`setDataSource`), JPA dialect는 `HibernateJpaDialect`(Spring이 Hibernate에 쓰는 기본)를 바꾸지 않는다. 이 dialect가 JDBC 커넥션을 트랜잭션에 노출해야 `JdbcClient`가 같은 트랜잭션에 합류한다(F16).
-- `DefaultJpaDialect`는 격리 수준 지정을 거부한다(`InvalidIsolationLevelException`). 워커 단계는 READ COMMITTED를 명시하므로(P2b-16) 이 dialect에서는 시작하지 못한다. `JtaTransactionManager`도 `allowCustomIsolationLevels=true`가 아니면 같다.
+- `DefaultJpaDialect`는 격리 수준 지정을 거부한다(`InvalidIsolationLevelException`). 워커 단계는 READ COMMITTED를 명시하므로(P2b-16) 이 dialect에서는 시작하지 못한다. JTA(`JtaTransactionManager`)는 지원하지 않는다. JTA에서는 트랜잭션이 시작될 때 DataSource 커넥션이 Spring 트랜잭션에 묶이지 않아, 접수 앞의 확인(F18)이 거부한다. 필요해지면 따로 결정한다.
 
 ### 큐 테이블 운영 (02d)
 
@@ -41,9 +41,9 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 
 ## 알려진 문제
 
-- **TB 서버 크래시 (O4 → F26)**: TB 0.17.9는 `listening on` 직후의 짧은 구간에 TCP 접속이 들어오면 `thread 1 panic: reached unreachable code`로 죽는다. Docker Desktop의 포트 공개가 그 구간에 접속을 넣는 것으로 보인다. 메모리 부족은 아니었다. 재현 방법과 수치는 docs/failure-modes.md F26에 있다. 픽스처가 listening 직후 죽은 컨테이너를 3번까지 새로 띄운다. 다시 띄운 횟수는 테스트 결과 XML의 system-err에서 `O4:`로 센다.
+- **TB 서버 크래시 (O4 → F26)**: TB 0.17.9는 `listening on` 직후의 짧은 구간에 TCP 접속이 들어오면 `thread 1 panic: reached unreachable code`로 죽는다. Docker Desktop의 포트 공개가 그 구간에 접속을 넣는 것으로 보인다. 메모리 부족은 아니었다. 재현 방법과 수치는 docs/failure-modes.md F26에 있다. 픽스처는 이번 시도가 listening까지 갔다가 죽으면 새 컨테이너로 다시 띄운다(모두 3번 시도, 다시 띄우기는 최대 2번). 다시 띄운 횟수는 테스트 결과 XML의 system-err에서 `O4:`로 센다.
 - TB 클라이언트에는 timeout이 없어서, 서버가 죽으면 요청이 영원히 대기한다. 픽스처의 대응은 다음과 같다.
   - `TigerBeetleContainer`는 컨테이너 로그를 항상 보관한다. 기동 실패는 로그 끝부분을 담은 `ContainerLaunchException`으로 다시 던진다.
-  - `listening on` 뒤 1초 동안 살아 있는지 확인한다. 이 구간 안에 죽으면 그 자리에서 실패한다.
+  - `listening on` 뒤 1초 동안 살아 있는지 확인한다. 이 구간 안에 죽으면 새 컨테이너로 다시 띄운다(F26). 세 번 모두 죽으면 그때 실패한다.
   - TB를 쓰는 테스트 클래스는 `@BeforeEach`에서 `assertAlive()`를 부른다. 서버가 도중에 죽어도 그 클래스의 남은 테스트가 2분씩 매달리지 않고 panic 로그와 함께 바로 실패한다.
   - 안전망으로 개별 테스트에는 2분, Gradle 테스트 태스크 전체에는 15분 상한을 둔다.
