@@ -24,6 +24,10 @@ import org.springframework.boot.health.contributor.HealthIndicator;
  * outstanding check has not waited longer than {@code ledgerStaleAfter}. This keeps health from hitting the probe
  * timeout while TB is unreachable, which would take the app out of service, and keeps lookups from piling up in the TB
  * client without end.
+ *
+ * <p>The price is one call of delay: the first call after TB goes away still reports the previous check's UP, and a
+ * later call reports DOWN once the new check has waited longer than {@code ledgerStaleAfter}. Removing that delay means
+ * waiting for TB (F36) or judging by the age of the last answer (F40).
  */
 public final class LedgerRelayHealthIndicator implements HealthIndicator {
 
