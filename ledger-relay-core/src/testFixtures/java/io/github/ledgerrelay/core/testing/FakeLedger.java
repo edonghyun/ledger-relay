@@ -30,6 +30,7 @@ public final class FakeLedger implements LedgerClient {
     private RuntimeException nextThrow;
     private boolean nextNull;
     private boolean holdingLookups;
+    private final List<Runnable> heldLookups = new java.util.ArrayList<>();
     private int lookups;
     /** TB가 기록한 이체(Created·Exists로 답한 것). 대사가 조회한다. */
     private final Map<BigInteger, LedgerTransfer> stored = new HashMap<>();
@@ -97,11 +98,24 @@ public final class FakeLedger implements LedgerClient {
         holdingLookups = true;
     }
 
+    /** 붙잡아 둔 조회에 지금 답한다. 이후 조회는 계속 붙잡는다. 답이 늦게 오는 TB를 흉내 낸다. */
+    public void answerHeldLookups() {
+        List<Runnable> answers;
+        synchronized (this) {
+            answers = List.copyOf(heldLookups);
+            heldLookups.clear();
+        }
+        answers.forEach(Runnable::run);
+    }
+
     @Override
     public synchronized CompletableFuture<List<LedgerTransfer>> lookup(List<BigInteger> transferIds) {
         lookups++;
         if (holdingLookups) {
-            return new CompletableFuture<>();
+            CompletableFuture<List<LedgerTransfer>> held = new CompletableFuture<>();
+            List<LedgerTransfer> found = transferIds.stream().map(stored::get).filter(Objects::nonNull).toList();
+            heldLookups.add(() -> held.complete(found));
+            return held;
         }
         return CompletableFuture.completedFuture(transferIds.stream().map(stored::get).filter(Objects::nonNull).toList());
     }

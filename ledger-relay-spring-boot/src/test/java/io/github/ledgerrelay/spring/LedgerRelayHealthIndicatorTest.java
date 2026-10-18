@@ -11,6 +11,7 @@ import io.github.ledgerrelay.core.testing.InMemoryStorage;
 import io.github.ledgerrelay.core.testing.RecordingHandler;
 import io.github.ledgerrelay.core.testing.SequentialTransferIds;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,6 +26,7 @@ class LedgerRelayHealthIndicatorTest {
 
     InMemoryStorage storage;
     FakeLedger fake;
+    final TestClock clock = new TestClock();
 
     @BeforeEach
     void givenTwoWaitingCommands() {
@@ -97,6 +99,42 @@ class LedgerRelayHealthIndicatorTest {
     }
 
     @Test
+    @DisplayName("health를 5초보다 드물게 불러도 TB가 답하는 동안은 UP이다 — Kubernetes probe 간격(기본 10초)에서도 (F40)")
+    void aLedgerThatAnswersIsUpEvenWhenHealthIsCalledRarely() {
+        // given: TB가 조금 늦게 답한다. 첫 확인은 답을 받았다
+        fake.holdLookups();
+        LedgerRelayHealthIndicator indicator = indicator(storage.transactions(), clock);
+        indicator.health();
+        fake.answerHeldLookups();
+
+        // when: 10초 뒤 다시 부른다. 새 확인은 막 보냈고 아직 답 전이다
+        clock.advance(Duration.ofSeconds(10));
+        Health health = indicator.health();
+
+        // then
+        assertThat(health.getDetails()).as("세부").containsEntry("ledger", "UP");
+    }
+
+    @Test
+    @DisplayName("보낸 확인이 5초 넘게 답이 없으면 DOWN이다 — 전에 답했더라도")
+    void aProbeUnansweredForTooLongIsDown() {
+        // given: 첫 확인은 답을 받았고, 다음 확인부터 TB가 답하지 않는다
+        fake.holdLookups();
+        LedgerRelayHealthIndicator indicator = indicator(storage.transactions(), clock);
+        indicator.health();
+        fake.answerHeldLookups();
+        clock.advance(Duration.ofSeconds(1));
+        indicator.health();
+
+        // when
+        clock.advance(Duration.ofSeconds(6));
+        Health health = indicator.health();
+
+        // then
+        assertThat(health.getDetails()).as("세부").containsEntry("ledger", "DOWN");
+    }
+
+    @Test
     @DisplayName("저장소를 읽을 수 없으면 DOWN이다 — PG 없이는 접수도 못 한다")
     void aFailingStoreIsDown() {
         // given
@@ -125,5 +163,23 @@ class LedgerRelayHealthIndicatorTest {
 
     private LedgerRelayHealthIndicator indicator(Transactions transactions) {
         return new LedgerRelayHealthIndicator(storage.store(), transactions, fake, LEDGER_STALE_AFTER);
+    }
+
+    private LedgerRelayHealthIndicator indicator(Transactions transactions, Supplier<Instant> clock) {
+        return new LedgerRelayHealthIndicator(storage.store(), transactions, fake, LEDGER_STALE_AFTER, clock);
+    }
+
+    /** 테스트가 돌리는 시계. */
+    static final class TestClock implements Supplier<Instant> {
+        private Instant now = Instant.parse("2026-10-18T00:00:00Z");
+
+        void advance(Duration by) {
+            now = now.plus(by);
+        }
+
+        @Override
+        public Instant get() {
+            return now;
+        }
     }
 }

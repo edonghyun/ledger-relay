@@ -6,7 +6,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - 처음부터 통과하는 테스트는 코드를 일부러 망가뜨려(대조군) 정말 실패하는지 확인한다. 대조군 결과도 적는다.
 - 수치는 실제로 잰 것만 적는다. 운영 지표와 실험(스펙 §9 E1~E10)은 해당 단계에서 채운다.
 
-## 1. 막은 장애 (F1~F10은 02a core, F11~F19는 02b jdbc, F20은 1단계 리뷰, F21~F25는 03a 워커, F26은 테스트 환경, F27부터 02d 전체 리뷰, F32·F33은 02e, F34~F36은 03b, F37부터 샘플 쇼핑몰)
+## 1. 막은 장애 (F1~F10은 02a core, F11~F19는 02b jdbc, F20은 1단계 리뷰, F21~F25는 03a 워커, F26은 테스트 환경, F27부터 02d 전체 리뷰, F32·F33은 02e, F34~F36은 03b, F37부터 샘플 쇼핑몰, F40은 그때 찾은 라이브러리 결함)
 
 ### F1. 막힌 키의 대기 명령이 claim 한도를 다 차지해 다른 키가 굶는다
 
@@ -334,6 +334,13 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **재현**: `ShopBootstrapTest` › TB 주소를 정하면 › `theClientRefusesAHostName`(TB의 동작을 고정하는 학습 테스트), `aHostNameBecomesAnIpv4Address`.
 - **구조**: 샘플 앱이 `shop.tigerbeetle.address`를 기동할 때 IPv4로 바꿔 `Client` 빈을 직접 만든다(`TigerBeetleClientConfig`). 라이브러리 자동 설정은 앱이 준 `Client`를 쓴다. 라이브러리의 `ledger-relay.tigerbeetle.addresses`도 같은 제약을 받으므로 그 설정에는 IP를 쓴다(docs/development.md).
 - **확인**: `localhost:<포트>`로 클라이언트를 만들면 위 메시지로 실패하고, 바꾼 `127.0.0.1:<포트>`로는 조회가 된다(2026-10-18, 테스트 컨테이너).
+
+### F40. health를 5초보다 드물게 부르면 TB가 멀쩡해도 TB DOWN으로 알린다 (03b-2에서 발견, 라이브러리)
+
+- **깨지는 것**: F36의 health는 "TB의 마지막 답이 지금부터 5초 안인가"로 판정했다. 그런데 확인 조회는 health를 부를 때만 보낸다. 그래서 health를 5초보다 드물게 부르면, 앞 확인의 답은 늘 5초보다 오래됐고 새 확인의 답은 아직 오지 않아 TB가 멀쩡해도 늘 `ledger: DOWN`이다. Kubernetes probe의 기본 간격은 10초다. 운영자는 TB가 늘 끊겨 있다고 보게 되고, 진짜 장애와 구분할 수 없다. 샘플 앱을 5초 간격 curl로 지켜보다 찾았다(1초 간격이면 UP, 6초 간격이면 계속 DOWN).
+- **재현**: `LedgerRelayHealthIndicatorTest` › `aLedgerThatAnswersIsUpEvenWhenHealthIsCalledRarely`. TB가 조금 늦게 답하는 가짜(`FakeLedger.answerHeldLookups`)와 시계를 돌리는 테스트로, 10초 뒤 health를 부른다.
+- **구조**: 판정을 시각이 아니라 확인의 결과로 한다. 마지막으로 끝난 확인이 성공했고, 가 있는 확인이 `ledgerStaleAfter`(5초)보다 오래 답을 기다리지 않으면 UP이다. F36의 성질은 그대로다. health는 기다리지 않고, 조회는 한 번에 하나만 보낸다. 답 없는 확인이 5초를 넘으면 DOWN이다(`aProbeUnansweredForTooLongIsDown`).
+- **확인**: 고치기 전 규칙에서 위 테스트가 `ledger: DOWN`으로 실패했다. 기존 health 테스트 5건은 그대로 통과한다.
 
 ## 2. 열린 장애
 
