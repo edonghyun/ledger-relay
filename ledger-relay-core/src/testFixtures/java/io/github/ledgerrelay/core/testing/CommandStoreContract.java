@@ -358,7 +358,7 @@ public abstract class CommandStoreContract {
             storage.elapse(LEASE.plusSeconds(1));
 
             // when
-            List<DueCommand> due = inTx(() -> store.lockDue(10));
+            List<DueCommand> due = inTx(() -> lockCandidates(10));
 
             // then
             assertThat(due).as("후보 수").hasSize(1);
@@ -452,7 +452,7 @@ public abstract class CommandStoreContract {
             finished("hold-1", appliedRow(1));
 
             // when
-            List<DueCommand> due = inTx(() -> store.lockDue(10));
+            List<DueCommand> due = inTx(() -> lockCandidates(10));
 
             // then
             assertThat(due).as("후보 수").hasSize(1);
@@ -467,7 +467,7 @@ public abstract class CommandStoreContract {
             inserted(newPost("capture-1", "order-1", 1, "hold-9"));
 
             // when
-            List<DueCommand> due = inTx(() -> store.lockDue(10));
+            List<DueCommand> due = inTx(() -> lockCandidates(10));
 
             // then
             assertThat(due).as("후보 수").hasSize(1);
@@ -648,11 +648,11 @@ public abstract class CommandStoreContract {
             inserted(newTransfer("pay-1", "order-1", 1));
             inserted(newTransfer("pay-2", "order-1", 2));
             try (OtherTransaction<List<DueCommand>> worker1 = OtherTransaction.start(storage.transactions(),
-                    () -> store.lockDue(10))) {
+                    () -> lockCandidates(10))) {
                 worker1.awaitWork();
 
                 // when: 다른 워커가 claim 후보를 찾는다
-                List<DueCommand> due = inTx(() -> store.lockDue(10));
+                List<DueCommand> due = inTx(() -> lockCandidates(10));
 
                 // then
                 assertThat(due).as("잡힌 맨 앞 명령 뒤의 claim 후보").isEmpty();
@@ -673,7 +673,7 @@ public abstract class CommandStoreContract {
                 writer.awaitWork();
 
                 // when
-                List<DueCommand> due = inTx(() -> store.lockDue(10));
+                List<DueCommand> due = inTx(() -> lockCandidates(10));
 
                 // then
                 assertThat(due).as("후보 수").hasSize(1);
@@ -751,6 +751,15 @@ public abstract class CommandStoreContract {
     }
 
     // ── 전제와 확인의 말 ────────────────────────────────────────────
+
+    /**
+     * claim이 하는 대로 후보를 잠근다: 끝난 명령이 쥔 맨 앞을 먼저 넘기고(02e P2e-7) 후보를 잠근다. 열린 트랜잭션 안에서
+     * 부른다.
+     */
+    protected List<DueCommand> lockCandidates(int limit) {
+        keys.passOnFinishedHeads(limit);
+        return store.lockDue(limit);
+    }
 
     protected <T> T inTx(Supplier<T> work) {
         return storage.transactions().inTransaction(work);
@@ -840,7 +849,7 @@ public abstract class CommandStoreContract {
     }
 
     private List<String> dueIds(int limit) {
-        return inTx(() -> store.lockDue(limit)).stream().map(due -> due.command().commandId()).toList();
+        return inTx(() -> lockCandidates(limit)).stream().map(due -> due.command().commandId()).toList();
     }
 
     private void assertUnchanged(boolean changed, CommandRow expectedRow) {

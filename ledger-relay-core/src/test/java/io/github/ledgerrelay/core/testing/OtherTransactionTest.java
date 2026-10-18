@@ -68,6 +68,23 @@ class OtherTransactionTest {
         }
 
         @Test
+        @DisplayName("막혀 있는데 막히지 않았다고 확인하면 실패한다 — 어휘가 거짓말하지 않게")
+        void assertingNoBlockWhileBlockedFails() {
+            // given
+            try (OtherTransaction<String> first = OtherTransaction.start(storage.transactions(), () -> "first")) {
+                first.awaitWork();
+                try (OtherTransaction<String> second = OtherTransaction.start(storage.transactions(), () -> "second")) {
+
+                    // when
+                    ThrowingCallable assertingNoBlock = () -> second.assertFinishedWithin(BLOCKED);
+
+                    // then
+                    assertThatThrownBy(assertingNoBlock).as("막힌 일을 끝났다고 본 확인").isInstanceOf(AssertionError.class);
+                }
+            }
+        }
+
+        @Test
         @DisplayName("롤백하면 그 안에서 넣은 행이 남지 않는다")
         void rollingBackLeavesNothing() {
             // given

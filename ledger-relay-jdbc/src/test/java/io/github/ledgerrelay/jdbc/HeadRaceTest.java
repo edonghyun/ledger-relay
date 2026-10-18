@@ -9,6 +9,7 @@ import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.application.Backoff;
 import io.github.ledgerrelay.core.application.ClaimedCommand;
 import io.github.ledgerrelay.core.application.CommandLifecycle;
+import io.github.ledgerrelay.core.application.WriteResult;
 import io.github.ledgerrelay.core.domain.CommandRow;
 import io.github.ledgerrelay.core.domain.StoredState;
 import io.github.ledgerrelay.core.spi.RowChange;
@@ -18,7 +19,11 @@ import io.github.ledgerrelay.core.testing.RecordingHandler;
 import io.github.ledgerrelay.core.testing.SequentialTransferIds;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,13 +38,15 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * 같은 키에서 맨 앞의 완료와 뒤 명령의 접수가 겹칠 때(02e P2e-4). 둘 다 키 행을 고치므로 늦은 쪽이 기다리거나(READ
- * COMMITTED) 직렬화 실패로 끝난다(더 높은 격리 수준). 어느 쪽이든 맨 앞이 사라져 그 키가 영원히 안 나가는 일은 없다.
+ * 같은 키에서 맨 앞의 완료와 뒤 명령의 접수가 겹칠 때(02e P2e-7). 완료는 순서 키 행을 잡지 않으므로 둘은 서로 기다리지
+ * 않는다. 끝난 맨 앞은 다음 claim이 키 행을 잡아 넘기며, 앱이 그 키 행을 쥐고 있으면 그 키만 미룬다. 어느 격리 수준에서도
+ * 맨 앞이 사라져 그 키가 영원히 안 나가는 일은 없다.
  */
-@DisplayName("같은 키의 완료와 접수가 겹치면 — 02e P2e-4")
+@DisplayName("같은 키의 완료와 접수가 겹치면 — 02e P2e-7")
 class HeadRaceTest {
 
     static final Duration BLOCKED = Duration.ofMillis(300);
+    static final Duration NOT_BLOCKED = Duration.ofSeconds(2);
     static final Duration LEASE = Duration.ofSeconds(30);
     static final String SERIALIZATION_FAILURE = "40001";
 
@@ -79,76 +86,238 @@ class HeadRaceTest {
     class ReadCommitted {
 
         @Test
-        @DisplayName("완료가 열려 있으면 접수는 기다렸다가 맨 앞이 된다")
-        void aSubmitWaitsForAnOpenCompletionAndBecomesTheHead() {
-            try (OtherTransaction<Boolean> completion = OtherTransaction.start(storage.transactions(), this::complete);
+        @DisplayName("완료가 열려 있어도 접수는 기다리지 않고, 둘 다 커밋하면 다음 claim이 뒤 명령을 잡는다")
+        void aSubmitDoesNotWaitForAnOpenCompletion() {
+            try (OtherTransaction<Boolean> completion = OtherTransaction.start(storage.transactions(),
+                    HeadRaceTest.this::complete);
                  OtherTransaction<CommandReceipt> submit = startAfter(completion, storage.transactions(),
                          () -> relay.submit(transfer("pay-2")))) {
-                submit.assertStillWorkingAfter(BLOCKED);
+                submit.assertFinishedWithin(NOT_BLOCKED);
 
                 // when
-                completion.commit();
-                submit.awaitWork();
                 submit.commit();
+                completion.commit();
 
                 // then
+                assertClaimedOnly("pay-2");
                 assertHeadOf("order-1", "pay-2");
             }
         }
 
         @Test
-        @DisplayName("접수가 열려 있으면 완료는 기다렸다가 맨 앞을 넘긴다")
-        void aCompletionWaitsForAnOpenSubmitAndPassesTheHeadOn() {
+        @DisplayName("접수가 열려 있어도 완료는 기다리지 않는다 — 워커가 다른 키의 결과도 멈추지 않고 쓴다")
+        void aCompletionDoesNotWaitForAnOpenSubmit() {
             try (OtherTransaction<CommandReceipt> submit = OtherTransaction.start(storage.transactions(),
                     () -> relay.submit(transfer("pay-2")));
-                 OtherTransaction<Boolean> completion = startAfter(submit, storage.transactions(), this::complete)) {
-                completion.assertStillWorkingAfter(BLOCKED);
+                 OtherTransaction<Boolean> completion = startAfter(submit, storage.transactions(),
+                         HeadRaceTest.this::complete)) {
+                completion.assertFinishedWithin(NOT_BLOCKED);
 
                 // when
-                submit.commit();
-                completion.awaitWork();
                 completion.commit();
+                submit.commit();
 
                 // then
+                assertClaimedOnly("pay-2");
                 assertHeadOf("order-1", "pay-2");
             }
-        }
-
-        private boolean complete() {
-            return HeadRaceTest.this.complete();
         }
     }
 
     @Nested
     @Order(2)
+    @DisplayName("claim이 끝난 맨 앞을 넘길 때")
+    class PassingOn {
+
+        @Test
+        @DisplayName("앱이 그 키 행을 쥐고 있으면 그 키만 미루고 다른 키는 내보낸다. 앱이 커밋하면 다음 claim이 넘긴다")
+        void aKeyHeldByAnOpenSubmitIsPassedOnLater() {
+            // given: pay-1이 끝났고, 다른 키의 pay-9가 기다리고, 앱이 order-1에 pay-2를 접수하는 중이다
+            complete();
+            storage.transactions().inTransaction(() -> relay.submit(transfer("pay-9", "order-9")));
+            try (OtherTransaction<CommandReceipt> submit = OtherTransaction.start(storage.transactions(),
+                    () -> relay.submit(transfer("pay-2")))) {
+                submit.awaitWork();
+
+                // when
+                List<String> whileHeld = claimedNow();
+                submit.commit();
+                List<String> afterCommit = claimedNow();
+
+                // then
+                assertThat(whileHeld).as("앱이 order-1 키 행을 쥔 동안 잡힌 명령").containsExactly("pay-9");
+                assertThat(afterCommit).as("앱이 커밋한 뒤 잡힌 명령").containsExactly("pay-2");
+            }
+        }
+    }
+
+    @Nested
+    @Order(3)
     @DisplayName("앱 트랜잭션이 더 높은 격리 수준이면")
     class HigherIsolation {
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(AppIsolation.class)
-        @DisplayName("완료 뒤에 기다린 접수는 재시도할 수 있는 실패로 끝나고, 다시 접수하면 맨 앞이 된다")
-        void aRepeatableReadSubmitAfterACompletionEndsInARetryableFailure(AppIsolation isolation) {
+        @DisplayName("완료와 겹친 접수는 그대로 커밋되고, 다음 claim이 뒤 명령을 잡는다")
+        void aSubmitOverlappingACompletionCommits(AppIsolation isolation) {
             // given
             Transactions app = appTransactions(isolation);
             try (OtherTransaction<Boolean> completion = OtherTransaction.start(storage.transactions(),
                     HeadRaceTest.this::complete);
                  OtherTransaction<CommandReceipt> submit = startAfter(completion, app,
                          () -> relay.submit(transfer("pay-2")))) {
-                submit.assertStillWorkingAfter(BLOCKED);
-                completion.commit();
-                assertEndedInARetryableFailure(submit);
-                assertNoHeadOf("order-1");
+                submit.awaitWork();
 
                 // when
-                app.inTransaction(() -> relay.submit(transfer("pay-2")));
+                completion.commit();
+                submit.commit();
 
                 // then
-                assertHeadOf("order-1", "pay-2");
+                assertClaimedOnly("pay-2");
+            }
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(AppIsolation.class)
+        @DisplayName("스냅숏을 잡은 뒤 claim이 맨 앞을 없앤 키에 접수하면 재시도할 수 있는 실패로 끝나고, 다시 접수하면 맨 앞이 된다")
+        void aSubmitOnAKeyWhoseHeadWasPassedOnAfterItsSnapshotEndsInARetryableFailure(AppIsolation isolation) {
+            // given: 앱의 스냅숏에서 pay-1은 아직 처리 중인 맨 앞이다. 그 뒤 pay-1이 끝나고 claim이 맨 앞을 없앴다
+            Transactions app = appTransactions(isolation);
+            CountDownLatch snapshotTaken = new CountDownLatch(1);
+            CountDownLatch submitNow = new CountDownLatch(1);
+            try (OtherTransaction<Boolean> completion = OtherTransaction.start(storage.transactions(),
+                    HeadRaceTest.this::complete)) {
+                completion.awaitWork();
+                try (OtherTransaction<CommandReceipt> submit = OtherTransaction.start(app, () -> {
+                    storage.sql().sql("SELECT count(*) FROM ledger_command").query(Long.class).single();
+                    snapshotTaken.countDown();
+                    await(submitNow);
+                    return relay.submit(transfer("pay-2"));
+                })) {
+                    await(snapshotTaken);
+                    completion.commit();
+                    assertThat(claimedNow()).as("넘기는 claim이 잡은 명령").isEmpty();
+                    assertNoHeadOf("order-1");
+
+                    // when
+                    submitNow.countDown();
+
+                    // then
+                    assertEndedInARetryableFailure(submit);
+                }
+            }
+            app.inTransaction(() -> relay.submit(transfer("pay-2")));
+            assertHeadOf("order-1", "pay-2");
+        }
+    }
+
+    @Nested
+    @Order(4)
+    @DisplayName("앱과 핸들러가 같은 주문 행을 고치면")
+    class SharedOrderRow {
+
+        CommandLifecycle relayThatMarksTheOrder;
+
+        @BeforeEach
+        void givenAHandlerThatMarksTheOrderPaid() {
+            storage.sql().sql("CREATE TABLE IF NOT EXISTS app_order (id text PRIMARY KEY, status text NOT NULL)").update();
+            storage.sql().sql("TRUNCATE app_order").update();
+            storage.sql().sql("INSERT INTO app_order (id, status) VALUES ('1', '결제 대기')").update();
+            relayThatMarksTheOrder = new CommandLifecycle(storage.keys(), storage.store(), storage.transactions(),
+                    new SequentialTransferIds(), outcome -> markOrder("결제 완료"),
+                    new Backoff(Duration.ofSeconds(5), Duration.ofSeconds(20)));
+        }
+
+        @Test
+        @DisplayName("주문 행을 고친 뒤 접수해도 교착하지 않는다 — 결과를 쓰는 쪽은 키 행을 쥐지 않고 주문 행만 기다린다 (P2e-7)")
+        void anAppThatMarksTheOrderThenSubmitsDoesNotDeadlockWithTheHandler() throws Exception {
+            CountDownLatch orderMarked = new CountDownLatch(1);
+            CountDownLatch submitNow = new CountDownLatch(1);
+            try (OtherTransaction<CommandReceipt> app = OtherTransaction.start(storage.transactions(), () -> {
+                markOrder("결제 중");
+                orderMarked.countDown();
+                await(submitNow);
+                return relay.submit(transfer("pay-2"));
+            })) {
+                // given: 앱이 주문 행을 쥐었고, pay-1의 핸들러가 그 주문 행을 기다린다
+                await(orderMarked);
+                CompletableFuture<WriteResult> completion = CompletableFuture
+                        .supplyAsync(() -> relayThatMarksTheOrder.complete(pay1, Created));
+                assertStillRunningAfter(completion, BLOCKED);
+
+                // when: 앱이 같은 키에 접수하고 커밋한다
+                submitNow.countDown();
+                app.awaitWork();
+                app.commit();
+
+                // then
+                assertThat(completion.get(10, TimeUnit.SECONDS)).as("pay-1의 결과 쓰기").isEqualTo(new WriteResult.Written());
+                assertThat(orderStatus()).as("핸들러가 마지막에 쓴 주문 상태").isEqualTo("결제 완료");
+            }
+        }
+
+        @Test
+        @DisplayName("접수한 뒤 주문 행을 고쳐도 교착하지 않는다")
+        void anAppThatSubmitsThenMarksTheOrderDoesNotDeadlockWithTheHandler() throws Exception {
+            CountDownLatch submitted = new CountDownLatch(1);
+            CountDownLatch markNow = new CountDownLatch(1);
+            try (OtherTransaction<CommandReceipt> app = OtherTransaction.start(storage.transactions(), () -> {
+                CommandReceipt receipt = relay.submit(transfer("pay-2"));
+                submitted.countDown();
+                await(markNow);
+                markOrder("결제 중");
+                return receipt;
+            })) {
+                // given: 앱이 같은 키에 접수했고, pay-1의 결과를 쓰기 시작한다
+                await(submitted);
+                CompletableFuture<WriteResult> completion = CompletableFuture
+                        .supplyAsync(() -> relayThatMarksTheOrder.complete(pay1, Created));
+
+                // when: 앱이 주문 행을 고치고 커밋한다
+                markNow.countDown();
+                app.awaitWork();
+                app.commit();
+
+                // then
+                assertThat(completion.get(10, TimeUnit.SECONDS)).as("pay-1의 결과 쓰기").isEqualTo(new WriteResult.Written());
             }
         }
     }
 
     // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+
+    private void markOrder(String status) {
+        storage.sql().sql("UPDATE app_order SET status = :status WHERE id = '1'").param("status", status).update();
+    }
+
+    private String orderStatus() {
+        return storage.sql().sql("SELECT status FROM app_order WHERE id = '1'").query(String.class).single();
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new AssertionError("10초 안에 신호가 오지 않았다");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("기다리다 인터럽트되었다", e);
+        }
+    }
+
+    private static void assertStillRunningAfter(CompletableFuture<?> work, Duration observation) {
+        try {
+            Object done = work.get(observation.toMillis(), TimeUnit.MILLISECONDS);
+            throw new AssertionError(observation.toMillis() + "ms 안에 끝났다(" + done + "): 막혀 있기를 기대했다");
+        } catch (java.util.concurrent.TimeoutException expected) {
+            // 막혀 있다
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("기다리다 인터럽트되었다", e);
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw new AssertionError("막혀 있기를 기대했는데 실패로 끝났다", e.getCause());
+        }
+    }
 
     /** 워커가 pay-1의 TB 결과를 쓴다. 핸들러 없이 저장소의 조건부 쓰기만 한다. */
     private boolean complete() {
@@ -162,6 +331,15 @@ class HeadRaceTest {
             throw new IllegalStateException("given 준비 실패: pay-1의 결과를 쓰지 못했다");
         }
         return true;
+    }
+
+    /** 지금 claim이 잡는 명령. */
+    private List<String> claimedNow() {
+        return relay.claim(10, LEASE).claimed().stream().map(ClaimedCommand::commandId).toList();
+    }
+
+    private void assertClaimedOnly(String commandId) {
+        assertThat(claimedNow()).as("다음 claim이 잡은 명령").containsExactly(commandId);
     }
 
     private void assertHeadOf(String orderingKey, String commandId) {
@@ -178,17 +356,21 @@ class HeadRaceTest {
     }
 
     private static LedgerCommand transfer(String commandId) {
-        return LedgerCommand.transfer(commandId).orderingKey("order-1")
+        return transfer(commandId, "order-1");
+    }
+
+    private static LedgerCommand transfer(String commandId, String orderingKey) {
+        return LedgerCommand.transfer(commandId).orderingKey(orderingKey)
                 .debit(1).credit(2).amount(500).ledger(1).code(1).build();
     }
 
-    /** 늦은 접수가 일하는 중에 또는 커밋할 때 직렬화 실패로 끝났다. 앱은 이 SQLSTATE를 보고 재시도한다. */
-    private static void assertEndedInARetryableFailure(OtherTransaction<?> late) {
+    /** 접수가 일하는 중에 또는 커밋할 때 직렬화 실패로 끝났다. 앱은 이 SQLSTATE를 보고 재시도한다. */
+    private static void assertEndedInARetryableFailure(OtherTransaction<?> submit) {
         Throwable failure = catchThrowable(() -> {
-            late.awaitWork();
-            late.commit();
+            submit.awaitWork();
+            submit.commit();
         });
-        assertThat(sqlState(failure)).as("늦은 접수의 실패 SQLSTATE (실패: %s)", failure).isEqualTo(SERIALIZATION_FAILURE);
+        assertThat(sqlState(failure)).as("접수의 실패 SQLSTATE (실패: %s)", failure).isEqualTo(SERIALIZATION_FAILURE);
     }
 
     /** 앱이 연 트랜잭션: 그 격리 수준의 Spring 트랜잭션. 접수는 여기에 합류한다. */

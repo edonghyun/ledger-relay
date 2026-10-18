@@ -66,6 +66,20 @@ public final class OtherTransaction<T> implements AutoCloseable {
         }
     }
 
+    /** 관찰 시간 안에 일이 끝났음을 확인하고 결과를 돌려준다 — 아무것에도 막히지 않았다. 일이 던졌으면 그 예외를 던진다. */
+    public T assertFinishedWithin(Duration observation) {
+        try {
+            if (!workDone.await(observation.toMillis(), TimeUnit.MILLISECONDS)) {
+                throw new AssertionError("다른 트랜잭션의 일이 " + observation.toMillis()
+                        + "ms 안에 끝나지 않았다: 막히지 않기를 기대했다");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("기다리다 인터럽트되었다", e);
+        }
+        return awaitWork();
+    }
+
     /** 트랜잭션을 커밋하고 끝날 때까지 기다린다. 커밋이 실패하면 그 예외를 던진다. */
     public void commit() {
         end(false);

@@ -5,12 +5,10 @@
 -- 유일 인덱스가 어긋나지 않는다(F31). 순서 키 행은 지우지 않는다: 지우면 경쟁 중에 순번이 1로 돌아간다(02d P2d-11).
 
 -- 순서 키마다 다음에 낼 순번. 접수가 이 행을 잠그고 커밋까지 놓지 않으므로 seq 순서가 커밋 순서와 같다(R12, P2b-8).
--- 미완료 개수는 접수와 완료가 이 행을 함께 고치게 하려고 둔다. 이 갱신이 같은 키의 접수·완료를 줄 세우므로 맨 앞 표시가
--- 사라지지 않는다(02e P2e-4).
+-- 이 행을 잡는 것은 접수와 claim의 맨 앞 넘기기뿐이다. 결과를 쓰고 핸들러를 부르는 트랜잭션은 잡지 않는다(02e P2e-7).
 CREATE TABLE ledger_ordering_key (
     ordering_key     text COLLATE "C" PRIMARY KEY,
-    next_seq         bigint NOT NULL CHECK (next_seq >= 1),
-    unfinished_count bigint NOT NULL DEFAULT 0 CHECK (unfinished_count >= 0)
+    next_seq         bigint NOT NULL CHECK (next_seq >= 1)
 );
 
 CREATE TABLE ledger_command (
@@ -46,8 +44,8 @@ CREATE TABLE ledger_command (
     accepted_xact          xid8 NOT NULL DEFAULT pg_current_xact_id(),
     accepted_at            timestamptz NOT NULL DEFAULT now(),
     completed_at           timestamptz,
-    -- 그 키에서 가장 앞 순번의 미완료 명령인가. 저장소가 넣기와 완료 때 고친다(02e P2e-4). DB를 직접 고친 뒤에는
-    -- rebuild-heads.sql로 다시 계산한다(P2e-5)
+    -- 그 키에서 지금 차례인 명령인가. 넣을 때 키에 맨 앞이 없으면 켠다. 명령이 끝나도 그대로 두고, 다음 claim이 그 키
+    -- 행을 잡아 다음 미완료로 넘긴다(02e P2e-7). DB를 직접 고친 뒤에는 rebuild-heads.sql로 다시 계산한다(P2e-5)
     is_head                boolean NOT NULL DEFAULT false,
     -- 보낼 수 있게 되는 시각: 접수 명령은 다음 시도 시각, 처리 중 명령은 lease 만료 시각(02e P2e-1)
     ready_at               timestamptz GENERATED ALWAYS AS (
@@ -129,3 +127,7 @@ CREATE UNIQUE INDEX ledger_command_one_head ON ledger_command (ordering_key) WHE
 -- 백로그도 읽지 않고, 인덱스 순서가 곧 후보 순서라 limit개를 잠그면 멈춘다(02e P2e-3, F32).
 CREATE INDEX ledger_command_ready ON ledger_command (ready_at, id)
     WHERE is_head AND state IN ('PENDING','CLAIMED');
+
+-- 끝났는데 아직 맨 앞인 명령. claim이 넘길 키를 찾는다. 넘기고 나면 빠지므로 방금 끝난 명령만 담긴다(02e P2e-7).
+CREATE INDEX ledger_command_finished_head ON ledger_command (id)
+    WHERE is_head AND state IN ('APPLIED','REJECTED','CONFLICT','SKIPPED');

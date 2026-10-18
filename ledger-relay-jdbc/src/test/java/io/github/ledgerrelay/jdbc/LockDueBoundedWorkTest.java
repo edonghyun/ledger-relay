@@ -84,6 +84,25 @@ class LockDueBoundedWorkTest {
         }
     }
 
+    @Nested
+    @Order(3)
+    @DisplayName("끝난 맨 앞이 많아도")
+    class ManyFinishedHeads {
+
+        @Test
+        @DisplayName("넘기기는 limit개 키를 잠그면 멈춘다 — 끝난 이력을 훑지 않는다 (P2e-7)")
+        void passingOnStopsAtTheLimit() {
+            // given: TB가 회복된 직후처럼 방금 끝난 맨 앞 2만 개가 넘길 차례를 기다리고, 그 앞에 끝난 이력 5만 건이 있다
+            finishedHistory(HISTORY);
+            finishedHeads(MANY);
+            storage.sql().sql("ANALYZE ledger_command").update();
+            storage.sql().sql("ANALYZE ledger_ordering_key").update();
+
+            // then
+            assertReadAtMostPages(PAGE_BUDGET, plan(JdbcOrderingKeys.LOCK_KEYS_TO_PASS_ON));
+        }
+    }
+
     // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
 
     /** 지금 보낼 수 있는 키 n개. 키마다 접수 명령 하나다. */
@@ -101,6 +120,20 @@ class LockDueBoundedWorkTest {
                     'APPLIED', now()
                 FROM generate_series(1, :n) g
                 """).param("n", n).update();
+    }
+
+    /** 끝났는데 아직 맨 앞인 명령 n건과 그 키 행. 키마다 하나다. */
+    private void finishedHeads(int n) {
+        storage.sql().sql("""
+                INSERT INTO ledger_command (command_id, transfer_id, ordering_key, seq, kind, debit_account_id,
+                    credit_account_id, amount, ledger, code, timeout_seconds, user_data_64, user_data_32,
+                    content_hash, state, completed_at, is_head)
+                SELECT 'fin-' || g, 8000000 + g, 'fin-' || g, 1, 'TRANSFER', 1, 2, 500, 1, 1, 0, 0, 0, 'hash',
+                    'APPLIED', now(), true
+                FROM generate_series(1, :n) g
+                """).param("n", n).update();
+        storage.sql().sql("INSERT INTO ledger_ordering_key (ordering_key, next_seq) SELECT 'fin-' || g, 2 "
+                + "FROM generate_series(1, :n) g").param("n", n).update();
     }
 
     /** 접수 상태의 행을 g = from..to로 직접 넣는다. 이체 ID는 이미 있는 가장 큰 값 뒤로 잇는다. */
@@ -122,8 +155,12 @@ class LockDueBoundedWorkTest {
     }
 
     private String plan() {
+        return plan(JdbcCommandStore.LOCK_DUE);
+    }
+
+    private String plan(String query) {
         return storage.transactions().inTransaction(() -> storage.sql()
-                .sql("EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) " + JdbcCommandStore.LOCK_DUE).param("limit", LIMIT)
+                .sql("EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) " + query).param("limit", LIMIT)
                 .query(String.class).list().stream().reduce("", (a, b) -> a + b + "\n"));
     }
 

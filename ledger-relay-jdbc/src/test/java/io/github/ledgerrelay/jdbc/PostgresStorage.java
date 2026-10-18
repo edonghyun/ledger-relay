@@ -185,7 +185,7 @@ final class PostgresStorage implements StorageUnderTest {
     }
 
     /**
-     * 맨 앞 표시와 미완료 개수를 행에서 다시 계산한다(02e P2e-5). 직접 SQL로 행을 바꾼 준비 뒤에 부른다. 스크립트의 표 잠금은
+     * 맨 앞 표시와 키 행을 행에서 다시 계산한다(02e P2e-5). 직접 SQL로 행을 바꾼 준비 뒤에 부른다. 스크립트의 표 잠금은
      * 트랜잭션 안에서만 되므로 트랜잭션을 열거나, 열린 것에 합류한다.
      */
     void rebuildHeads() {
@@ -193,26 +193,30 @@ final class PostgresStorage implements StorageUnderTest {
     }
 
     /**
-     * 키마다 표시가 행과 맞는지 본다: 미완료 개수가 실제와 같고, 맨 앞 표시가 미완료가 있을 때만 정확히 하나이며, 그것이
-     * 가장 앞 순번의 미완료다. 어긋난 키를 모두 담아 던진다.
+     * 키마다 표시가 행과 맞는지 본다(02e P2e-7f): 표시는 0~1개다. 미완료가 있으면 표시가 있고, 그것은 가장 앞 미완료이거나
+     * 그보다 앞 순번의 끝난 명령(다음 claim이 넘길 것)이다. 미완료가 없으면 표시가 없거나 끝난 명령이다. 명령이 있는 키는
+     * 키 행이 있다(넘기기가 그 행을 잡는다). 어긋난 키를 모두 담아 던진다.
      */
     void assertHeadsConsistent() {
         java.util.List<String> broken = sql().sql("""
                 WITH actual AS (
                     SELECT ordering_key,
-                           count(*) FILTER (WHERE state IN ('PENDING','CLAIMED','HALTED')) AS unfinished,
                            min(seq) FILTER (WHERE state IN ('PENDING','CLAIMED','HALTED')) AS first_unfinished,
                            count(*) FILTER (WHERE is_head) AS heads,
-                           min(seq) FILTER (WHERE is_head) AS head_seq
+                           min(seq) FILTER (WHERE is_head) AS head_seq,
+                           bool_or(is_head AND state IN ('PENDING','CLAIMED','HALTED')) AS head_unfinished
                     FROM ledger_command GROUP BY ordering_key)
-                SELECT coalesce(a.ordering_key, k.ordering_key) || ': 미완료 ' || coalesce(a.unfinished, 0)
-                       || ', 기록된 개수 ' || coalesce(k.unfinished_count::text, '키 행 없음')
-                       || ', 맨 앞 표시 ' || coalesce(a.heads, 0) || '개(seq ' || coalesce(a.head_seq::text, '-')
-                       || ', 가장 앞 미완료 seq ' || coalesce(a.first_unfinished::text, '-') || ')'
-                FROM actual a FULL JOIN ledger_ordering_key k ON k.ordering_key = a.ordering_key
-                WHERE coalesce(a.unfinished, 0) <> coalesce(k.unfinished_count, -1)
-                   OR coalesce(a.heads, 0) <> least(coalesce(a.unfinished, 0), 1)
-                   OR a.head_seq IS DISTINCT FROM a.first_unfinished
+                SELECT a.ordering_key || ': 맨 앞 표시 ' || a.heads || '개(seq ' || coalesce(a.head_seq::text, '-')
+                       || CASE WHEN a.head_unfinished THEN ', 미완료' ELSE ', 끝남' END
+                       || '), 가장 앞 미완료 seq ' || coalesce(a.first_unfinished::text, '-')
+                       || CASE WHEN k.ordering_key IS NULL THEN ', 키 행 없음' ELSE '' END
+                FROM actual a LEFT JOIN ledger_ordering_key k ON k.ordering_key = a.ordering_key
+                WHERE a.heads > 1
+                   OR k.ordering_key IS NULL
+                   OR (a.first_unfinished IS NOT NULL AND (a.heads = 0
+                        OR (a.head_unfinished AND a.head_seq <> a.first_unfinished)
+                        OR (NOT a.head_unfinished AND a.head_seq > a.first_unfinished)))
+                   OR (a.first_unfinished IS NULL AND a.head_unfinished)
                 ORDER BY 1
                 """).query(String.class).list();
         if (!broken.isEmpty()) {

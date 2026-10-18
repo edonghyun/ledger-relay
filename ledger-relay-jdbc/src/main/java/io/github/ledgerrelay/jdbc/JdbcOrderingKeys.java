@@ -1,6 +1,7 @@
 package io.github.ledgerrelay.jdbc;
 
 import io.github.ledgerrelay.core.spi.OrderingKeys;
+import java.util.List;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -29,7 +30,45 @@ public final class JdbcOrderingKeys implements OrderingKeys {
                 """).param("key", orderingKey).query(Long.class).single();
     }
 
+    /**
+     * 넘길 키를 고른다. 끝났는데 맨 앞인 명령({@code ledger_command_finished_head})의 키 행을 잠근다. 다른 트랜잭션이 쥔 키
+     * 행은 건너뛰며, 건너뛴 행은 limit에 세지 않는다. 테스트가 실행 계획을 본다.
+     */
+    static final String LOCK_KEYS_TO_PASS_ON = """
+                SELECT k.ordering_key
+                FROM ledger_command c
+                JOIN ledger_ordering_key k ON k.ordering_key = c.ordering_key
+                WHERE c.is_head AND c.state IN ('APPLIED','REJECTED','CONFLICT','SKIPPED')
+                ORDER BY c.id
+                LIMIT :limit
+                FOR UPDATE OF k SKIP LOCKED
+            """;
+
+    /**
+     * 끝난 명령이 쥔 맨 앞을 다음 미완료로 넘긴다(02e P2e-7). 잡은 키 행은 값을 그대로 두고 갱신한다. 새 행 버전이 생기므로,
+     * 이보다 앞서 스냅숏을 잡은 REPEATABLE READ 이상의 앱 트랜잭션은 이 키에서 순번을 받을 때 직렬화 실패(40001)로 끝나
+     * 재시도한다. 그러지 않으면 그 앱은 옛 스냅숏에서 아직 맨 앞이 있다고 보고 새 명령을 맨 앞으로 세우지 않아, 그 키가
+     * 영원히 나가지 않는다. 다음 미완료를 접수하는 중인 트랜잭션은 순번을 받으며 키 행을 쥐었으므로 그 키는 건너뛰고, 그 접수가
+     * 커밋한 뒤 다음 호출이 넘긴다.
+     */
     @Override
     public void passOnFinishedHeads(int limit) {
+        List<String> keys = sql.sql(LOCK_KEYS_TO_PASS_ON).param("limit", limit).query(String.class).list();
+        if (keys.isEmpty()) {
+            return;
+        }
+        sql.sql("UPDATE ledger_ordering_key SET next_seq = next_seq WHERE ordering_key IN (:keys)")
+                .param("keys", keys).update();
+        sql.sql("""
+                UPDATE ledger_command SET is_head = false
+                WHERE ordering_key IN (:keys) AND is_head AND state IN ('APPLIED','REJECTED','CONFLICT','SKIPPED')
+                """).param("keys", keys).update();
+        sql.sql("""
+                UPDATE ledger_command c SET is_head = true
+                FROM (SELECT ordering_key, min(seq) AS seq FROM ledger_command
+                      WHERE ordering_key IN (:keys) AND state IN ('PENDING','CLAIMED','HALTED')
+                      GROUP BY ordering_key) h
+                WHERE c.ordering_key = h.ordering_key AND c.seq = h.seq
+                """).param("keys", keys).update();
     }
 }
