@@ -58,10 +58,10 @@ class StatusApiTest extends ShopSpringTest {
 
         // then
         String after = get("/api/status");
-        assertThat(number(after, "$.tiles.accepted") - number(before, "$.tiles.accepted")).as("accepted increase").isEqualTo(2);
-        assertThat(number(after, "$.tiles.completed") - number(before, "$.tiles.completed")).as("completed increase").isEqualTo(2);
-        assertThat(number(after, "$.tiles.backlog")).as("backlog").isEqualTo(number(before, "$.tiles.backlog"));
-        assertThat(number(after, "$.tiles.p99Millis")).as("p99 accept→done (ms)").isPositive();
+        assertTileRose(before, after, "accepted", 2);
+        assertTileRose(before, after, "completed", 2);
+        assertTileRose(before, after, "backlog", 0);
+        assertLatencyMeasured(after);
     }
 
     @Test
@@ -77,9 +77,8 @@ class StatusApiTest extends ShopSpringTest {
                 && number(json, "$.paidOrdersSatang") > 0);
 
         // then
-        assertThat(number(consistency, "$.mismatches")).as("reconciliation mismatches").isZero();
-        assertThat(number(consistency, "$.checked")).as("commands checked by reconciliation").isEqualTo(number(consistency, "$.matched"));
-        assertThat(number(consistency, "$.doubleTransfers")).as("double transfers").isZero();
+        assertEveryCheckedCommandMatched(consistency);
+        assertNoOrderChargedTwice(consistency);
     }
 
     @Test
@@ -93,25 +92,68 @@ class StatusApiTest extends ShopSpringTest {
                 json -> JsonPath.read(json, "$.buyer") != null && number(json, "$.buyer.paidSatang") >= 89_000);
 
         // then
-        assertThat((List<String>) JsonPath.read(timeline, "$.steps[*].kind")).as("steps").containsExactly("RESERVE", "POST");
-        assertThat((List<String>) JsonPath.read(timeline, "$.steps[*].state")).as("step results")
-                .containsExactly("APPLIED", "APPLIED");
-        assertThat((List<Number>) JsonPath.read(timeline, "$.steps[*].submitCount")).as("TB submit counts")
-                .allSatisfy(count -> assertThat(count.longValue()).isGreaterThanOrEqualTo(1));
-        assertThat((String) JsonPath.read(timeline, "$.steps[0].transferId")).as("reservation transfer id (hex)").startsWith("0x");
-        assertThat(number(timeline, "$.order.amountSatang")).as("order amount").isEqualTo(89_000);
-        assertThat(number(timeline, "$.merchant.postedSatang")).as("merchant posted balance").isGreaterThanOrEqualTo(89_000);
-        assertThat(number(timeline, "$.buyer.paidSatang")).as("money paid by the buyer").isGreaterThanOrEqualTo(89_000);
+        assertStepsApplied(timeline, "RESERVE", "POST");
+        assertEveryStepSentToTheLedger(timeline);
+        assertBalancesShownFor(timeline, 89_000);
     }
 
     @Test
     @DisplayName("This instance appears in the Workers list within seconds and the TB connection shows as UP")
     void theInstanceShowsUpWithinSeconds() throws Exception {
-        // The TB check runs in the background without waiting (F36). The first response may come before any answer, so poll
+        // when: the TB check runs in the background without waiting (F36). The first response may come before any
+        // answer, so poll
         String status = await("/api/status", json -> !((List<?>) JsonPath.read(json,
                 "$.instances[?(@.name == '" + properties.instanceName() + "')]")).isEmpty()
                 && Boolean.TRUE.equals(JsonPath.read(json, "$.ledgerUp")));
 
+        // then
+        assertInstancesListed(status);
+    }
+
+    // ── Effects checked only in this file ────────────────────────────────
+
+    private static void assertTileRose(String before, String after, String tile, long by) {
+        String path = "$.tiles." + tile;
+        assertThat(number(after, path) - number(before, path)).as("rise of the %s tile", tile).isEqualTo(by);
+    }
+
+    private static void assertLatencyMeasured(String status) {
+        assertThat(number(status, "$.tiles.p99Millis")).as("p99 accept→done (ms)").isPositive();
+    }
+
+    private static void assertEveryCheckedCommandMatched(String consistency) {
+        assertThat(number(consistency, "$.mismatches")).as("reconciliation mismatches").isZero();
+        assertThat(number(consistency, "$.checked")).as("commands checked by reconciliation")
+                .isEqualTo(number(consistency, "$.matched"));
+    }
+
+    private static void assertNoOrderChargedTwice(String consistency) {
+        assertThat(number(consistency, "$.doubleTransfers")).as("orders charged twice").isZero();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void assertStepsApplied(String timeline, String... kinds) {
+        assertThat((List<String>) JsonPath.read(timeline, "$.steps[*].kind")).as("steps").containsExactly(kinds);
+        assertThat((List<String>) JsonPath.read(timeline, "$.steps[*].state")).as("step results")
+                .hasSize(kinds.length).containsOnly("APPLIED");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void assertEveryStepSentToTheLedger(String timeline) {
+        assertThat((List<Number>) JsonPath.read(timeline, "$.steps[*].submitCount")).as("TB submit counts")
+                .allSatisfy(count -> assertThat(count.longValue()).isGreaterThanOrEqualTo(1));
+        assertThat((List<String>) JsonPath.read(timeline, "$.steps[*].transferId")).as("transfer ids (hex)")
+                .allSatisfy(id -> assertThat(id).startsWith("0x"));
+    }
+
+    /** The order amount and the balances it moved are shown. Balances are at least the amount: other orders share them. */
+    private static void assertBalancesShownFor(String timeline, long amount) {
+        assertThat(number(timeline, "$.order.amountSatang")).as("order amount").isEqualTo(amount);
+        assertThat(number(timeline, "$.merchant.postedSatang")).as("merchant posted balance").isGreaterThanOrEqualTo(amount);
+        assertThat(number(timeline, "$.buyer.paidSatang")).as("money paid by the buyer").isGreaterThanOrEqualTo(amount);
+    }
+
+    private static void assertInstancesListed(String status) {
         assertThat(number(status, "$.instances.length()")).as("live instances").isPositive();
     }
 

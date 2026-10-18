@@ -22,7 +22,7 @@ class ComposeFileTest {
         List<String> lines = Files.readAllLines(COMPOSE);
 
         // then: a top-level volumes: entry would survive down (without -v)
-        assertThat(lines).as("top-level volumes declaration").noneMatch(line -> line.startsWith("volumes:"));
+        assertNoNamedVolumes(lines);
     }
 
     @Test
@@ -32,9 +32,17 @@ class ComposeFileTest {
         String compose = Files.readString(COMPOSE);
 
         // then
-        assertThat(compose).as("compose.yaml")
-                .contains("image: postgres:" + System.getProperty("ledgerrelay.postgres.version") + "\n")
-                .contains("image: ghcr.io/tigerbeetle/tigerbeetle:" + System.getProperty("ledgerrelay.tigerbeetle.version")
-                        + "\n");
+        assertUsesImage(compose, "postgres:" + System.getProperty("ledgerrelay.postgres.version"));
+        assertUsesImage(compose, "ghcr.io/tigerbeetle/tigerbeetle:" + System.getProperty("ledgerrelay.tigerbeetle.version"));
+    }
+
+    // ── Effects checked only in this file ────────────────────────────────
+
+    private static void assertNoNamedVolumes(List<String> lines) {
+        assertThat(lines).as("top-level volumes declaration").noneMatch(line -> line.startsWith("volumes:"));
+    }
+
+    private static void assertUsesImage(String compose, String image) {
+        assertThat(compose).as("compose.yaml").contains("image: " + image + "\n");
     }
 }

@@ -1,5 +1,14 @@
 package io.github.ledgerrelay.shop.order;
 
+import static io.github.ledgerrelay.shop.ShopAssertions.assertAnswered;
+import static io.github.ledgerrelay.shop.ShopAssertions.assertCommands;
+import static io.github.ledgerrelay.shop.ShopAssertions.assertFailedFor;
+import static io.github.ledgerrelay.shop.ShopAssertions.assertHoldReleased;
+import static io.github.ledgerrelay.shop.ShopAssertions.assertMerchantReceived;
+import static io.github.ledgerrelay.shop.ShopAssertions.assertNewlyHeld;
+import static io.github.ledgerrelay.shop.ShopAssertions.assertNoFailure;
+import static io.github.ledgerrelay.shop.ShopAssertions.assertRefusedForState;
+import static io.github.ledgerrelay.shop.ShopAssertions.assertStillIn;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -15,6 +24,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -67,7 +77,7 @@ class OrderFlowTest extends ShopSpringTest {
 
             // then
             probe.awaitState(order.id(), OrderState.AUTHORIZED);
-            assertThat(probe.heldBy(1001) - heldBefore).as("newly held buyer money").isEqualTo(EARBUDS);
+            assertNewlyHeld(probe, 1001, EARBUDS, heldBefore);
         }
 
         @Test
@@ -84,10 +94,8 @@ class OrderFlowTest extends ShopSpringTest {
             Checkout second = clicks.get(1).get(10, TimeUnit.SECONDS);
 
             // then
-            assertThat(first.order().id()).as("order returned to both requests").isEqualTo(second.order().id());
-            assertThat(List.of(first.created(), second.created())).as("created flags").containsExactlyInAnyOrder(true, false);
-            assertThat(orders.commandsOf(first.order().id())).as("commands of the order").extracting(OrderCommand::kind)
-                    .containsExactly(CommandKind.RESERVE);
+            assertSameOrderCreatedOnce(first, second);
+            assertCommands(orders, first.order().id(), CommandKind.RESERVE);
         }
 
         @Test
@@ -97,10 +105,12 @@ class OrderFlowTest extends ShopSpringTest {
             String key = newKey();
             ShopOrder first = shop.checkout(key, 1001, "earbuds").order();
 
+            // when
+            ThrowingCallable otherProduct = () -> shop.checkout(key, 1001, "keyboard");
+
             // then
-            assertThatThrownBy(() -> shop.checkout(key, 1001, "keyboard")).as("other product")
-                    .isInstanceOf(IdempotencyMismatchException.class);
-            assertThat(orders.find(first.id()).orElseThrow().productCode()).as("product of the order").isEqualTo("earbuds");
+            assertRefusedAsKeyReuse(otherProduct);
+            assertProductIs(first.id(), "earbuds");
         }
 
         @Test
@@ -110,13 +120,15 @@ class OrderFlowTest extends ShopSpringTest {
             String unknownProduct = newKey();
             String unknownBuyer = newKey();
 
+            // when
+            ThrowingCallable piano = () -> shop.checkout(unknownProduct, 1001, "piano");
+            ThrowingCallable stranger = () -> shop.checkout(unknownBuyer, 4242, "earbuds");
+
             // then
-            assertThatThrownBy(() -> shop.checkout(unknownProduct, 1001, "piano")).as("unknown product")
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> shop.checkout(unknownBuyer, 4242, "earbuds")).as("unknown buyer")
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThat(orders.findByKey(unknownProduct)).as("order for the unknown product").isEmpty();
-            assertThat(orders.findByKey(unknownBuyer)).as("order for the unknown buyer").isEmpty();
+            assertRefusedAsUnknown(piano);
+            assertRefusedAsUnknown(stranger);
+            assertNoOrderFor(unknownProduct);
+            assertNoOrderFor(unknownBuyer);
         }
 
         private CompletableFuture<Checkout> click(CountDownLatch together, String key) {
@@ -146,8 +158,8 @@ class OrderFlowTest extends ShopSpringTest {
 
             // then
             probe.awaitState(order.id(), OrderState.PAID);
-            assertThat(probe.merchantReceived() - receivedBefore).as("money newly received by the merchant").isEqualTo(EARBUDS);
-            assertThat(probe.heldBy(1003)).as("buyer money held").isEqualTo(heldBefore);
+            assertMerchantReceived(probe, EARBUDS, receivedBefore);
+            assertHoldReleased(probe, 1003, heldBefore);
         }
 
         @Test
@@ -158,9 +170,12 @@ class OrderFlowTest extends ShopSpringTest {
                 // given
                 ShopOrder order = shop.checkout(newKey(), 1003, "earbuds").order();
 
+                // when
+                ThrowingCallable shipping = () -> shop.ship(order.id());
+
                 // then
-                assertThatThrownBy(() -> shop.ship(order.id())).as("shipping before authorization").isInstanceOf(OrderConflictException.class);
-                assertThat(orders.find(order.id()).orElseThrow().state()).as("order state").isEqualTo(OrderState.ACCEPTED);
+                assertRefusedForState(shipping);
+                assertStillIn(orders, order.id(), OrderState.ACCEPTED);
             } finally {
                 ledger.restoreConnection();
             }
@@ -185,7 +200,7 @@ class OrderFlowTest extends ShopSpringTest {
 
             // then
             probe.awaitState(order.id(), OrderState.CANCELLED);
-            assertThat(probe.heldBy(1004)).as("buyer money held").isEqualTo(heldBefore);
+            assertHoldReleased(probe, 1004, heldBefore);
         }
 
         @Test
@@ -207,9 +222,8 @@ class OrderFlowTest extends ShopSpringTest {
 
             // then
             probe.awaitState(order.id(), OrderState.CANCELLED);
-            assertThat(orders.commandsOf(order.id())).as("commands of the order").extracting(OrderCommand::kind)
-                    .containsExactly(CommandKind.RESERVE, CommandKind.VOID);
-            assertThat(probe.heldBy(1004)).as("buyer money held").isEqualTo(heldBefore);
+            assertCommands(orders, order.id(), CommandKind.RESERVE, CommandKind.VOID);
+            assertHoldReleased(probe, 1004, heldBefore);
         }
 
         @Test
@@ -230,7 +244,7 @@ class OrderFlowTest extends ShopSpringTest {
 
             // then
             ShopOrder cancelled = probe.awaitState(order.id(), OrderState.CANCELLED);
-            assertThat(cancelled.failureReason()).as("failure reason").isNull();
+            assertNoFailure(cancelled);
         }
 
         @Test
@@ -240,8 +254,11 @@ class OrderFlowTest extends ShopSpringTest {
             ShopOrder order = authorized(1004);
             shop.ship(order.id());
 
+            // when
+            ThrowingCallable cancelling = () -> shop.cancel(order.id());
+
             // then
-            assertThatThrownBy(() -> shop.cancel(order.id())).as("cancel after shipping").isInstanceOf(OrderConflictException.class);
+            assertRefusedForState(cancelling);
             probe.awaitState(order.id(), OrderState.PAID);
         }
     }
@@ -262,7 +279,7 @@ class OrderFlowTest extends ShopSpringTest {
 
             // then
             ShopOrder failed = probe.awaitState(order.id(), OrderState.FAILED);
-            assertThat(failed.failureReason()).as("failure reason").isEqualTo("exceeds_credits");
+            assertFailedFor(failed, "exceeds_credits");
         }
     }
 
@@ -282,18 +299,20 @@ class OrderFlowTest extends ShopSpringTest {
             MvcTestResult again = checkout(key, "earbuds");
 
             // then
-            assertThat(first).hasStatus(HttpStatus.CREATED);
-            assertThat(again).hasStatus(HttpStatus.OK);
             long id = orders.findByKey(key).orElseThrow().id();
-            assertThat(first).bodyJson().extractingPath("$.id").asNumber().isEqualTo((int) id);
-            assertThat(again).bodyJson().extractingPath("$.id").asNumber().isEqualTo((int) id);
+            assertAnsweredWithOrder(first, HttpStatus.CREATED, id);
+            assertAnsweredWithOrder(again, HttpStatus.OK, id);
         }
 
         @Test
         @DisplayName("A request without the Idempotency-Key header answers 400")
         void aMissingKeyIsABadRequest() {
-            assertThat(http.post().uri("/api/orders").contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"buyerId\":1001,\"product\":\"earbuds\"}")).hasStatus(HttpStatus.BAD_REQUEST);
+            // when
+            MvcTestResult withoutKey = http.post().uri("/api/orders").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"buyerId\":1001,\"product\":\"earbuds\"}").exchange();
+
+            // then
+            assertAnswered(withoutKey, HttpStatus.BAD_REQUEST);
         }
 
         @Test
@@ -304,16 +323,49 @@ class OrderFlowTest extends ShopSpringTest {
             checkout(key, "earbuds");
             ShopOrder cancelled = shop.cancel(shop.checkout(newKey(), 1001, "mouse").order().id());
 
+            // when
+            MvcTestResult otherProduct = checkout(key, "keyboard");
+            MvcTestResult unknownOrder = http.post().uri("/api/orders/{id}/ship", Long.MAX_VALUE).exchange();
+            MvcTestResult wrongState = http.post().uri("/api/orders/{id}/ship", cancelled.id()).exchange();
+
             // then
-            assertThat(checkout(key, "keyboard")).hasStatus(HttpStatus.UNPROCESSABLE_CONTENT);
-            assertThat(http.post().uri("/api/orders/{id}/ship", Long.MAX_VALUE)).hasStatus(HttpStatus.NOT_FOUND);
-            assertThat(http.post().uri("/api/orders/{id}/ship", cancelled.id())).hasStatus(HttpStatus.CONFLICT);
+            assertAnswered(otherProduct, HttpStatus.UNPROCESSABLE_CONTENT);
+            assertAnswered(unknownOrder, HttpStatus.NOT_FOUND);
+            assertAnswered(wrongState, HttpStatus.CONFLICT);
         }
 
         private MvcTestResult checkout(String key, String product) {
             return http.post().uri("/api/orders").header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON)
                     .content("{\"buyerId\":1001,\"product\":\"" + product + "\"}").exchange();
         }
+    }
+
+    // ── Effects checked only in this file ────────────────────────────────
+
+    private static void assertSameOrderCreatedOnce(Checkout first, Checkout second) {
+        assertThat(first.order().id()).as("order returned to both requests").isEqualTo(second.order().id());
+        assertThat(List.of(first.created(), second.created())).as("created flags").containsExactlyInAnyOrder(true, false);
+    }
+
+    private static void assertRefusedAsKeyReuse(ThrowingCallable attempt) {
+        assertThatThrownBy(attempt).isInstanceOf(IdempotencyMismatchException.class);
+    }
+
+    private static void assertRefusedAsUnknown(ThrowingCallable attempt) {
+        assertThatThrownBy(attempt).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private void assertProductIs(long orderId, String product) {
+        assertThat(orders.find(orderId).orElseThrow().productCode()).as("product of order %d", orderId).isEqualTo(product);
+    }
+
+    private void assertNoOrderFor(String key) {
+        assertThat(orders.findByKey(key)).as("order for key %s", key).isEmpty();
+    }
+
+    private static void assertAnsweredWithOrder(MvcTestResult result, HttpStatus status, long orderId) {
+        assertThat(result).hasStatus(status);
+        assertThat(result).bodyJson().extractingPath("$.id").asNumber().isEqualTo((int) orderId);
     }
 
     // ── Helpers used only in this file ───────────────────────────────────

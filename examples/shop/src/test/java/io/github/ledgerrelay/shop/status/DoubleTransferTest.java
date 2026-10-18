@@ -75,8 +75,7 @@ class DoubleTransferTest {
         probe.awaitState(order.id(), OrderState.PAID);
 
         // then
-        assertThat(userData64OfTransfer(ShopOrder.commandId(order.id(), "post"))).as("user_data_64 of the post")
-                .isEqualTo(order.id());
+        assertCarriesOrderId(ShopOrder.commandId(order.id(), "post"), order.id());
     }
 
     @Test
@@ -100,9 +99,25 @@ class DoubleTransferTest {
             consistency = http.get().uri("/api/consistency").exchange().getResponse()
                     .getContentAsString(StandardCharsets.UTF_8);
         } while (StatusApiTest.number(consistency, "$.doubleTransfers") == 0 && System.nanoTime() < deadline);
-        assertThat(StatusApiTest.number(consistency, "$.doubleTransfers")).as("double transfers").isEqualTo(1);
-        assertThat((String) JsonPath.read(consistency, "$.verdict")).as("consistency verdict").isEqualTo("broken");
+        assertOrdersChargedTwice(consistency, 1);
+        assertVerdict(consistency, "broken");
     }
+
+    // ── Effects checked only in this file ────────────────────────────────
+
+    private void assertCarriesOrderId(String commandId, long orderId) throws InterruptedException {
+        assertThat(userData64OfTransfer(commandId)).as("user_data_64 of %s in TB", commandId).isEqualTo(orderId);
+    }
+
+    private static void assertOrdersChargedTwice(String consistency, long count) {
+        assertThat(StatusApiTest.number(consistency, "$.doubleTransfers")).as("orders charged twice").isEqualTo(count);
+    }
+
+    private static void assertVerdict(String consistency, String verdict) {
+        assertThat((String) JsonPath.read(consistency, "$.verdict")).as("consistency verdict").isEqualTo(verdict);
+    }
+
+    // ── Helpers used only in this file ───────────────────────────────────
 
     private long userData64OfTransfer(String commandId) throws InterruptedException {
         IdBatch ids = new IdBatch(1);

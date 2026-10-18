@@ -83,7 +83,7 @@ class ShopComposeTest {
         awaitOrder(order, "PAID");
         String consistency = await(SETTLE, "/api/consistency",
                 json -> number(json, "$.merchantPostedSatang") == merchantBefore + EARBUDS);
-        assertThat(number(consistency, "$.paidOrdersSatang")).as("sum of paid orders").isEqualTo(merchantBefore + EARBUDS);
+        assertPaidOrdersAddUpTo(consistency, merchantBefore + EARBUDS);
     }
 
     @Test
@@ -98,14 +98,12 @@ class ShopComposeTest {
             for (int i = 0; i < orders.length; i++) {
                 long started = System.nanoTime();
                 Checkout checkout = checkout(UUID.randomUUID().toString(), 1002, "mouse");
-                assertThat(checkout.status()).as("payment response while TB is cut").isEqualTo(201);
-                assertThat(Duration.ofNanos(System.nanoTime() - started)).as("payment time")
-                        .isLessThan(Duration.ofSeconds(1));
+                assertAcceptedWithin(checkout, Duration.ofNanos(System.nanoTime() - started), Duration.ofSeconds(1));
                 orders[i] = checkout.id();
             }
 
             // then: the backlog grows and the TB dot in the UI turns red
-            assertThat(number(get("/api/status"), "$.tiles.backlog")).as("backlog").isGreaterThanOrEqualTo(3);
+            assertBacklogOfAtLeast(3);
             await(SETTLE, "/api/status", json -> Boolean.FALSE.equals(JsonPath.read(json, "$.ledgerUp")));
         } finally {
             post("/api/demo/ledger/restore");
@@ -140,7 +138,7 @@ class ShopComposeTest {
         String abandoned = post("/api/operator/halted/" + postCommand + "/abandon");
 
         // then
-        assertThat((String) JsonPath.read(abandoned, "$.outcome")).as("abandon outcome").isEqualTo("ABANDONED");
+        assertAbandoned(abandoned);
         awaitOrder(injected, "CANCELLED");
         await(SETTLE, "/api/orders/" + injected + "/timeline",
                 json -> JsonPath.read(json, "$.buyer") != null && number(json, "$.buyer.heldSatang") == heldBefore);
@@ -160,11 +158,9 @@ class ShopComposeTest {
         Checkout b = second.get();
 
         // then
-        assertThat(a.id()).as("order returned to both requests").isEqualTo(b.id());
-        assertThat(List.of(a.status(), b.status())).as("response statuses").containsExactlyInAnyOrder(201, 200);
+        assertSameOrderCreatedOnce(a, b);
         awaitOrder(a.id(), "AUTHORIZED");
-        assertThat((List<String>) JsonPath.read(get("/api/orders/" + a.id() + "/timeline"), "$.steps[*].kind"))
-                .as("commands of the order").containsExactly("RESERVE");
+        assertSteps(a.id(), "RESERVE");
     }
 
     @Test
@@ -197,7 +193,7 @@ class ShopComposeTest {
         List<Number> ids = JsonPath.read(post("/api/demo/burst?count=50"), "$.orderIds");
 
         // then
-        assertThat(ids).as("created orders").hasSize(50);
+        assertOrdersCreated(ids, 50);
         for (Number id : ids) {
             awaitOrder(id.longValue(), "AUTHORIZED");
         }
@@ -205,7 +201,45 @@ class ShopComposeTest {
             Map<String, Long> sent = sentByInstance(json);
             return sent.size() == 2 && sent.entrySet().stream().allMatch(e -> e.getValue() > sentBefore.getOrDefault(e.getKey(), 0L));
         });
-        assertThat(sentByInstance(after).keySet()).as("sending instances").containsExactlyInAnyOrder("shop-a", "shop-b");
+        assertSentBy(after, "shop-a", "shop-b");
+    }
+
+    // ── Effects checked only in this file ────────────────────────────────
+
+    private static void assertPaidOrdersAddUpTo(String consistency, long amount) {
+        assertThat(number(consistency, "$.paidOrdersSatang")).as("sum of paid orders").isEqualTo(amount);
+    }
+
+    private static void assertAcceptedWithin(Checkout checkout, Duration took, Duration limit) {
+        assertThat(checkout.status()).as("payment response while TB is cut").isEqualTo(201);
+        assertThat(took).as("payment time").isLessThan(limit);
+    }
+
+    private static void assertBacklogOfAtLeast(long count) throws Exception {
+        assertThat(number(get("/api/status"), "$.tiles.backlog")).as("backlog").isGreaterThanOrEqualTo(count);
+    }
+
+    private static void assertAbandoned(String answer) {
+        assertThat((String) JsonPath.read(answer, "$.outcome")).as("abandon outcome").isEqualTo("ABANDONED");
+    }
+
+    private static void assertSameOrderCreatedOnce(Checkout a, Checkout b) {
+        assertThat(a.id()).as("order returned to both requests").isEqualTo(b.id());
+        assertThat(List.of(a.status(), b.status())).as("response statuses").containsExactlyInAnyOrder(201, 200);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void assertSteps(long order, String... kinds) throws Exception {
+        assertThat((List<String>) JsonPath.read(get("/api/orders/" + order + "/timeline"), "$.steps[*].kind"))
+                .as("commands of order %d", order).containsExactly(kinds);
+    }
+
+    private static void assertOrdersCreated(List<Number> ids, int count) {
+        assertThat(ids).as("created orders").hasSize(count).doesNotHaveDuplicates();
+    }
+
+    private static void assertSentBy(String status, String... instances) {
+        assertThat(sentByInstance(status).keySet()).as("sending instances").containsExactlyInAnyOrder(instances);
     }
 
     // ── Helpers used only in this file ───────────────────────────────────

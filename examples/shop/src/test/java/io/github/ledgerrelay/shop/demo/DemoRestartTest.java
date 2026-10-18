@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.ledgerrelay.shop.ShopApplication;
 import io.github.ledgerrelay.shop.ShopTestEnvironment;
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -47,19 +49,26 @@ class DemoRestartTest {
                         "--shop.demo.toxiproxy-url=" + environment.ledger().controlUrl()));
 
         // then
-        assertAppStarted(starting);
+        try (ConfigurableApplicationContext app = assertStartsWithin(starting, Duration.ofSeconds(60))) {
+            assertLinkConnected(app);
+        }
     }
 
-    private void assertAppStarted(CompletableFuture<ConfigurableApplicationContext> starting) throws Exception {
+    // ── Effects checked only in this file ────────────────────────────────
+
+    private ConfigurableApplicationContext assertStartsWithin(CompletableFuture<ConfigurableApplicationContext> starting,
+            Duration limit) throws Exception {
         try {
-            try (ConfigurableApplicationContext app = starting.get(60, TimeUnit.SECONDS)) {
-                assertThat(app.getBean(LedgerLink.class).connected()).as("TB connection after startup").isTrue();
-            }
-        } catch (java.util.concurrent.TimeoutException e) {
+            return starting.get(limit.toSeconds(), TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
             // let the stuck startup finish so its threads end with the test
             environment.ledger().restoreConnection();
-            starting.get(60, TimeUnit.SECONDS).close();
-            throw new AssertionError("The app did not finish starting within 60 s while the connection was cut", e);
+            starting.get(limit.toSeconds(), TimeUnit.SECONDS).close();
+            throw new AssertionError("The app did not finish starting within " + limit + " while the connection was cut", e);
         }
+    }
+
+    private static void assertLinkConnected(ConfigurableApplicationContext app) {
+        assertThat(app.getBean(LedgerLink.class).connected()).as("TB connection after startup").isTrue();
     }
 }

@@ -12,6 +12,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
@@ -64,8 +65,7 @@ class ShopBootstrapTest {
                 ShopSchema.apply(database);
 
                 // then
-                assertThat(JdbcClient.create(database).sql("SELECT submitted_total FROM shop_instance WHERE name = 'kept'")
-                        .query(Long.class).single()).as("kept row").isEqualTo(7L);
+                assertInstanceRowKept(database, "kept", 7);
             }
         }
     }
@@ -85,8 +85,7 @@ class ShopBootstrapTest {
 
                 // then: the only money credited to a buyer is the top-up. Payments move only the debit side
                 for (long buyer : Accounts.BUYERS) {
-                    assertThat(Accounts.balanceOf(client, buyer).creditsPosted()).as("amount topped up to buyer %d", buyer)
-                            .isEqualTo(100_000_000L);
+                    assertToppedUpWith(client, buyer, 100_000_000L);
                 }
             }
         }
@@ -100,21 +99,46 @@ class ShopBootstrapTest {
         @Test
         @DisplayName("A host name becomes an IPv4 address — the TB client does not resolve names")
         void aHostNameBecomesAnIpv4Address() {
-            assertThat(TigerBeetleClientConfig.toIpv4Address("localhost:3001")).isEqualTo("127.0.0.1:3001");
+            // when
+            String address = TigerBeetleClientConfig.toIpv4Address("localhost:3001");
+
+            // then
+            assertThat(address).isEqualTo("127.0.0.1:3001");
         }
 
         @Test
         @DisplayName("The TB client rejects a host name at construction — which is why the app converts it to IPv4 (F39)")
         void theClientRefusesAHostName() {
-            assertThatThrownBy(() -> new Client(UInt128.asBytes(0), new String[] {"localhost:3000"}).close())
-                    .as("host name address").hasMessageContaining("Replica addresses format is invalid");
+            // when
+            ThrowingCallable construction = () -> new Client(UInt128.asBytes(0), new String[] {"localhost:3000"}).close();
+
+            // then
+            assertRefusedAsInvalidAddress(construction);
         }
 
         @Test
         @DisplayName("An IPv4 address is kept as is")
         void anIpv4AddressIsKept() {
-            assertThat(TigerBeetleClientConfig.toIpv4Address("10.0.0.7:3000")).isEqualTo("10.0.0.7:3000");
+            // when
+            String address = TigerBeetleClientConfig.toIpv4Address("10.0.0.7:3000");
+
+            // then
+            assertThat(address).isEqualTo("10.0.0.7:3000");
         }
+    }
+
+    private static void assertRefusedAsInvalidAddress(ThrowingCallable construction) {
+        assertThatThrownBy(construction).hasMessageContaining("Replica addresses format is invalid");
+    }
+
+    private static void assertInstanceRowKept(DataSource database, String name, long submittedTotal) {
+        assertThat(JdbcClient.create(database).sql("SELECT submitted_total FROM shop_instance WHERE name = ?").param(name)
+                .query(Long.class).single()).as("submitted_total of %s", name).isEqualTo(submittedTotal);
+    }
+
+    private static void assertToppedUpWith(Client client, long buyer, long amount) {
+        assertThat(Accounts.balanceOf(client, buyer).creditsPosted()).as("amount topped up to buyer %d", buyer)
+                .isEqualTo(amount);
     }
 
     private static void assertTablesExist(DataSource database, String... tables) {

@@ -18,6 +18,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
+import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import org.springframework.web.util.ServletRequestPathUtils;
 
@@ -38,26 +39,51 @@ class StaticPageTest extends ShopSpringTest {
     @Test
     @DisplayName("The first page has the Store, Operator and Scenarios tabs")
     void theIndexHasThreeTabs() {
-        assertThat(http.get().uri("/")).as("root path").hasForwardedUrl("index.html");
-        assertThat(http.get().uri("/index.html")).hasStatus(HttpStatus.OK).bodyText()
-                .contains("data-tab=\"store\"", "data-tab=\"operator\"", "data-tab=\"scenarios\"");
+        // when
+        MvcTestResult root = http.get().uri("/").exchange();
+        MvcTestResult index = http.get().uri("/index.html").exchange();
+
+        // then
+        assertForwardedTo(root, "index.html");
+        assertHasTabs(index, "store", "operator", "scenarios");
     }
 
     @Test
     @DisplayName("Every API path shop.js calls is mapped on the server — so that a rename never silently breaks the UI")
     void everyApiPathTheUiCallsIsMapped() throws Exception {
-        // given
+        // when
         List<String[]> calls = apiCalls();
-        assertThat(calls).as("API entries in shop.js").hasSizeGreaterThanOrEqualTo(10);
 
         // then
+        assertThat(calls).as("API entries in shop.js").hasSizeGreaterThanOrEqualTo(10);
         for (String[] call : calls) {
-            String path = call[1].replace("{id}", "1").replace("{commandId}", "x").replaceFirst("\\?.*$", "");
-            MockHttpServletRequest request = new MockHttpServletRequest(call[0].toUpperCase(), path);
-            ServletRequestPathUtils.parseAndCache(request);
-            assertThat(mappings.getHandler(request)).as(call[0].toUpperCase() + " " + call[1]).isNotNull();
+            assertMapped(call[0], call[1]);
         }
     }
+
+    // ── Effects checked only in this file ────────────────────────────────
+
+    private static void assertForwardedTo(MvcTestResult result, String page) {
+        assertThat(result).hasForwardedUrl(page);
+    }
+
+    private static void assertHasTabs(MvcTestResult page, String... tabs) {
+        assertThat(page).hasStatus(HttpStatus.OK);
+        for (String tab : tabs) {
+            assertThat(page).bodyText().as("tab %s", tab).contains("data-tab=\"" + tab + "\"");
+        }
+    }
+
+    /** The server has a handler for this method and path. Path variables are filled with sample values. */
+    private void assertMapped(String method, String template) throws Exception {
+        String path = template.replace("{id}", "1").replace("{commandId}", "x").replaceFirst("\\?.*$", "");
+        MockHttpServletRequest request = new MockHttpServletRequest(method.toUpperCase(), path);
+        ServletRequestPathUtils.parseAndCache(request);
+        assertThat(mappings.getHandler(request)).as(method.toUpperCase() + " " + template).isNotNull();
+    }
+
+    // ── Helpers used only in this file ───────────────────────────────────
+
 
     private static List<String[]> apiCalls() throws IOException {
         String script;
