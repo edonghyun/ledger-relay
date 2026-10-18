@@ -15,7 +15,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-@DisplayName("워커 설정 — worker.*")
+@DisplayName("Worker settings — worker.*")
 class WorkerSettingsTest {
 
     static final Duration S30 = Duration.ofSeconds(30);
@@ -24,11 +24,11 @@ class WorkerSettingsTest {
 
     @Nested
     @Order(1)
-    @DisplayName("올바르게 주면")
+    @DisplayName("When given valid values")
     class Valid {
 
         @Test
-        @DisplayName("기본값(128, 1024, 30s, 5s)과 poll-timeout 1s로 만들어진다")
+        @DisplayName("It is built with the defaults (128, 1024, 30s, 5s) and poll-timeout 1s")
         void theSpecDefaultsAreAccepted() {
             // when
             WorkerSettings settings = new WorkerSettings(128, 1024, S30, S5, S1);
@@ -41,39 +41,39 @@ class WorkerSettingsTest {
 
     @Nested
     @Order(2)
-    @DisplayName("잘못 주면")
+    @DisplayName("When given invalid values")
     class Invalid {
 
         @ParameterizedTest(name = "{argumentSetName} → {1}", quoteTextArguments = false)
         @MethodSource("invalidSettings")
-        @DisplayName("만들 수 없고, 어느 설정이 틀렸는지 알려 준다")
+        @DisplayName("It cannot be built, and the error names the wrong setting")
         void isRefusedNamingTheSetting(ThrowingCallable making, String field) {
             assertRefusedNaming(making, field);
         }
 
         static Stream<Arguments> invalidSettings() {
             return Stream.of(
-                    argumentSet("batch-size가 0이면",
+                    argumentSet("batch-size 0",
                             (ThrowingCallable) () -> new WorkerSettings(0, 1024, S30, S5, S1), "batchSize"),
-                    argumentSet("batch-size가 TB 한 요청의 최대(8189)를 넘으면",
+                    argumentSet("batch-size above the TB maximum per request (8189)",
                             (ThrowingCallable) () -> new WorkerSettings(8190, 10_000, S30, S5, S1), "batchSize"),
-                    argumentSet("max-in-flight가 batch-size보다 작으면 — 슬롯을 영원히 못 잡는다",
+                    argumentSet("max-in-flight smaller than batch-size — slots can never be taken",
                             (ThrowingCallable) () -> new WorkerSettings(128, 127, S30, S5, S1), "maxInFlight"),
-                    argumentSet("lease가 0이면",
+                    argumentSet("lease 0",
                             (ThrowingCallable) () -> new WorkerSettings(128, 1024, Duration.ZERO, S5, S1), "lease"),
-                    argumentSet("submit-timeout이 음수면",
+                    argumentSet("a negative submit-timeout",
                             (ThrowingCallable) () -> new WorkerSettings(128, 1024, S30, Duration.ofSeconds(-1), S1),
                             "submitTimeout"),
-                    argumentSet("lease가 submit-timeout의 두 배보다 짧으면 — 기다리는 동안 다른 워커가 같은 명령을 다시 잡는다",
+                    argumentSet("lease shorter than twice submit-timeout — another worker claims the same command again during the wait",
                             (ThrowingCallable) () -> new WorkerSettings(128, 1024, Duration.ofSeconds(9), S5, S1), "lease"),
-                    argumentSet("poll-timeout이 0이면",
+                    argumentSet("poll-timeout 0",
                             (ThrowingCallable) () -> new WorkerSettings(128, 1024, S30, S5, Duration.ZERO),
                             "pollTimeout"));
         }
     }
 
     private static void assertRefusedNaming(ThrowingCallable making, String field) {
-        assertThatThrownBy(making).as("%s가 틀린 설정이 만들어지지 않기", field)
+        assertThatThrownBy(making).as("settings with a wrong %s are refused", field)
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining(field);
     }
 }

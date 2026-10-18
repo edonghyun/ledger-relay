@@ -5,9 +5,10 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * claim 후보 하나와, 게이트가 그 후보에 대해 볼 것.
+ * One claim candidate, and what the gate looks at for it.
  *
- * @param reservation post·void가 참조한 예약의 순번과 상태. 참조가 없거나 예약 행이 없으면 비어 있다
+ * @param reservation the seq and state of the reservation the post or void refers to. Empty if there is no reference
+ *                    or no reservation row
  */
 public record DueCommand(CommandRecord command, Optional<QueuedCommand> reservation) {
 

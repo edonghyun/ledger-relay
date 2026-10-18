@@ -10,10 +10,11 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * 샘플 앱 테스트가 함께 쓰는 PostgreSQL과 Toxiproxy 뒤의 TigerBeetle. JVM당 한 번 띄우고 JVM이 끝날 때 Testcontainers가
- * 치운다. 테스트끼리 같은 DB와 원장을 쓰므로, 잔액을 보는 테스트는 자기만 쓰는 구매자나 주문을 쓴다.
+ * PostgreSQL and TigerBeetle behind Toxiproxy, shared by the sample app tests. Started once per JVM; Testcontainers
+ * removes them when the JVM exits. Tests share the DB and the ledger, so a test that checks balances uses a buyer or
+ * order of its own.
  *
- * <p>정합성을 일부러 깨는 테스트는 {@link #isolated()}로 자기 환경을 따로 띄운다.
+ * <p>Tests that break consistency on purpose start their own environment with {@link #isolated()}.
  */
 public final class ShopTestEnvironment {
 
@@ -36,7 +37,7 @@ public final class ShopTestEnvironment {
         return shared;
     }
 
-    /** 다른 테스트와 나누지 않는 새 PG와 TB. 부른 쪽이 {@link #close()}한다. */
+    /** New PG and TB not shared with other tests. The caller calls {@link #close()}. */
     public static ShopTestEnvironment isolated() {
         return new ShopTestEnvironment();
     }
@@ -49,12 +50,12 @@ public final class ShopTestEnvironment {
         return ledger;
     }
 
-    /** 새 TB 클라이언트. 부른 쪽이 닫는다. */
+    /** New TB client. The caller closes it. */
     public Client newLedgerClient() {
         return ledger.newClient();
     }
 
-    /** 같은 PG 서버에 빈 database를 하나 더 만든다. 스키마가 없는 상태에서 시작하는 테스트용. 부른 쪽이 닫는다. */
+    /** Creates another empty database on the same PG server, for tests that start without a schema. The caller closes it. */
     public HikariDataSource newEmptyDatabase() {
         String name = "empty_" + DATABASES.incrementAndGet();
         try (HikariDataSource admin = dataSource(postgres.getJdbcUrl())) {
@@ -63,7 +64,7 @@ public final class ShopTestEnvironment {
         return dataSource(postgres.getJdbcUrl().replaceFirst("/[^/?]+(\\?|$)", "/" + name + "$1"));
     }
 
-    /** {@code @DynamicPropertySource}에서 부른다. demo 프로필 테스트가 TB를 끊을 수 있게 Toxiproxy 주소도 넘긴다. */
+    /** Called from {@code @DynamicPropertySource}. Also passes the Toxiproxy address so that demo profile tests can cut TB. */
     public void properties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);

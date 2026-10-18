@@ -1,6 +1,6 @@
-// Relay Shop 화면. 빌드 도구 없이 앱이 그대로 서빙한다. 숫자는 모두 서버(PG·TB)에서 받는다. 1초마다 폴링한다.
+// Relay Shop UI. The app serves it as is, with no build tool. Every number comes from the server (PG and TB). Polls every second.
 
-// 화면이 부르는 경로를 여기에 모두 모은다. StaticPageTest가 각 경로가 서버에 있는지 확인한다.
+// Every path the UI calls is listed here. StaticPageTest checks that each path is mapped on the server.
 const API = {
   getCatalog: '/api/catalog',
   getStatus: '/api/status',
@@ -21,9 +21,9 @@ const API = {
 };
 
 const HALT_REASONS = {
-  RESERVATION_NOT_EARLIER: '참조한 예약이 확정보다 앞 순번이 아님',
-  RESERVATION_MISSING: '참조한 예약이 같은 키에 없음',
-  MALFORMED_ROW: '행 데이터가 규칙과 어긋남',
+  RESERVATION_NOT_EARLIER: 'The referenced reservation does not have an earlier sequence number than the post',
+  RESERVATION_MISSING: 'The referenced reservation is not on the same ordering key',
+  MALFORMED_ROW: 'The row data violates the command rules',
 };
 
 const state = {
@@ -34,11 +34,11 @@ const state = {
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n).toLocaleString('en-US');
 const baht = (satang) => '฿' + (satang / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-/** 멱등 키. crypto.randomUUID는 localhost가 아닌 http 주소에서는 없다. */
+/** Idempotency key. crypto.randomUUID is missing on plain-http origins other than localhost. */
 const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
 const path = (template, values) => template.replace(/\{(\w+)\}/g, (_, k) => encodeURIComponent(values[k]));
 
-/** 요소를 만든다. 문자열은 textContent로 넣어 서버 값이 HTML로 해석되지 않게 한다. */
+/** Builds an element. Strings go in as text nodes so that server values are never parsed as HTML. */
 function h(tag, attrs, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
@@ -82,7 +82,7 @@ async function act(button, work) {
   refresh();
 }
 
-// ── 탭 ───────────────────────────────────────────────
+// ── Tabs ─────────────────────────────────────────────
 
 function showTab(tab) {
   state.tab = tab;
@@ -102,10 +102,10 @@ function renderCatalog() {
   $('products').replaceChildren(...products.map((p) => h('div', { class: 'prod' },
     h('div', { class: 'thumb' }, p.emoji),
     h('div', {}, h('div', { class: 'pname' }, p.name), h('div', { class: 'pmeta' }, baht(p.priceSatang) + ' · ' + p.code)),
-    h('button', { class: 'buy', onclick: (e) => act(e.currentTarget, async () => { state.selected = (await postCheckout(p.code, newKey())).body.id; }) }, '결제하기'))));
+    h('button', { class: 'buy', onclick: (e) => act(e.currentTarget, async () => { state.selected = (await postCheckout(p.code, newKey())).body.id; }) }, 'Pay'))));
 }
 
-/** 결제 요청. 같은 key로 다시 보내면 서버가 같은 주문을 돌려준다(201 → 200). */
+/** Payment request. Resending with the same key returns the same order (201 → 200). */
 async function postCheckout(product, key) {
   const response = await fetch(API.postCheckout, {
     method: 'POST',
@@ -113,7 +113,7 @@ async function postCheckout(product, key) {
     body: JSON.stringify({ buyerId: state.buyer, product }),
   });
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error || '결제 실패 ' + response.status);
+  if (!response.ok) throw new Error(body.error || 'Payment failed: ' + response.status);
   return { status: response.status, body };
 }
 
@@ -125,7 +125,7 @@ function renderOrders() {
   const list = state.filter === 'halted' ? state.orders.filter((o) => o.halted) : state.orders;
   if (!list.length) {
     $('orders').replaceChildren(h('div', { class: 'empty' },
-      state.filter === 'halted' ? '멈춘 주문이 없습니다.' : '아직 주문이 없습니다. 위에서 결제해 보세요.'));
+      state.filter === 'halted' ? 'No halted orders.' : 'No orders yet. Pay for a product above.'));
     return;
   }
   $('orders').replaceChildren(...list.map((o) => h('div', {
@@ -143,7 +143,7 @@ function renderOrders() {
   )));
 }
 
-// ── 단계 칸과 흐르는 점 ───────────────────────────────
+// ── Pipeline stages and moving dots ──────────────────
 
 function renderStatus(s) {
   state.ledgerUp = s.ledgerUp;
@@ -179,7 +179,7 @@ function renderStatus(s) {
   state.lastCompleted = finished;
 }
 
-/** 점 하나를 흘린다. TB가 끊기면 빨간 점이 TB 앞에서 멈춘다. */
+/** Sends one dot down the pipeline. When TB is down, a red dot stops in front of TB. */
 function packet(flowing) {
   const pipe = $('pipe');
   if (getComputedStyle(pipe).display === 'grid') return;
@@ -193,7 +193,7 @@ function packet(flowing) {
   setTimeout(() => dot.remove(), flowing ? 1700 : 1200);
 }
 
-// ── 타임라인 ─────────────────────────────────────────
+// ── Timeline ─────────────────────────────────────────
 
 async function refreshTimeline() {
   if (state.selected == null) return;
@@ -208,8 +208,8 @@ async function refreshTimeline() {
   const rows = [];
   let n = 1;
   t.steps.forEach((step, index) => {
-    const accepted = { RESERVE: '결제 → 예약 접수', POST: '출고 → 확정 접수', VOID: '취소 → 해제 접수' }[step.kind] ?? step.kind;
-    const where = (index === 0 ? '주문 저장과 한 트랜잭션 · ' : '') + `키 order-${t.order.id} · 순번 ${index + 1}`;
+    const accepted = { RESERVE: 'Pay → reserve accepted', POST: 'Ship → post accepted', VOID: 'Cancel → void accepted' }[step.kind] ?? step.kind;
+    const where = (index === 0 ? 'same transaction as the order · ' : '') + `key order-${t.order.id} · seq ${index + 1}`;
     rows.push(h('div', { class: 'tlrow ok' }, h('span', { class: 'i' }, n++),
       h('span', { class: 'd' }, accepted, h('small', {}, where)),
       h('span', { class: 't' }, offset(step.acceptedAt))));
@@ -230,7 +230,7 @@ async function refreshTimeline() {
     ['merchant posted', t.merchant ? baht(t.merchant.postedSatang) : '—'],
   ];
   $('timeline').replaceChildren(...rows,
-    h('div', { class: 'ledger four', title: '계좌 전체의 TigerBeetle 잔액(이 주문만의 값이 아님)' }, ...cells.map(([k, v]) => h('div', { class: 'lc' }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v)))));
+    h('div', { class: 'ledger four', title: 'TigerBeetle balances of the whole account (not just this order)' }, ...cells.map(([k, v]) => h('div', { class: 'lc' }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v)))));
 }
 
 const shortId = (hex) => (hex.length > 12 ? hex.slice(0, 8) + '…' + hex.slice(-4) : hex);
@@ -241,26 +241,26 @@ async function refreshHalted() {
   const { body: halted } = await call('GET', API.getHalted, { quiet: true });
   if (!Array.isArray(halted)) return;
   if (!halted.length) {
-    $('halted').replaceChildren(h('div', { class: 'empty' }, '멈춘 명령이 없습니다.'));
+    $('halted').replaceChildren(h('div', { class: 'empty' }, 'No halted commands.'));
     return;
   }
   $('halted').replaceChildren(h('table', {},
     h('thead', {}, h('tr', {}, ...['command', 'ordering key · seq', 'kind', 'reason', 'halted at', ''].map((c) => h('th', {}, c)))),
     h('tbody', {}, ...halted.map((c) => h('tr', {},
-      h('td', {}, c.commandId, c.orderId != null && h('small', {}, '주문 #' + c.orderId)),
+      h('td', {}, c.commandId, c.orderId != null && h('small', {}, 'order #' + c.orderId)),
       h('td', {}, c.orderingKey + ' · ' + c.seq),
       h('td', {}, c.kind),
       h('td', {}, c.reason, h('small', {}, HALT_REASONS[c.reason] ?? '')),
       h('td', {}, new Date(c.haltedAt).toLocaleTimeString()),
       h('td', {}, h('button', { class: 'ghost red', onclick: (e) => act(e.currentTarget, async () => {
         const { body } = await call('POST', path(API.postAbandon, { commandId: c.commandId }));
-        toast(c.commandId + ' → ' + body.outcome + (body.outcome === 'ABANDONED' ? ' · 해제가 뒤따라 주문은 취소됩니다' : ''));
+        toast(c.commandId + ' → ' + body.outcome + (body.outcome === 'ABANDONED' ? ' · a void follows and the order is cancelled' : ''));
       }) }, 'Abandon')))))));
 }
 
 async function runReconcile(button) {
   await act(button, async () => {
-    $('reconcile-result').replaceChildren(h('div', { class: 'empty' }, '대사 중…'));
+    $('reconcile-result').replaceChildren(h('div', { class: 'empty' }, 'Reconciling…'));
     const { body: r } = await call('POST', API.postReconcile);
     $('reconcile-result').replaceChildren(
       h('div', { class: 'ledger' },
@@ -293,30 +293,30 @@ async function doubleClick(button) {
     const key = newKey();
     const [a, b] = await Promise.all([postCheckout(product, key), postCheckout(product, key)]);
     const same = a.body.id === b.body.id;
-    $('double-result').textContent = `#${a.body.id} (${a.status}) · #${b.body.id} (${b.status}) — ` + (same ? '주문 하나 ✓' : '주문 둘 ✗');
+    $('double-result').textContent = `#${a.body.id} (${a.status}) · #${b.body.id} (${b.status}) — ` + (same ? 'one order ✓' : 'two orders ✗');
     state.selected = a.body.id;
   });
 }
 
-// ── 정합성 칸 ─────────────────────────────────────────
+// ── Consistency panel ────────────────────────────────
 
 function renderConsistency(c) {
   $('c-posted').textContent = baht(c.merchantPostedSatang);
   $('c-paid').textContent = baht(c.paidOrdersSatang);
   $('c-reconciled').textContent = fmt(c.matched) + ' / ' + fmt(c.checked);
-  $('c-stale').textContent = c.stale ? 'TB에서 새 숫자를 받지 못해 마지막 값을 보여 줍니다' : 'live · 1s';
+  $('c-stale').textContent = c.stale ? 'No fresh numbers from TB; showing the last values' : 'live · 1s';
   const box = $('c-verdict');
   box.className = 'eq ' + c.verdict;
   const words = {
     ok: `${baht(c.merchantPostedSatang)} = ${baht(c.paidOrdersSatang)} · mismatches 0 ✓`,
-    settling: '결과를 쓰는 중 — 곧 맞춰집니다',
-    broken: `어긋남: mismatches ${c.mismatches} · double transfers ${c.doubleTransfers} ✗`,
-    unknown: '아직 TB에서 숫자를 받지 못했습니다',
+    settling: 'Writing results — totals will match shortly',
+    broken: `Mismatch: mismatches ${c.mismatches} · double transfers ${c.doubleTransfers} ✗`,
+    unknown: 'No numbers from TB yet',
   };
   box.replaceChildren(h('span', {}, 'Σ merchant posted = Σ paid orders · reconcile mismatches 0'), h('span', {}, words[c.verdict] ?? c.verdict));
 }
 
-// ── 폴링 ─────────────────────────────────────────────
+// ── Polling ──────────────────────────────────────────
 
 async function refresh() {
   try {
@@ -325,7 +325,7 @@ async function refresh() {
     $('pg-dot').className = 'dot up';
     renderStatus(status.body);
     state.orders = orders.body;
-    // 고른 주문이 없으면 가장 최근 주문의 타임라인을 보여 준다
+    // With no order selected, show the timeline of the most recent order
     state.selected ??= state.orders[0]?.id ?? null;
     renderOrders();
     renderConsistency(consistency.body);
@@ -333,7 +333,7 @@ async function refresh() {
     if (state.tab === 'operator') await refreshHalted();
     if (state.tab === 'scenarios') await refreshDemo();
   } catch (e) {
-    // 화면을 지우지 않고 점만 바꾼다. 다음 폴링에서 다시 시도한다
+    // Keep the screen as is and only change the dot. The next poll tries again
     $('pg-dot').className = 'dot down';
   }
 }
@@ -356,17 +356,17 @@ async function start() {
   $('inject').addEventListener('click', (e) => act(e.currentTarget, async () => {
     const { body } = await call('POST', API.postDemoBadPost);
     state.selected = body.id;
-    toast(`주문 #${body.id}에 잘못된 확정을 넣었습니다. 곧 멈춥니다 → Operator`);
+    toast(`Injected a bad post into order #${body.id}. It halts shortly → Operator`);
   }));
   $('double').addEventListener('click', (e) => doubleClick(e.currentTarget));
   $('burst').addEventListener('click', (e) => act(e.currentTarget, async () => {
     const { body } = await call('POST', API.postDemoBurst);
-    toast(`주문 ${body.orderIds.length}건을 넣었습니다`);
+    toast(`Placed ${body.orderIds.length} orders`);
   }));
 
   state.catalog = (await call('GET', API.getCatalog)).body;
   renderCatalog();
-  // 주소의 #operator, #scenarios로 그 탭을 바로 연다(README의 안내 링크)
+  // #operator or #scenarios in the URL opens that tab directly (the links in the README)
   const tab = location.hash.slice(1);
   if (['store', 'operator', 'scenarios'].includes(tab)) showTab(tab);
   await refresh();

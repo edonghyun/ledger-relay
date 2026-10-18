@@ -14,13 +14,16 @@ import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 
 /**
- * 릴레이의 health. TB가 끊겨도 상태는 UP이다: 접수는 TB 없이도 되는 것이 이 라이브러리의 요점이고, health가 DOWN이면
- * 부하 분산기나 오케스트레이터가 접수까지 막는다. TB 상태는 세부 항목 {@code ledger}로만 알린다. 저장소를 읽을 수 없을 때만
- * DOWN이다(PG 없이는 접수도 못 한다).
+ * Health of the relay. The status stays UP when TB is unreachable: the point of this library is that acceptance works
+ * without TB, and a DOWN health would make a load balancer or orchestrator block acceptance too. TB status is reported
+ * only in the {@code ledger} detail. The status is DOWN only when the store cannot be read (without PG, nothing can be
+ * accepted).
  *
- * <p>TB 확인은 health 요청을 붙잡지 않는다. 요청마다 조회를 하나 보내되(이미 하나가 가 있으면 보내지 않는다), 답은 기다리지
- * 않는다. 마지막으로 끝난 확인이 성공했고, 가 있는 확인이 {@code ledgerStaleAfter}보다 오래 답을 기다리지 않으면 UP이다. TB가 끊긴 동안 health가 probe
- * timeout에 걸려 앱이 서비스에서 빠지거나, 조회가 TB 클라이언트에 끝없이 쌓이지 않게 하려는 것이다.
+ * <p>The TB check does not hold up the health request. Each request sends one lookup (none if one is already
+ * outstanding) and does not wait for the answer. The result is UP when the last finished check succeeded and the
+ * outstanding check has not waited longer than {@code ledgerStaleAfter}. This keeps health from hitting the probe
+ * timeout while TB is unreachable, which would take the app out of service, and keeps lookups from piling up in the TB
+ * client without end.
  */
 public final class LedgerRelayHealthIndicator implements HealthIndicator {
 
@@ -33,7 +36,7 @@ public final class LedgerRelayHealthIndicator implements HealthIndicator {
     private Instant probeSentAt;
     private volatile boolean lastProbeSucceeded;
 
-    /** @param ledgerStaleAfter TB의 마지막 답이 이보다 오래됐으면 DOWN으로 본다 */
+    /** @param ledgerStaleAfter TB is considered DOWN if its last answer is older than this */
     public LedgerRelayHealthIndicator(CommandStore store, Transactions transactions, LedgerClient ledger,
             Duration ledgerStaleAfter) {
         this(store, transactions, ledger, ledgerStaleAfter, Instant::now);
@@ -67,9 +70,10 @@ public final class LedgerRelayHealthIndicator implements HealthIndicator {
     }
 
     /**
-     * TB 클라이언트에는 ping이 없어 이체 하나를 조회해 본다. 기다리지 않는다. 마지막으로 끝난 확인이 성공했고, 지금 가 있는 확인이
-     * {@code ledgerStaleAfter}보다 오래 답을 기다리고 있지 않으면 닿는다고 본다. "마지막 답이 지금부터 얼마 안인가"로 보면
-     * health를 그보다 드물게 부르는 환경(Kubernetes probe 기본 10초)에서 TB가 멀쩡해도 늘 DOWN이 된다(F40).
+     * The TB client has no ping, so the check looks up one transfer. It does not wait. TB counts as reachable when the
+     * last finished check succeeded and the current outstanding check has not waited longer than
+     * {@code ledgerStaleAfter}. Checking "how recent is the last answer" instead would always report DOWN, even with a
+     * healthy TB, in environments that call health less often than that (Kubernetes probe default: 10 seconds) (F40).
      */
     private synchronized boolean ledgerAnswers() {
         Instant now = clock.get();
@@ -84,7 +88,7 @@ public final class LedgerRelayHealthIndicator implements HealthIndicator {
             probe = null;
             lastProbeSucceeded = false;
         }
-        // 바로 답한 확인이면 그 결과, 아니면 직전에 끝난 확인의 결과다. 막 보낸 확인은 아직 늦지 않았다
+        // Result of a check that answered at once, else of the last finished check. A check just sent is not late yet
         return lastProbeSucceeded;
     }
 }

@@ -9,7 +9,10 @@ import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** 주문 표와 주문이 접수한 명령 표. 업무 판단은 하지 않는다({@link OrderService}, {@link OrderOutcomeHandler}가 한다). */
+/**
+ * The order table and the table of commands accepted for orders. It makes no business decisions
+ * ({@link OrderService} and {@link OrderOutcomeHandler} do).
+ */
 @Repository
 public class Orders {
 
@@ -23,8 +26,9 @@ public class Orders {
     }
 
     /**
-     * 주문을 넣는다. 같은 멱등 키의 주문이 있으면 넣지 않고 비어 있는 값을 돌려준다. 그 키로 커밋 중인 트랜잭션이 있으면 끝날 때까지
-     * 유일 인덱스에서 기다린다. 그래서 동시에 온 같은 요청 중 하나만 넣는다(F38).
+     * Inserts an order. If an order with the same idempotency key exists, inserts nothing and returns empty. If another
+     * transaction with that key is committing, waits on the unique index until it finishes. So of identical concurrent
+     * requests only one inserts (F38).
      */
     Optional<ShopOrder> insertIfAbsent(String idempotencyKey, long buyerId, String productCode, long amountSatang) {
         return sql.sql("INSERT INTO shop_order (idempotency_key, buyer_id, product_code, amount_satang, state) "
@@ -41,13 +45,13 @@ public class Orders {
                 .query(Orders::order).optional();
     }
 
-    /** 주문 행을 잠그고 읽는다. 상태를 고치고 같은 키에 접수하기 전에 먼저 부른다(F33의 순서). */
+    /** Locks and reads the order row. Called before changing the state and submitting on the same key (F33). */
     Optional<ShopOrder> lock(long id) {
         return sql.sql("SELECT " + COLUMNS + " FROM shop_order WHERE id = ? FOR UPDATE").param(id).query(Orders::order)
                 .optional();
     }
 
-    /** 최신 주문부터. */
+    /** Newest orders first. */
     public List<ShopOrder> recent(int limit) {
         return sql.sql("SELECT " + COLUMNS + " FROM shop_order ORDER BY id DESC LIMIT ?").param(limit).query(Orders::order)
                 .list();
@@ -63,20 +67,20 @@ public class Orders {
                 .params(commandId, orderId, kind.name()).update();
     }
 
-    /** 이 명령을 접수한 주문. 이 앱이 만든 명령이 아니면 비어 있다. */
+    /** The order that submitted this command. Empty if this app did not create the command. */
     public Optional<OrderCommand> commandOf(String commandId) {
         return sql.sql("SELECT order_id, command_id, kind FROM shop_order_command WHERE command_id = ?").param(commandId)
                 .query(Orders::command).optional();
     }
 
-    /** 주문의 명령을 순번 순서로. */
+    /** The commands of an order, in seq order. */
     public List<OrderCommand> commandsOf(long orderId) {
         return sql.sql("SELECT oc.order_id, oc.command_id, oc.kind FROM shop_order_command oc "
                         + "JOIN ledger_command c ON c.command_id = oc.command_id WHERE oc.order_id = ? ORDER BY c.seq")
                 .param(orderId).query(Orders::command).list();
     }
 
-    /** 주문의 명령 중 멈춘(HALTED) 것이 있는가. 화면의 halted 칩. */
+    /** Whether any command of the order is HALTED. Drives the halted chip in the UI. */
     public boolean isHalted(long orderId) {
         return sql.sql("SELECT EXISTS (SELECT 1 FROM shop_order_command oc JOIN ledger_command c ON c.command_id = "
                 + "oc.command_id WHERE oc.order_id = ? AND c.state = 'HALTED')").param(orderId).query(Boolean.class).single();

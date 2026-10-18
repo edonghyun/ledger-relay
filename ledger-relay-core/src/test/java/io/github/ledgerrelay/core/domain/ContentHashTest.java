@@ -20,16 +20,16 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-@DisplayName("내용 해시 — 정규화, G7 내용 무결성")
+@DisplayName("Content hash — normalization, G7 content integrity")
 class ContentHashTest {
 
     @Nested
     @Order(1)
-    @DisplayName("같은 내용이면")
+    @DisplayName("When the content is the same")
     class SameContent {
 
         @Test
-        @DisplayName("빌더에 값을 넣는 순서가 달라도 해시는 같다")
+        @DisplayName("The hash is the same whatever order the values go into the builder")
         void builderOrderDoesNotMatter() {
             // given
             LedgerCommand one = LedgerCommand.transfer("pay-1").orderingKey("order-42")
@@ -42,7 +42,7 @@ class ContentHashTest {
         }
 
         @Test
-        @DisplayName("commandId가 달라도 해시는 같다 — commandId는 비교 기준이지 내용이 아니다")
+        @DisplayName("The hash is the same even if commandId differs — commandId is what is compared on, not content")
         void commandIdIsNotContent() {
             // given
             LedgerCommand one = aTransfer("pay-1").build();
@@ -53,7 +53,7 @@ class ContentHashTest {
         }
 
         @Test
-        @DisplayName("금액을 생략한 확정과 AMOUNT_MAX를 적은 확정은 같은 해시다")
+        @DisplayName("A post without an amount and a post with AMOUNT_MAX have the same hash")
         void omittedPostAmountEqualsAmountMax() {
             // given
             LedgerCommand omitted = aPost().build();
@@ -64,7 +64,7 @@ class ContentHashTest {
         }
 
         @Test
-        @DisplayName("user_data를 생략한 이체와 0을 적은 이체는 같은 해시다")
+        @DisplayName("A transfer without user_data and a transfer with 0 written have the same hash")
         void omittedUserDataEqualsZero() {
             // given
             LedgerCommand omitted = aTransfer("pay-1").build();
@@ -77,63 +77,63 @@ class ContentHashTest {
 
     @Nested
     @Order(2)
-    @DisplayName("내용이 하나라도 다르면")
+    @DisplayName("When even one part of the content differs")
     class DifferentContent {
 
         @ParameterizedTest(name = "{argumentSetName}")
         @MethodSource("oneFieldApart")
-        @DisplayName("해시가 다르다")
+        @DisplayName("The hash differs")
         void hashDiffers(LedgerCommand one, LedgerCommand other, String field) {
             assertDifferentHash(one, other);
         }
 
         static Stream<Arguments> oneFieldApart() {
             return Stream.of(
-                    argumentSet("kind가 다르면 (이체 vs 예약)",
+                    argumentSet("different kind (transfer vs reservation)",
                             aTransfer("c").build(), aReserveLikeTheTransfer("c").build(), "kind"),
-                    argumentSet("orderingKey가 다르면",
+                    argumentSet("different orderingKey",
                             aTransfer("c").build(), aTransfer("c").orderingKey("order-43").build(), "orderingKey"),
-                    argumentSet("보내는 계좌가 다르면",
+                    argumentSet("different debit account",
                             aTransfer("c").build(), aTransfer("c").debit(1003).build(), "debitAccountId"),
-                    argumentSet("받는 계좌가 다르면",
+                    argumentSet("different credit account",
                             aTransfer("c").build(), aTransfer("c").credit(2003).build(), "creditAccountId"),
-                    argumentSet("금액이 다르면",
+                    argumentSet("different amount",
                             aTransfer("c").build(), aTransfer("c").amount(501).build(), "amount"),
-                    argumentSet("ledger가 다르면",
+                    argumentSet("different ledger",
                             aTransfer("c").build(), aTransfer("c").ledger(2).build(), "ledger"),
-                    argumentSet("code가 다르면",
+                    argumentSet("different code",
                             aTransfer("c").build(), aTransfer("c").code(11).build(), "code"),
-                    argumentSet("code가 다르면 (10 vs 266: 하위 8비트가 같은 값)",
+                    argumentSet("different code (10 vs 266: the same low 8 bits)",
                             aTransfer("c").build(), aTransfer("c").code(266).build(), "code"),
-                    argumentSet("timeoutSeconds가 다르면",
+                    argumentSet("different timeoutSeconds",
                             aReserveLikeTheTransfer("c").timeoutSeconds(30).build(),
                             aReserveLikeTheTransfer("c").timeoutSeconds(31).build(), "timeoutSeconds"),
-                    argumentSet("reservation이 다르면",
+                    argumentSet("different reservation",
                             aPost().build(), aPost().reservation("hold-2").build(), "reservationCommandId"),
-                    argumentSet("user_data_64가 다르면",
+                    argumentSet("different user_data_64",
                             aTransfer("c").build(), aTransfer("c").userData64(7).build(), "userData64"),
-                    argumentSet("user_data_32가 다르면",
+                    argumentSet("different user_data_32",
                             aTransfer("c").build(), aTransfer("c").userData32(7).build(), "userData32"));
         }
 
         @Test
-        @DisplayName("위 표는 해시 필드를 하나도 빠뜨리지 않는다")
+        @DisplayName("The table above leaves out no hashed field")
         void tableCoversEveryHashedField() {
-            // given: 표의 행마다 셋째 칸이 그 행이 바꾼 필드다
+            // given: the third column of each row is the field that row changes
             List<Object> coveredByTheTable = oneFieldApart().map(row -> row.get()[2]).toList();
 
             // then
-            assertThat(coveredByTheTable).as("표가 바꿔 보는 필드").containsAll(ContentHash.HASHED_FIELDS);
+            assertThat(coveredByTheTable).as("fields the table varies").containsAll(ContentHash.HASHED_FIELDS);
         }
     }
 
     @Nested
     @Order(3)
-    @DisplayName("해시는 DB에 저장되므로 v1 인코딩은 고정이다 — 바꾸려면 VERSION을 올린다")
+    @DisplayName("The hash is stored in the DB, so the v1 encoding is fixed — changing it requires raising VERSION")
     class FixedEncoding {
 
         @Test
-        @DisplayName("기준 이체(order-42, 1001 → 2002, 500, ledger 1, code 10)의 해시는 13ff1a83…다")
+        @DisplayName("The hash of the base transfer (order-42, 1001 → 2002, 500, ledger 1, code 10) is 13ff1a83…")
         void knownVectorForTheReferenceTransfer() {
             // when
             String hash = ContentHash.of(aTransfer("pay-1").build());
@@ -143,7 +143,7 @@ class ContentHashTest {
         }
 
         @Test
-        @DisplayName("user_data는 부호 없는 정수로 적는다: -1은 2^64-1과 2^32-1로 읽힌다")
+        @DisplayName("user_data is written as unsigned integers: -1 reads as 2^64-1 and 2^32-1")
         void userDataIsHashedUnsigned() {
             // when
             LedgerCommand command = aTransfer("pay-1").userData64(-1L).userData32(-1).build();
@@ -166,9 +166,10 @@ class ContentHashTest {
         }
 
         @Test
-        @DisplayName("한글 순서 키는 UTF-8 바이트 길이로 적는다: \"주문-42\"는 9바이트다(한글 두 글자 3바이트씩 + 3)")
+        @DisplayName("A Hangul ordering key is written with its UTF-8 byte length: two Hangul syllables plus \"-42\" make 9 bytes (3 bytes per syllable + 3)")
         void nonAsciiValuesUseUtf8ByteLength() {
             // when
+            // The Hangul key is test data: each syllable is 3 bytes in UTF-8.
             LedgerCommand command = aTransfer("pay-1").orderingKey("주문-42").build();
 
             // then
@@ -189,7 +190,7 @@ class ContentHashTest {
         }
 
         @Test
-        @DisplayName("금액을 생략한 확정(hold-1 전액)은 계좌 0, AMOUNT_MAX 39자리, reservation을 적는다")
+        @DisplayName("A post without an amount (all of hold-1) is written with accounts 0, the 39-digit AMOUNT_MAX, and the reservation")
         void knownVectorForAFullPost() {
             // when
             LedgerCommand command = aPost().build();
@@ -212,7 +213,7 @@ class ContentHashTest {
         }
 
         @Test
-        @DisplayName("해제(hold-1)는 kind \"void\"를 로캘과 무관하게 소문자로 적는다")
+        @DisplayName("A void (hold-1) writes kind \"void\" in lower case regardless of locale")
         void knownVectorForAVoid() {
             // when
             LedgerCommand command = LedgerCommand.voidReservation("release-1").orderingKey("order-42")
@@ -236,7 +237,7 @@ class ContentHashTest {
         }
 
         @Test
-        @DisplayName("만료 2^32-1초 예약은 timeout을 int로 자르지 않고 10자리로 적는다")
+        @DisplayName("A reservation expiring in 2^32-1 seconds writes the timeout with 10 digits without truncating it to int")
         void knownVectorForTheLongestReserveTimeout() {
             // when
             LedgerCommand command = aReserveLikeTheTransfer("hold-1").timeoutSeconds(4_294_967_295L).build();
@@ -259,7 +260,7 @@ class ContentHashTest {
         }
 
         @Test
-        @DisplayName("해시 필드는 명령의 모든 필드(commandId 제외)와 정확히 같다 — 새 필드가 해시에서 빠지지 않게")
+        @DisplayName("The hashed fields are exactly the command's fields (except commandId) — so a new field is not left out of the hash")
         void hashedFieldsMatchTheCommandRecord() {
             // given
             List<String> commandFields = Arrays.stream(LedgerCommand.class.getRecordComponents())
@@ -272,28 +273,28 @@ class ContentHashTest {
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ──────────────────────────────────────────
 
-    /** 기준 이체: order-42 키에서 1001 → 2002로 500, ledger 1, code 10. */
+    /** Base transfer: 500 from 1001 to 2002 on key order-42, ledger 1, code 10. */
     private static LedgerCommand.Builder aTransfer(String commandId) {
         return LedgerCommand.transfer(commandId).orderingKey("order-42")
                 .debit(1001).credit(2002).amount(500).ledger(1).code(10);
     }
 
-    /** 기준 이체와 같은 값의 예약. */
+    /** A reservation with the same values as the base transfer. */
     private static LedgerCommand.Builder aReserveLikeTheTransfer(String commandId) {
         return LedgerCommand.reserve(commandId).orderingKey("order-42")
                 .debit(1001).credit(2002).amount(500).ledger(1).code(10);
     }
 
-    /** 기준 확정: hold-1 전액 확정. */
+    /** Base post: full post of hold-1. */
     private static LedgerCommand.Builder aPost() {
         return LedgerCommand.post("capture-1").orderingKey("order-42").reservation("hold-1");
     }
 
     /**
-     * 손으로 쓴 v1 정규 텍스트의 SHA-256과 같은지 본다. 기대값은 텍스트이므로, 실패하면 어느 줄이 바뀌었는지 독자가 직접
-     * 읽을 수 있다. 텍스트의 마지막 줄바꿈이 인코딩 끝의 '\n'이다.
+     * Checks against the SHA-256 of the hand-written v1 canonical text. The expected value is text, so when it fails
+     * the reader can see which line changed. The text's final newline is the '\n' at the end of the encoding.
      */
     private static void assertEncodedAs(LedgerCommand command, String canonicalText) {
         assertPinnedHash(ContentHash.of(command), sha256Hex(canonicalText));
@@ -307,23 +308,26 @@ class ContentHashTest {
         }
     }
 
-    /** 고정 해시는 손으로 계산한 값이다. 다르다면 기대값을 고치지 말고 인코딩이 왜 바뀌었는지 본다. */
+    /**
+     * The pinned hash was computed by hand. If it differs, do not fix the expected value; find out why the encoding
+     * changed.
+     */
     private static void assertPinnedHash(String actual, String pinned) {
         assertThat(actual)
-                .as("v1 인코딩이 바뀌었다. 이미 저장된 content_hash와의 비교가 깨진다 — "
-                        + "의도한 변경이면 ContentHash.VERSION을 올리고 이전 버전 비교 방법을 정한다")
+                .as("the v1 encoding changed, which breaks comparison with content_hash values already stored — "
+                        + "if the change is intended, raise ContentHash.VERSION and decide how to compare with the previous version")
                 .isEqualTo(pinned);
     }
 
     private static void assertSameHash(LedgerCommand one, LedgerCommand other) {
         assertThat(ContentHash.of(other))
-                .as("같은 내용으로 인정되기(같은 해시)를 기대했다: %s / %s", one, other)
+                .as("expected the same content (same hash): %s / %s", one, other)
                 .isEqualTo(ContentHash.of(one));
     }
 
     private static void assertDifferentHash(LedgerCommand one, LedgerCommand other) {
         assertThat(ContentHash.of(other))
-                .as("다른 내용으로 구분되기(다른 해시)를 기대했다: %s / %s", one, other)
+                .as("expected different content (different hash): %s / %s", one, other)
                 .isNotEqualTo(ContentHash.of(one));
     }
 }

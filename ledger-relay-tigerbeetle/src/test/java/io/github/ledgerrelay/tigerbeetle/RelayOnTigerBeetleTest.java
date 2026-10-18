@@ -42,8 +42,11 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-/** 메모리 저장소 + 실제 TB 위에서 접수부터 결과까지. PG와 TB를 함께 띄우는 확인은 spring-boot 모듈의 통합 테스트와 샘플 앱에서 한다. */
-@DisplayName("실제 TB 위의 워커 한 바퀴 —, F23")
+/**
+ * From acceptance to result on an in-memory store and a real TB. Running PG and TB together is checked by the
+ * integration test in the spring-boot module and by the sample app.
+ */
+@DisplayName("One worker cycle on a real TB — F23")
 class RelayOnTigerBeetleTest {
 
     static final Duration BACKOFF_MAX = Duration.ofSeconds(1);
@@ -85,13 +88,13 @@ class RelayOnTigerBeetleTest {
         handler = new RecordingHandler();
         relay = new CommandLifecycle(storage.keys(), storage.store(), storage.transactions(),
                 () -> UInt128.asBigInteger(UInt128.id()), handler, new Backoff(Duration.ofMillis(200), BACKOFF_MAX));
-        payer = ledger.openAccount("구매자");
-        payee = ledger.openAccount("가맹점");
+        payer = ledger.openAccount("buyer");
+        payee = ledger.openAccount("merchant");
     }
 
     @Nested
     @Order(1)
-    @DisplayName("앱이 접수한 명령을 워커가 한 바퀴 돌리면")
+    @DisplayName("When the worker runs a cycle over commands the app accepted")
     class OneCycle {
 
         RelayWorker worker;
@@ -102,7 +105,7 @@ class RelayOnTigerBeetleTest {
         }
 
         @Test
-        @DisplayName("이체는 돈을 옮기고 적용됨으로 끝나며, 핸들러가 한 번 실행된다")
+        @DisplayName("A transfer moves money and ends as applied, and the handler runs once")
         void aTransferMovesMoneyAndEndsApplied() {
             // given
             accepted(transfer("pay-1", payer, payee, 500));
@@ -112,12 +115,12 @@ class RelayOnTigerBeetleTest {
 
             // then
             assertState("pay-1", State.APPLIED);
-            assertThat(handler.completedFor("pay-1")).as("pay-1의 핸들러 실행").hasSize(1);
+            assertThat(handler.completedFor("pay-1")).as("handler runs for pay-1").hasSize(1);
             assertMovedExactly(ledger, payer, payee, 500);
         }
 
         @Test
-        @DisplayName("예약을 보낸 뒤 그 확정을 보내면 예약 금액 전부가 확정된다")
+        @DisplayName("Sending a reservation and then its post posts the full reserved amount")
         void aReservationThenItsPostCaptureTheAmount() {
             // given
             accepted(LedgerCommand.reserve("hold-1").orderingKey("order-1").debit(accountIdOf(payer))
@@ -135,10 +138,10 @@ class RelayOnTigerBeetleTest {
         }
 
         @Test
-        @DisplayName("잔액이 부족한 지갑의 이체는 거절됨으로 끝나고, 돈은 움직이지 않는다")
+        @DisplayName("A transfer from a wallet with insufficient balance ends as rejected, and no money moves")
         void insufficientFundsEndRejected() {
             // given
-            Account wallet = ledger.openAccountThatCannotOverdraw("지갑");
+            Account wallet = ledger.openAccountThatCannotOverdraw("wallet");
             accepted(transfer("pay-1", wallet, payee, 100));
 
             // when
@@ -147,15 +150,15 @@ class RelayOnTigerBeetleTest {
             // then
             assertState("pay-1", State.REJECTED);
             assertThat(relay.status("pay-1").orElseThrow().rejection().orElseThrow().tbCode())
-                    .as("pay-1의 거절 코드").isEqualTo(ExceedsCredits);
+                    .as("rejection code of pay-1").isEqualTo(ExceedsCredits);
             assertNothingMoved(ledger, wallet);
         }
 
         @Test
-        @DisplayName("이체·예약·확정·거절이 섞여 처리된 뒤 대사하면 어긋남이 없다")
+        @DisplayName("Reconciliation after a mix of transfer, reservation, post and rejection finds no mismatch")
         void reconcilingAfterRealTrafficFindsNoMismatch() {
             // given
-            Account wallet = ledger.openAccountThatCannotOverdraw("지갑");
+            Account wallet = ledger.openAccountThatCannotOverdraw("wallet");
             accepted(transfer("pay-1", payer, payee, 500));
             accepted(LedgerCommand.reserve("hold-1").orderingKey("order-2").debit(accountIdOf(payer))
                     .credit(accountIdOf(payee)).amount(300).ledger(1).code(1).timeoutSeconds(60).build());
@@ -171,15 +174,15 @@ class RelayOnTigerBeetleTest {
             ReconciliationReport report = operator.reconcile(0, 100);
 
             // then
-            assertThat(report.mismatches()).as("어긋남").isEmpty();
-            assertThat(report.checked()).as("확인한 명령").isEqualTo(4);
-            assertThat(report.matched()).as("일치").isEqualTo(4);
+            assertThat(report.mismatches()).as("mismatches").isEmpty();
+            assertThat(report.checked()).as("commands checked").isEqualTo(4);
+            assertThat(report.matched()).as("matched").isEqualTo(4);
         }
     }
 
     @Nested
     @Order(2)
-    @DisplayName("TB 응답이 유실되면 — F23")
+    @DisplayName("When a TB reply is lost — F23")
     class LostReplies {
 
         ProxiedTigerBeetle proxied;
@@ -196,9 +199,9 @@ class RelayOnTigerBeetleTest {
         }
 
         @Test
-        @DisplayName("요청은 TB에 닿고 응답만 사라졌으면, 같은 이체 ID로 다시 보내 이미 기록됨으로 끝나고 돈은 한 번만 움직인다")
+        @DisplayName("If the request reached TB and only the reply was lost, resending with the same transfer id ends as already recorded and money moves only once")
         void aLostReplyIsRetriedWithTheSameTransferIdAndMovesMoneyOnce() {
-            // given: 첫 요청은 TB에 닿지만 응답은 워커에게 오지 않는다
+            // given: the first request reaches TB, but its reply never reaches the worker
             ReplyLosingLedger losing = new ReplyLosingLedger(new TigerBeetleLedgerClient(workerClient));
             RelayWorker worker = workerOn(losing);
             accepted(transfer("pay-1", payer, payee, 500));
@@ -211,18 +214,18 @@ class RelayOnTigerBeetleTest {
             // then
             assertState("pay-1", State.APPLIED);
             assertMovedExactly(ledger, payer, payee, 500);
-            assertThat(losing.transferIdsSent()).as("두 요청의 이체 ID").hasSize(2).containsOnly(losing.transferIdsSent().get(0));
-            assertThat(losing.deliveredReplies()).as("두 번째 요청의 TB 결과").containsExactly(List.of(Exists));
+            assertThat(losing.transferIdsSent()).as("transfer ids of the two requests").hasSize(2).containsOnly(losing.transferIdsSent().get(0));
+            assertThat(losing.deliveredReplies()).as("TB results of the second request").containsExactly(List.of(Exists));
         }
 
         @Test
-        @DisplayName("연결이 끊겼으면 timeout으로 되돌리고, 복구된 뒤 다시 보내 적용됨으로 끝나며 돈은 한 번만 움직인다")
+        @DisplayName("If the connection is cut, the command is returned on timeout, resent after recovery, ends as applied, and money moves only once")
         void aCutConnectionIsRetriedAfterItIsRestored() throws Exception {
-            // given: 프록시 뒤의 TB에 계좌를 열고 연결을 끊었다
+            // given: accounts are opened on the TB behind the proxy, and the connection is cut
             proxied = ProxiedTigerBeetle.start();
             proxiedLedger = new TigerBeetleTestLedger(proxied.newClient());
-            Account buyer = proxiedLedger.openAccount("구매자");
-            Account shop = proxiedLedger.openAccount("가맹점");
+            Account buyer = proxiedLedger.openAccount("buyer");
+            Account shop = proxiedLedger.openAccount("merchant");
             com.tigerbeetle.Client throughProxy = proxied.newClient();
             try {
                 RelayWorker worker = workerOn(new TigerBeetleLedgerClient(throughProxy));
@@ -231,8 +234,9 @@ class RelayOnTigerBeetleTest {
                 worker.runOnce();
                 assertState("pay-1", State.IN_PROGRESS);
 
-                // when: 연결을 복구하고, 적용될 때까지 backoff를 지나며 다시 돈다. TB 클라이언트가 다시 붙고 끊기기 전의
-                // 요청을 먼저 보내는 데 걸리는 시간은 정해져 있지 않아, submit-timeout 한 번에 기대지 않는다
+                // when: the connection is restored, and cycles run again past backoff until applied. How long the TB
+                // client takes to reconnect and send the request from before the cut is not fixed, so this does not
+                // rely on a single submit-timeout
                 proxied.restoreConnection();
                 long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
                 do {
@@ -249,7 +253,7 @@ class RelayOnTigerBeetleTest {
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Vocabulary used only in this file ──────────────────────────────────────────
 
     private RelayWorker workerOn(LedgerClient client) {
         return new RelayWorker(relay, client, new InFlightLimit(SETTINGS.maxInFlight()), SETTINGS, WorkerEvents.NONE);
@@ -269,12 +273,13 @@ class RelayOnTigerBeetleTest {
     }
 
     private void assertState(String commandId, State expected) {
-        assertThat(relay.status(commandId).orElseThrow().state()).as("%s의 조회 상태", commandId).isEqualTo(expected);
+        assertThat(relay.status(commandId).orElseThrow().state()).as("queried state of %s", commandId).isEqualTo(expected);
     }
 
     /**
-     * 첫 요청은 실제 TB에 보내 기록될 때까지 기다리지만, 워커에게는 끝나지 않는 응답을 돌려준다. 요청은 TB에 닿았는데
-     * 응답만 사라진 상황이다. 그다음 요청부터는 그대로 전하고, 받은 결과를 남긴다.
+     * Sends the first request to the real TB and waits until it is recorded, but returns a reply that never completes
+     * to the worker: the request reached TB and only the reply was lost. Later requests pass through unchanged, and
+     * their results are kept.
      */
     private static final class ReplyLosingLedger implements LedgerClient {
 

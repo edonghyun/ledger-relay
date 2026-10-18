@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("가짜 TB와 이벤트 기록 — 워커 테스트가 믿는 도구 (docs/testing.md)")
+@DisplayName("Fake TB and event recorder — tools the worker tests rely on (docs/testing.md)")
 class FakeLedgerTest {
 
     FakeLedger ledger;
@@ -30,21 +30,21 @@ class FakeLedgerTest {
 
     @Nested
     @Order(1)
-    @DisplayName("가짜 TB에 이체를 보내면")
+    @DisplayName("When transfers are sent to the fake TB")
     class Submitting {
 
         @Test
-        @DisplayName("정하지 않은 이체는 기록된(Created) 것으로 끝난다")
+        @DisplayName("A transfer with no scripted answer ends as recorded (Created)")
         void unscriptedTransfersAreCreated() {
             // when
             CompletableFuture<List<LedgerResultCode>> reply = ledger.submit(List.of(submission(101), submission(102)));
 
             // then
-            assertThat(reply).as("가짜 TB의 응답").isCompletedWithValue(List.of(Created, Created));
+            assertThat(reply).as("fake TB reply").isCompletedWithValue(List.of(Created, Created));
         }
 
         @Test
-        @DisplayName("결과를 정해 둔 이체는 그 결과로 끝난다")
+        @DisplayName("A transfer with a scripted result ends with that result")
         void aScriptedTransferGetsItsAnswer() {
             // given
             ledger.answer(BigInteger.valueOf(102), ExceedsCredits);
@@ -53,41 +53,41 @@ class FakeLedgerTest {
             CompletableFuture<List<LedgerResultCode>> reply = ledger.submit(List.of(submission(101), submission(102)));
 
             // then
-            assertThat(reply).as("가짜 TB의 응답").isCompletedWithValue(List.of(Created, ExceedsCredits));
+            assertThat(reply).as("fake TB reply").isCompletedWithValue(List.of(Created, ExceedsCredits));
         }
 
         @Test
-        @DisplayName("응답을 붙잡으면 풀 때까지 끝나지 않는다")
+        @DisplayName("A held reply does not end until it is released")
         void heldRepliesDoNotEndUntilReleased() {
             // given
             ledger.holdReplies();
             CompletableFuture<List<LedgerResultCode>> reply = ledger.submit(List.of(submission(101)));
-            assertThat(reply).as("붙잡힌 응답").isNotDone();
+            assertThat(reply).as("held reply").isNotDone();
 
             // when
             ledger.releaseHeldReplies();
 
             // then
-            assertThat(reply).as("풀어 준 응답").isCompletedWithValue(List.of(Created));
+            assertThat(reply).as("released reply").isCompletedWithValue(List.of(Created));
         }
 
         @Test
-        @DisplayName("다음 요청을 실패시키면 그 요청은 그 예외로 끝난다")
+        @DisplayName("When the next request is set to fail, that request ends with that exception")
         void aFailedRequestEndsExceptionally() {
             // given
-            IllegalStateException cut = new IllegalStateException("끊김");
+            IllegalStateException cut = new IllegalStateException("cut off");
             ledger.failNext(cut);
 
             // when
             CompletableFuture<List<LedgerResultCode>> reply = ledger.submit(List.of(submission(101)));
 
             // then
-            assertThat(reply).as("실패시킨 요청").isCompletedExceptionally();
+            assertThat(reply).as("request set to fail").isCompletedExceptionally();
             assertThat(reply.exceptionNow()).isSameAs(cut);
         }
 
         @Test
-        @DisplayName("결과 개수를 정하면 다음 요청에 그 개수만큼만 답한다")
+        @DisplayName("When a result count is set, the next request gets only that many answers")
         void aReplyCanCarryTheWrongCount() {
             // given
             ledger.replyWithCount(1);
@@ -96,11 +96,11 @@ class FakeLedgerTest {
             CompletableFuture<List<LedgerResultCode>> reply = ledger.submit(List.of(submission(101), submission(102)));
 
             // then
-            assertThat(reply).as("개수를 줄인 응답").isCompletedWithValue(List.of(Created));
+            assertThat(reply).as("reply with fewer results").isCompletedWithValue(List.of(Created));
         }
 
         @Test
-        @DisplayName("결과 개수를 요청보다 많게 정하면 남는 몫은 Created로 채운다")
+        @DisplayName("When the result count is set higher than the request, the extra answers are filled with Created")
         void aReplyCanCarryTooManyResults() {
             // given
             ledger.replyWithCount(3);
@@ -109,25 +109,25 @@ class FakeLedgerTest {
             CompletableFuture<List<LedgerResultCode>> reply = ledger.submit(List.of(submission(101)));
 
             // then
-            assertThat(reply).as("개수를 늘린 응답").isCompletedWithValue(List.of(Created, Created, Created));
+            assertThat(reply).as("reply with more results").isCompletedWithValue(List.of(Created, Created, Created));
         }
 
         @Test
-        @DisplayName("다음 요청을 보내는 자리에서 던지게 하면 future 없이 그 예외가 난다")
+        @DisplayName("When the next submit is set to throw on the spot, the exception is thrown without a future")
         void aSubmitCanThrowSynchronously() {
             // given
-            IllegalStateException failure = new IllegalStateException("배치를 채우다 실패했다");
+            IllegalStateException failure = new IllegalStateException("failed while filling the batch");
             ledger.throwOnNextSubmit(failure);
 
             // when
             Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(() -> ledger.submit(List.of(submission(101))));
 
             // then
-            assertThat(thrown).as("보내는 자리의 예외").isSameAs(failure);
+            assertThat(thrown).as("exception at the point of sending").isSameAs(failure);
         }
 
         @Test
-        @DisplayName("받은 요청을 순서대로 남긴다 — 붙잡힌 요청도 남는다")
+        @DisplayName("It records the requests it receives in order — held requests are recorded too")
         void requestsAreRecordedInOrder() {
             // given
             ledger.submit(List.of(submission(101)));
@@ -137,18 +137,18 @@ class FakeLedgerTest {
             ledger.submit(List.of(submission(102), submission(103)));
 
             // then
-            assertThat(ledger.requests()).as("받은 요청")
+            assertThat(ledger.requests()).as("received requests")
                     .containsExactly(List.of(submission(101)), List.of(submission(102), submission(103)));
         }
     }
 
     @Nested
     @Order(2)
-    @DisplayName("이벤트 기록 대역에 이벤트를 보내면")
+    @DisplayName("When events are sent to the event-recording double")
     class RecordingEvents {
 
         @Test
-        @DisplayName("이름과 인자를 받은 순서대로 남긴다")
+        @DisplayName("It records names and arguments in the order received")
         void recordsEventsWithTheirArguments() {
             // given
             RecordingWorkerEvents events = new RecordingWorkerEvents();
@@ -159,7 +159,7 @@ class FakeLedgerTest {
             events.ledgerUnavailable(new IllegalStateException());
 
             // then
-            assertThat(events.events()).as("남은 이벤트")
+            assertThat(events.events()).as("recorded events")
                     .containsExactly("halted:capture-1", "submitted:3", "ledgerUnavailable");
         }
     }

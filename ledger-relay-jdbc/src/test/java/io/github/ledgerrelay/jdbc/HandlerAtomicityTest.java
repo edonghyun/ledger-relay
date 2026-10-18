@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-@DisplayName("DB에 쓰는 결과 반영 핸들러 — G6")
+@DisplayName("Outcome handler that writes to the DB — G6")
 class HandlerAtomicityTest {
 
     static final Duration LEASE = Duration.ofSeconds(30);
@@ -49,11 +49,11 @@ class HandlerAtomicityTest {
 
     @Nested
     @Order(1)
-    @DisplayName("핸들러가 끝까지 실행되면")
+    @DisplayName("When the handler runs to completion")
     class WhenTheHandlerCompletes {
 
         @Test
-        @DisplayName("결과와 앱 테이블의 기록이 함께 남는다")
+        @DisplayName("The result and the app table row are both kept")
         void theResultAndTheAppRowCommitTogether() {
             // when
             relay.complete(pay1, LedgerResultCode.Created);
@@ -66,11 +66,11 @@ class HandlerAtomicityTest {
 
     @Nested
     @Order(2)
-    @DisplayName("핸들러가 앱 테이블에 쓴 뒤 던지면")
+    @DisplayName("When the handler throws after writing to the app table")
     class WhenTheHandlerThrowsAfterWriting {
 
         @Test
-        @DisplayName("결과도 앱 테이블의 기록도 남지 않는다 — 반쯤 남지 않는다")
+        @DisplayName("Neither the result nor the app table row is kept — nothing is left half done")
         void neitherTheResultNorTheAppRowRemains() {
             // given
             handler.failAfterWriteOnce();
@@ -84,7 +84,7 @@ class HandlerAtomicityTest {
         }
 
         @Test
-        @DisplayName("다시 잡아 같은 결과로 끝내면 적용으로 끝나고 앱 테이블의 기록은 정확히 하나다 — 핸들러 효과가 한 번만 남는다")
+        @DisplayName("Claiming again and completing with the same result ends as applied with exactly one app table row — the handler's effect is kept once")
         void retryingLeavesExactlyOneAppRow() {
             // given
             handler.failAfterWriteOnce();
@@ -102,15 +102,15 @@ class HandlerAtomicityTest {
     }
 
     private void assertQueryState(String commandId, State expected) {
-        assertThat(relay.status(commandId).orElseThrow().state()).as("%s의 조회 상태", commandId).isEqualTo(expected);
+        assertThat(relay.status(commandId).orElseThrow().state()).as("query state of %s", commandId).isEqualTo(expected);
     }
 
     private void assertWalletEvents(String commandId, String... states) {
-        assertThat(walletEvents(commandId)).as("wallet_event에 남은 %s의 기록", commandId).containsExactly(states);
+        assertThat(walletEvents(commandId)).as("wallet_event rows of %s", commandId).containsExactly(states);
     }
 
     private void assertNoWalletEvent(String commandId) {
-        assertThat(walletEvents(commandId)).as("wallet_event에 %s의 기록이 없기를 기대했다", commandId).isEmpty();
+        assertThat(walletEvents(commandId)).as("expected no wallet_event row of %s", commandId).isEmpty();
     }
 
     private List<String> walletEvents(String commandId) {
@@ -118,7 +118,7 @@ class HandlerAtomicityTest {
                 .param("id", commandId).query(String.class).list();
     }
 
-    /** 결과를 앱 테이블 wallet_event에 쓰는 핸들러 대역. command_id가 기본 키라 두 번 쓰면 실패한다. */
+    /** Handler stand-in that writes the result to the app table wallet_event. command_id is the primary key, so a second write fails. */
     private static final class WalletEventHandler implements LedgerOutcomeHandler {
 
         private final DataSource dataSource;
@@ -134,12 +134,12 @@ class HandlerAtomicityTest {
 
         @Override
         public void onCompleted(CommandStatus outcome) {
-            // Spring이 묶어 둔 트랜잭션 커넥션으로 쓴다: 결과 기록과 한 트랜잭션이다
+            // Writes on the transaction connection Spring has bound: one transaction with writing the result
             JdbcClient.create(dataSource).sql("INSERT INTO wallet_event (command_id, state) VALUES (:id, :state)")
                     .param("id", outcome.commandId()).param("state", outcome.state().name()).update();
             if (failAfterWrite) {
                 failAfterWrite = false;
-                throw new IllegalStateException("핸들러가 쓴 뒤 일부러 실패한다");
+                throw new IllegalStateException("the handler fails on purpose after writing");
             }
         }
     }

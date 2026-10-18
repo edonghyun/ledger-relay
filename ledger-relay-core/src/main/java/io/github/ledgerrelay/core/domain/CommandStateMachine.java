@@ -5,11 +5,13 @@ import io.github.ledgerrelay.core.SkipReason;
 import java.util.Optional;
 
 /**
- * 토큰까지 다루는 상태 기계. 애플리케이션 서비스가 실행하며, 무작위 검증(E6a)의 오라클이기도 하다.
+ * The state machine, tokens included. The application services run it, and it is also the oracle for the randomized
+ * checks (E6a).
  *
- * <p>claim은 토큰을 받는다. 나머지 쓰기는 claim 때 받은 토큰을 내밀고, 행이 처리 중(CLAIMED)이며 토큰이 같을
- * 때만 반영된다. 아니면 0행이다(G5). 반영되는 쓰기의 목적지와 효과는 전이표의 CLAIMED 줄이 정한다.
- * 전이표가 "불가"나 "해당 없음"으로 적은 칸에 닿으면 모듈의 버그이므로 {@link IllegalStateException}을 던진다.
+ * <p>A claim receives a token. Every other write presents the token received at claim time and takes effect only if
+ * the row is in progress (CLAIMED) and the token matches. Otherwise it is zero rows (G5). The CLAIMED row of the
+ * transition table decides the target and effects of a write that takes effect. Reaching a cell the table marks
+ * "impossible" or "not applicable" is a bug in the module, so it throws {@link IllegalStateException}.
  */
 public final class CommandStateMachine {
 
@@ -27,9 +29,12 @@ public final class CommandStateMachine {
     private static StepResult claim(CommandRow row, Step.Claim claim) {
         CommandEvent event = switch (row.state()) {
             case PENDING -> claim.gate().claimEvent();
-            // 처리 중 명령은 lease가 끝났을 때만 다시 claim된다. 살아 있으면 표의 "불가" 칸으로 간다.
-            // 게이트 결정은 보지 않는다. 처리 중 명령은 claim될 때 이미 게이트를 통과했고, 게이트 입력(같은 키의 앞 명령,
-            // 참조한 예약)은 그 뒤 앞으로만 움직인다. 이 행이 멈춤 대상이 되려면 DB를 직접 고쳐야 한다.
+            // An in-flight command is claimed again only when its lease has expired. While it is live, this reaches the
+            // "impossible" cell of the table. The gate decision is ignored: an in-flight command already passed the
+            // gate
+            // when claimed, and the gate inputs (earlier commands of the same key, the referenced reservation) only
+            // move
+            // forward after that. Making this row a halt target takes a direct DB edit.
             case CLAIMED -> claim.leaseExpired() ? CommandEvent.LEASE_EXPIRED : CommandEvent.CLAIM_WITH_GATE_OPEN;
             case APPLIED, REJECTED, CONFLICT, SKIPPED, HALTED -> CommandEvent.CLAIM_WITH_GATE_OPEN;
         };
@@ -44,14 +49,14 @@ public final class CommandStateMachine {
         CommandEvent event = switch (write) {
             case Step.MarkSubmitted submitted -> {
                 if (row.knownResult().isPresent()) {
-                    throw bug("이미 아는 결과(" + row.knownResult().get() + ")가 있는 명령을 TB에 다시 보내려 한다. "
-                            + "다시 보내면 원래 사유가 IdAlreadyFailed로 덮인다");
+                    throw bug("attempt to resend to TB a command with a known result (" + row.knownResult().get() + "). "
+                            + "Resending masks the original reason with IdAlreadyFailed");
                 }
                 yield CommandEvent.SUBMITTING;
             }
             case Step.Complete complete -> {
                 if (row.knownResult().isPresent() && row.knownResult().get() != complete.code()) {
-                    throw bug("이미 아는 결과는 " + row.knownResult().get() + "인데 " + complete.code() + "로 끝내려 한다");
+                    throw bug("the known result is " + row.knownResult().get() + ", but the attempt ends the command with " + complete.code());
                 }
                 yield CommandEvent.of(complete.code().category());
             }
@@ -69,7 +74,7 @@ public final class CommandStateMachine {
             case UNCHANGED -> new StepResult.Unchanged();
             case ZERO_ROWS -> new StepResult.Fenced();
             case IMPOSSIBLE, NOT_APPLICABLE ->
-                    throw bug(row.state() + " 상태에서 " + event + " 사건은 일어날 수 없다(전이표: " + transition.outcome() + ")");
+                    throw bug("event " + event + " cannot occur in state " + row.state() + " (transition table: " + transition.outcome() + ")");
         };
     }
 
@@ -84,7 +89,8 @@ public final class CommandStateMachine {
                 case RECORD_SUBMISSION -> submitCount++;
                 case KEEP_KNOWN_RESULT -> knownResult = ((Step.HandlerFailed) step).knownResult();
                 case COUNT_HANDLER_FAILURE -> handlerFailures++;
-                // 서비스가 맡는다: 같은 트랜잭션의 핸들러 실행, 저장소 시계(PG now()) 기준의 다음 시도 시각
+                // The service handles these: running the handler in the same transaction, and the next attempt time by
+                // the store clock (PG now())
                 case RUN_HANDLER, BACKOFF -> { }
             }
         }
@@ -100,6 +106,6 @@ public final class CommandStateMachine {
     }
 
     private static IllegalStateException bug(String what) {
-        return new IllegalStateException("버그: " + what);
+        return new IllegalStateException("Bug: " + what);
     }
 }

@@ -3,9 +3,9 @@ plugins {
     `java-test-fixtures`
 }
 
-// main 의존성 없음: core는 JDK만 쓴다. 방향은 ArchitectureTest가 지킨다
+// No main dependencies: core uses only the JDK. ArchitectureTest enforces the direction
 dependencies {
-    // 메모리 저장소와 계약 테스트(core.testing). jdbc 모듈이 같은 계약을 PostgreSQL로 돌린다
+    // In-memory store and contract tests (core.testing). The jdbc module runs the same contracts against PostgreSQL
     testFixturesApi(platform(libs.junit.bom))
     testFixturesApi(libs.junit.jupiter)
     testFixturesApi(libs.assertj.core)

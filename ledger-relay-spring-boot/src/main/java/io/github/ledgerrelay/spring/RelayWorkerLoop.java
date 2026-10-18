@@ -10,12 +10,13 @@ import org.apache.commons.logging.LogFactory;
 import org.springframework.context.SmartLifecycle;
 
 /**
- * 워커 바퀴를 스레드로 반복한다. 바퀴 자체(claim, 제출, 결과 쓰기)는 core의
- * {@link io.github.ledgerrelay.core.application.RelayWorker#runOnce()}가 하고, 여기는 스레드와 종료만 맡는다.
+ * Runs worker cycles on threads. The cycle itself (claim, submit, writing the result) is done by core's
+ * {@link io.github.ledgerrelay.core.application.RelayWorker#runOnce()}; this class only handles threads and shutdown.
  *
- * <p>종료: 새 바퀴를 막고, 돌고 있는 바퀴가 끝나기를 {@code stopTimeout}까지 기다린다. 바퀴는 TB 응답을 submit-timeout까지
- * 기다린 뒤 받은 결과를 쓰므로 보통 그 안에 끝난다. 그래도 남은 스레드는 인터럽트하고 돌아온다. 그 명령은 lease가 끝난 뒤
- * 다른 워커가 같은 이체 ID로 다시 보낸다.
+ * <p>Shutdown: blocks new cycles and waits up to {@code stopTimeout} for running cycles to finish. A cycle waits for
+ * the TB reply up to submit-timeout and then writes the results it got, so it usually finishes within that time.
+ * Threads still running after that are interrupted and the method returns. Another worker resends their commands with
+ * the same transfer id after the lease ends.
  */
 public final class RelayWorkerLoop implements SmartLifecycle {
 
@@ -30,15 +31,15 @@ public final class RelayWorkerLoop implements SmartLifecycle {
     private volatile boolean running;
 
     /**
-     * @param cycle       한 바퀴. 보통 {@code relayWorker::runOnce}
-     * @param idleDelay   잡은 명령이 없던 바퀴 뒤에 쉬는 시간
-     * @param errorDelay  바퀴가 예외를 던진 뒤 쉬는 시간
-     * @param stopTimeout 종료 때 돌고 있는 바퀴를 기다리는 상한
+     * @param cycle       one cycle, usually {@code relayWorker::runOnce}
+     * @param idleDelay   pause after a cycle that claimed no commands
+     * @param errorDelay  pause after a cycle threw an exception
+     * @param stopTimeout upper bound on waiting for running cycles at shutdown
      */
     public RelayWorkerLoop(Supplier<CycleReport> cycle, int concurrency, Duration idleDelay, Duration errorDelay,
             Duration stopTimeout) {
         if (concurrency < 1) {
-            throw new IllegalArgumentException("worker.concurrency는 1 이상이어야 합니다: " + concurrency);
+            throw new IllegalArgumentException("worker.concurrency must be at least 1: " + concurrency);
         }
         this.cycle = cycle;
         this.concurrency = concurrency;
@@ -69,8 +70,8 @@ public final class RelayWorkerLoop implements SmartLifecycle {
         }
         for (Thread thread : threads) {
             if (thread.isAlive()) {
-                log.warn(thread.getName() + "가 " + stopTimeout + " 안에 바퀴를 끝내지 못해 인터럽트한다. 그 명령은 lease가 "
-                        + "끝난 뒤 같은 이체 ID로 다시 보낸다");
+                log.warn(thread.getName() + " did not finish its cycle within " + stopTimeout + "; interrupting it. "
+                        + "Its command is resent with the same transfer id after the lease ends");
                 thread.interrupt();
             }
         }
@@ -90,8 +91,9 @@ public final class RelayWorkerLoop implements SmartLifecycle {
                     pause(idleDelay);
                 }
             } catch (RuntimeException e) {
-                // 한 바퀴의 실패(DB 끊김 등)로 스레드가 죽으면 그 프로세스의 처리가 조용히 멈춘다. 알리고 쉬었다가 계속한다
-                log.warn("워커 바퀴가 실패했다. " + errorDelay + " 뒤 다시 돈다", e);
+                // If one failed cycle (a DB disconnect, for example) killed the thread, this process would silently
+                // stop processing. Report it, pause, and continue
+                log.warn("Worker cycle failed. Running again after " + errorDelay, e);
                 pause(errorDelay);
             }
         }

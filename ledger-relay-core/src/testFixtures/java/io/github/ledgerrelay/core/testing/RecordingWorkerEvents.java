@@ -4,7 +4,10 @@ import io.github.ledgerrelay.core.spi.WorkerEvents;
 import java.util.ArrayList;
 import java.util.List;
 
-/** 워커 이벤트를 "이름:인자" 문자열로 받은 순서대로 남기는 대역. 예: {@code "halted:capture-1"}, {@code "submitted:3"}. */
+/**
+ * A stand-in that keeps worker events as "name:argument" strings in the order received. For example {@code
+ * "halted:capture-1"}, {@code "submitted:3"}.
+ */
 public final class RecordingWorkerEvents implements WorkerEvents {
 
     private final java.util.Map<String, RuntimeException> writeFailures = new java.util.HashMap<>();
@@ -36,11 +39,11 @@ public final class RecordingWorkerEvents implements WorkerEvents {
         writeFailures.put(commandId, cause);
     }
 
-    /** 그 명령의 마지막 쓰기 실패 예외. */
+    /** The exception of the last write failure for that command. */
     public synchronized RuntimeException writeFailure(String commandId) {
         RuntimeException cause = writeFailures.get(commandId);
         if (cause == null) {
-            throw new AssertionError(commandId + "의 쓰기 실패가 없다. 이벤트: " + events);
+            throw new AssertionError("No write failure for " + commandId + ". Events: " + events);
         }
         return cause;
     }

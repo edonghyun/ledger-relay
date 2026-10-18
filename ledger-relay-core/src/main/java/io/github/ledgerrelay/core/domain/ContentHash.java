@@ -11,19 +11,21 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * 명령 내용의 정규화 해시(G7). 같은 commandId로 다시 접수할 때 내용이 같은지를 이 값으로 비교한다.
+ * The canonical hash of a command's content (G7). When a command is submitted again under the same commandId, this
+ * value decides whether the content is the same.
  *
- * <p>이 값은 DB({@code content_hash})에 저장된다. 인코딩을 바꾸면 이미 저장된 명령과의 비교가 깨진다.
- * 바꿀 때는 {@link #VERSION}을 올리고 이전 버전과 어떻게 비교할지 함께 정한다.
+ * <p>The value is stored in the DB ({@code content_hash}). Changing the encoding breaks the comparison with commands
+ * already stored. To change it, bump {@link #VERSION} and decide at the same time how to compare with the old version.
  *
- * <p>인코딩 v1: {@code "v1\n"} 뒤에 필드마다 {@code 이름=<UTF-8 바이트 길이>:<값>\n}을 {@link #HASHED_FIELDS}
- * 순서로 붙이고 SHA-256을 씌운다. 길이를 앞에 붙이는 것은 값 안의 구분자가 경계를 흐리지 못하게 하려는 것이다.
+ * <p>Encoding v1: {@code "v1\n"}, then for each field {@code name=<UTF-8 byte length>:<value>\n} in
+ * {@link #HASHED_FIELDS} order, then SHA-256 over the whole. The length prefix keeps a separator inside a value from
+ * blurring the field boundaries.
  */
 public final class ContentHash {
 
     public static final String VERSION = "v1";
 
-    /** 해시에 들어가는 필드와 순서. commandId는 비교 기준이라 넣지 않는다. */
+    /** The hashed fields and their order. commandId is the key of the comparison, so it is not included. */
     public static final List<String> HASHED_FIELDS = List.of(
             "kind", "orderingKey", "debitAccountId", "creditAccountId", "amount", "ledger", "code",
             "timeoutSeconds", "reservationCommandId", "userData64", "userData32");
@@ -60,7 +62,7 @@ public final class ContentHash {
         try {
             return MessageDigest.getInstance("SHA-256").digest(bytes);
         } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("JDK에 SHA-256이 없습니다", e);
+            throw new IllegalStateException("The JDK has no SHA-256", e);
         }
     }
 }

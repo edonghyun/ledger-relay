@@ -4,9 +4,9 @@ import java.math.BigInteger;
 import java.util.Objects;
 
 /**
- * TB 이체 하나로 보낼 내용.
+ * What to send as one TB transfer.
  *
- * @param userData128 명령 행 ID. TB에서 PG를 역참조한다
+ * @param userData128 the command row id. It lets TB refer back to PG
  */
 public record Submission(BigInteger transferId, BigInteger userData128, TransferBody body) {
 

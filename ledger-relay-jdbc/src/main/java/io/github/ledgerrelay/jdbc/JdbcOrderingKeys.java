@@ -6,8 +6,8 @@ import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * PostgreSQL 순서 키 저장소. {@code ledger_ordering_key} 행을 잠그는 SQL은 모두 여기에 있다. {@link JdbcCommandStore}는
- * 이 행을 잠그지 않는다.
+ * PostgreSQL ordering key store. All SQL that locks {@code ledger_ordering_key} rows lives here.
+ * {@link JdbcCommandStore} does not lock these rows.
  */
 public final class JdbcOrderingKeys implements OrderingKeys {
 
@@ -18,8 +18,8 @@ public final class JdbcOrderingKeys implements OrderingKeys {
     }
 
     /**
-     * 키 행을 upsert해 잠그고 다음 순번을 낸다. 잠금은 커밋까지 유지되므로 같은 키의 다음 접수는 이 트랜잭션이
-     * 끝날 때까지 기다린다. 그래서 seq 순서가 커밋 순서와 같다.
+     * Upserts and locks the key row and returns the next sequence number. The lock is held until commit, so the next
+     * acceptance on the same key waits until this transaction ends. That is why seq order equals commit order.
      */
     @Override
     public long lockKeyAndTakeSeq(String orderingKey) {
@@ -31,10 +31,12 @@ public final class JdbcOrderingKeys implements OrderingKeys {
     }
 
     /**
-     * 넘길 키를 고른다. 끝났는데 맨 앞인 명령({@code ledger_command_finished_head})의 키 행을 잠근다. 다른 트랜잭션이 쥔 키
-     * 행은 건너뛰며, 건너뛴 행은 limit에 세지 않는다. 끝난 맨 앞 행은 잠그지 않는다: 누가 그 행을 쥐면(예: 예약 행, F13)
-     * 키 전체의 넘기기가 미뤄진다. 그래서 다른 워커가 이 질의의 스냅숏 뒤에 넘기고 커밋한 키도 잡힐 수 있고, 그때는
-     * {@link #MARK_NEXT_HEADS}가 이미 있는 맨 앞을 보고 아무것도 하지 않는다. 테스트가 실행 계획을 본다.
+     * Picks the keys whose head to pass on. Locks the key rows of commands that are finished but still the head
+     * ({@code ledger_command_finished_head}). Key rows held by another transaction are skipped, and skipped rows do not
+     * count toward the limit. The finished head rows themselves are not locked: if someone holds such a row (for
+     * example a reservation row, F13), passing on the whole key would be delayed. So the query can also pick a key that
+     * another worker passed on and committed after this query's snapshot. In that case {@link #MARK_NEXT_HEADS} sees
+     * the existing head and does nothing. A test checks the query plan.
      */
     static final String LOCK_KEYS_TO_PASS_ON = """
                 SELECT k.ordering_key
@@ -47,11 +49,13 @@ public final class JdbcOrderingKeys implements OrderingKeys {
             """;
 
     /**
-     * 끝난 명령이 쥔 맨 앞을 다음 미완료로 넘긴다. 잡은 키 행은 값을 그대로 두고 갱신한다. 새 행 버전이 생기므로,
-     * 이보다 앞서 스냅숏을 잡은 REPEATABLE READ 이상의 앱 트랜잭션은 이 키에서 순번을 받을 때 직렬화 실패(40001)로 끝나
-     * 재시도한다. 그러지 않으면 그 앱은 옛 스냅숏에서 아직 맨 앞이 있다고 보고 새 명령을 맨 앞으로 세우지 않아, 그 키가
-     * 영원히 나가지 않는다. 다음 미완료를 접수하는 중인 트랜잭션은 순번을 받으며 키 행을 쥐었으므로 그 키는 건너뛰고, 그 접수가
-     * 커밋한 뒤 다음 호출이 넘긴다.
+     * Passes the head held by a finished command on to the next unfinished command. The locked key rows are updated
+     * with their values unchanged. This creates a new row version, so an app transaction at REPEATABLE READ or higher
+     * whose snapshot is older fails with a serialization failure (40001) when it takes a sequence number on this key,
+     * and retries. Otherwise that app would see a head in its old snapshot, would not make the new command the head,
+     * and the key would never move again. A transaction that is accepting the next unfinished command holds the key
+     * row since it took a sequence number, so that key is skipped, and the next call passes it on after that
+     * acceptance commits.
      */
     @Override
     public void passOnFinishedHeads(int limit) {
@@ -74,9 +78,11 @@ public final class JdbcOrderingKeys implements OrderingKeys {
             """;
 
     /**
-     * 키마다 가장 앞 순번의 미완료를 맨 앞으로 켠다. 키마다 따로 {@code min(seq)}를 구해야 미완료 인덱스에서 하나만 읽는다.
-     * 키들을 묶어 {@code GROUP BY}로 구하면 막힌 키 뒤의 백로그를 모두 읽는다(2만 건에 564페이지). 맨 앞이 이미 있는 키는
-     * 건드리지 않는다: 그 맨 앞은 결과를 쓰는 중일 수 있고, 그 행을 고치려 기다리면 핸들러와 교착한다. 테스트가 실행 계획을 본다.
+     * For each key, marks the unfinished command with the lowest sequence number as the head. Computing
+     * {@code min(seq)} separately per key reads only one entry from the unfinished index. Computing it for all keys
+     * with {@code GROUP BY} reads the whole backlog behind a blocked key (564 pages for 20,000 rows). Keys that already
+     * have a head are left alone: that head may be writing its result, and waiting to update its row would deadlock
+     * with the handler. A test checks the query plan.
      */
     static final String MARK_NEXT_HEADS = """
                 UPDATE ledger_command c SET is_head = true

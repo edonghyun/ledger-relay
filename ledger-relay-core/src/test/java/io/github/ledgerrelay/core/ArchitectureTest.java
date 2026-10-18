@@ -12,19 +12,19 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * 헥사고날 의존 방향. 안쪽은 바깥을 모른다.
+ * Hexagonal dependency direction. The inside does not know the outside.
  *
  * <pre>
- * 공개 API ◀── domain ◀── spi ◀── application
+ * public API ◀── domain ◀── spi ◀── application
  *    ▲______________________________│
  * </pre>
  */
-@DisplayName("헥사고날 경계 — 의존은 안쪽으로만 향한다")
+@DisplayName("Hexagonal boundaries — dependencies point inward only")
 class ArchitectureTest {
 
     /**
-     * main 소스셋의 클래스만 본다. 테스트와 testFixtures는 경계 밖이다. testFixtures를 켜면 Gradle이 main을
-     * 폴더 대신 jar로 테스트 클래스패스에 올리므로 둘 다 받는다.
+     * Looks only at classes of the main source set. Tests and testFixtures are outside the boundary. With testFixtures
+     * enabled, Gradle puts main on the test classpath as a jar instead of a folder, so both are accepted.
      */
     static final JavaClasses MAIN = new ClassFileImporter()
             .withImportOption(location -> location.contains("/classes/java/main/")
@@ -37,7 +37,7 @@ class ArchitectureTest {
     static final String SPI = "io.github.ledgerrelay.core.spi..";
 
     @Test
-    @DisplayName("공개 API는 도메인 규칙·서비스·포트를 모른다 — 앱 코드가 내부 타입에 묶이지 않게")
+    @DisplayName("The public API knows nothing of domain rules, services or ports — so app code is not tied to internal types")
     void thePublicApiKnowsNothingInside() {
         // then
         noClasses().that().resideInAPackage(PUBLIC)
@@ -46,7 +46,7 @@ class ArchitectureTest {
     }
 
     @Test
-    @DisplayName("도메인 규칙은 서비스와 포트를 모른다 — 규칙은 저장 방식과 상관없이 참이다")
+    @DisplayName("Domain rules know neither services nor ports — the rules hold regardless of how things are stored")
     void theDomainKnowsNeitherServiceNorPorts() {
         // then
         noClasses().that().resideInAPackage(DOMAIN)
@@ -55,7 +55,7 @@ class ArchitectureTest {
     }
 
     @Test
-    @DisplayName("core는 JDK 말고 아무것도 쓰지 않는다 — Spring·PG·TB는 어댑터 모듈만 안다")
+    @DisplayName("core uses nothing but the JDK — only adapter modules know Spring, PG and TB")
     void coreUsesOnlyTheJdk() {
         // then
         classes().that().resideInAPackage("io.github.ledgerrelay.core..")
@@ -64,7 +64,7 @@ class ArchitectureTest {
     }
 
     @Test
-    @DisplayName("포트는 서비스를 모른다 — 어댑터가 서비스 구현에 묶이지 않게")
+    @DisplayName("Ports do not know the service — so adapters are not tied to the service implementation")
     void portsDoNotKnowTheService() {
         // then
         noClasses().that().resideInAPackage(SPI)
@@ -73,7 +73,7 @@ class ArchitectureTest {
     }
 
     @Test
-    @DisplayName("핸들러를 부르는 클래스는 순서 키 포트를 모른다 — 키 행을 쥔 채 핸들러가 주문 행을 기다려 앱의 접수와 교착하지 않게")
+    @DisplayName("Classes that call the handler do not know the ordering key port — so a handler waiting on an order row while holding a key row cannot deadlock with the app's submit")
     void theHandlerPathCannotLockAKey() {
         // then
         noClasses().that(callTheOutcomeHandler())

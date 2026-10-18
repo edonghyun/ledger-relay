@@ -18,7 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("TigerBeetle 테스트 컨테이너")
+@DisplayName("TigerBeetle test container")
 class TigerBeetleContainerTest {
 
     static final TigerBeetleContainer TB = new TigerBeetleContainer();
@@ -44,11 +44,11 @@ class TigerBeetleContainerTest {
     }
 
     @Test
-    @DisplayName("실제 TB에 이체 1건을 보내면 새로 기록되고, 그 금액이 정확히 움직인다")
+    @DisplayName("One transfer sent to a real TB is newly recorded, and exactly that amount moves")
     void recordsOneTransfer() {
         // given
-        Account payer = ledger.openAccount("구매자");
-        Account payee = ledger.openAccount("가맹점");
+        Account payer = ledger.openAccount("buyer");
+        Account payee = ledger.openAccount("merchant");
 
         // when
         CreateTransferStatus result = ledger.submit(transfer(10_000).from(payer).to(payee));
@@ -59,13 +59,13 @@ class TigerBeetleContainerTest {
     }
 
     @Test
-    @DisplayName("클라이언트 주소는 호스트명이 아니라 IPv4:포트다")
+    @DisplayName("The client address is IPv4:port, not a host name")
     void replicaAddressIsIpv4AndPort() {
         assertThat(TB.replicaAddress()).matches("\\d{1,3}(\\.\\d{1,3}){3}:\\d+");
     }
 
     @Test
-    @DisplayName("이미지 태그는 클래스패스에 실린 tigerbeetle-java jar의 버전과 같다 — 버전 키가 갈라져도 잡아냄")
+    @DisplayName("The image tag equals the version of the tigerbeetle-java jar on the classpath — catches diverging version keys")
     void imageTagMatchesClientJarVersion() throws Exception {
         assertThat(TB.getDockerImageName()).isEqualTo("ghcr.io/tigerbeetle/tigerbeetle:" + clientJarVersion());
     }
@@ -74,7 +74,7 @@ class TigerBeetleContainerTest {
         Properties pom = new Properties();
         try (InputStream in = Client.class.getResourceAsStream(
                 "/META-INF/maven/com.tigerbeetle/tigerbeetle-java/pom.properties")) {
-            assertThat(in).as("tigerbeetle-java jar의 pom.properties").isNotNull();
+            assertThat(in).as("pom.properties of the tigerbeetle-java jar").isNotNull();
             pom.load(in);
         }
         return pom.getProperty("version");

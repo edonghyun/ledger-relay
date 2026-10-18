@@ -23,8 +23,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
 /**
- * TB Java 클라이언트 위의 {@link LedgerClient}. 묶음 하나를 TB 요청 하나로 보낸다.
- * 클라이언트의 수명은 만든 쪽이 관리하며 이 어댑터는 닫지 않는다. 결과 개수는 검사하지 않는다. 그것은 워커의 판단이다.
+ * {@link LedgerClient} on top of the TB Java client. Sends one batch as one TB request.
+ * The creator of the client manages its lifetime; this adapter does not close it. It does not check the number of
+ * results; that is the worker's decision.
  */
 public final class TigerBeetleLedgerClient implements LedgerClient {
 
@@ -41,7 +42,8 @@ public final class TigerBeetleLedgerClient implements LedgerClient {
             TransferBody body = submission.body();
             transfers.add();
             transfers.setId(UInt128.asBytes(submission.transferId()));
-            // post·void는 계좌·ledger·code를 0으로 보내 예약의 값을 물려받는다(ReservationSemanticsTest 장 4)
+            // post and void send account, ledger and code as 0 so they inherit the reservation's values
+            // (ReservationSemanticsTest section 4)
             transfers.setDebitAccountId(UInt128.asBytes(body.debitAccountId()));
             transfers.setCreditAccountId(UInt128.asBytes(body.creditAccountId()));
             transfers.setAmount(body.amount());
@@ -66,7 +68,10 @@ public final class TigerBeetleLedgerClient implements LedgerClient {
                 .thenCompose(codes -> codes);
     }
 
-    /** 대사용 조회. TB에 없는 ID는 결과에 없다. 종류는 flags에서 정한다(보류 → RESERVE, 보류 확정 → POST, 보류 해제 → VOID). */
+    /**
+     * Lookup for reconciliation. Ids that TB does not have are absent from the result. The kind is derived from the
+     * flags (pending → RESERVE, post pending → POST, void pending → VOID).
+     */
     @Override
     public CompletableFuture<List<LedgerTransfer>> lookup(List<BigInteger> transferIds) {
         IdBatch ids = new IdBatch(transferIds.size());
@@ -109,13 +114,14 @@ public final class TigerBeetleLedgerClient implements LedgerClient {
     }
 
     /**
-     * 닫힌 클라이언트, 세션 축출(clients_max 초과), 클라이언트·서버 버전 불일치는 다시 보내도 회복되지 않는다. 일시적 실패와
-     * 구분되게 {@link LedgerUnavailableException}으로 감싼다. 나머지는 그대로 둔다.
+     * A closed client, session eviction (more than clients_max) and a client/server version mismatch do not recover on
+     * resend. They are wrapped in {@link LedgerUnavailableException} so they can be told apart from transient failures.
+     * Everything else is left as is.
      */
     private static RuntimeException unavailableOrAsIs(Throwable failure) {
         if (failure instanceof ClientClosedException || failure instanceof ClientEvictedException
                 || failure instanceof ClientReleaseException) {
-            return new LedgerUnavailableException("TB 클라이언트를 더 쓸 수 없습니다: " + failure, failure);
+            return new LedgerUnavailableException("The TB client can no longer be used: " + failure, failure);
         }
         return failure instanceof RuntimeException runtime ? runtime : new CompletionException(failure);
     }
@@ -133,7 +139,10 @@ public final class TigerBeetleLedgerClient implements LedgerClient {
         };
     }
 
-    /** TB 0.17은 이벤트마다 결과를 요청 순서대로 하나씩 낸다. 두 enum의 이름이 같다는 것은 ResultCodeGuardTest가 지킨다. */
+    /**
+     * TB 0.17 returns one result per event, in request order. ResultCodeGuardTest ensures the two enums have the same
+     * names.
+     */
     private static List<LedgerResultCode> codesOf(CreateTransferResultBatch results) {
         List<LedgerResultCode> codes = new ArrayList<>(results.getLength());
         while (results.next()) {

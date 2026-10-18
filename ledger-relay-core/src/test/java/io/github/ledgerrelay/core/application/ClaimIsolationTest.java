@@ -25,10 +25,10 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 /**
- * claim이 후보 하나의 이상을 그 후보에 가두는가(F29). 저장소가 끝난 행을 후보로 잘못 내는 경우는 계약 테스트로 만들 수 없으므로
- * 저장소 장식자로 끼워 넣는다.
+ * Does claim keep a fault in one candidate confined to that candidate (F29)? A store that wrongly offers a finished row
+ * cannot be built in a contract test, so a store decorator injects it.
  */
-@DisplayName("claim 후보 하나가 규칙과 어긋나면 — F29")
+@DisplayName("When one claim candidate breaks the rules — F29")
 class ClaimIsolationTest {
 
     static final Duration LEASE = Duration.ofSeconds(30);
@@ -50,11 +50,11 @@ class ClaimIsolationTest {
 
     @Nested
     @Order(1)
-    @DisplayName("저장소가 끝난 행을 후보로 내면")
+    @DisplayName("When the store offers a finished row as a candidate")
     class AFinishedRowIsOffered {
 
         @Test
-        @DisplayName("그 행은 멈추게도 못 하므로 건너뛰되, 이유와 함께 알린다 — 다른 키는 그대로 잡힌다")
+        @DisplayName("That row cannot even be halted, so it is skipped and reported with its cause — other keys are still claimed")
         void itIsSkippedAndReportedWithItsCause() {
             // given
             leaky.alsoOffer("pay-9");
@@ -63,16 +63,16 @@ class ClaimIsolationTest {
             ClaimBatch batch = relay.claim(10, LEASE);
 
             // then
-            assertThat(batch.claimed()).as("잡힌 명령").extracting(ClaimedCommand::commandId).containsExactly("pay-2");
-            assertThat(batch.problems()).as("문제가 있던 후보").singleElement().satisfies(problem -> {
+            assertThat(batch.claimed()).as("claimed commands").extracting(ClaimedCommand::commandId).containsExactly("pay-2");
+            assertThat(batch.problems()).as("candidates with a problem").singleElement().satisfies(problem -> {
                 assertThat(problem.commandId()).isEqualTo("pay-9");
-                assertThat(problem.halted()).as("멈춤으로 세웠는가").isFalse();
-                assertThat(problem.cause()).as("원래 예외").hasMessageContaining("버그");
+                assertThat(problem.halted()).as("whether it was halted").isFalse();
+                assertThat(problem.cause()).as("original exception").hasMessageContaining("Bug");
             });
         }
 
         @Test
-        @DisplayName("워커는 그 후보를 이유와 함께 알린다")
+        @DisplayName("The worker reports that candidate with its cause")
         void theWorkerReportsIt() {
             // given
             leaky.alsoOffer("pay-9");
@@ -84,7 +84,7 @@ class ClaimIsolationTest {
             worker.runOnce();
 
             // then
-            assertThat(events.events()).as("워커 이벤트").contains("malformedCandidate:pay-9");
+            assertThat(events.events()).as("worker events").contains("malformedCandidate:pay-9");
         }
     }
 
@@ -93,7 +93,7 @@ class ClaimIsolationTest {
                 .orderingKey(orderingKey).debit(1).credit(2).amount(500).ledger(1).code(1).build()));
     }
 
-    /** 진짜 후보 뒤에 지정한 행을 후보로 하나 더 낸다. 저장소 버그를 흉내 낸다. */
+    /** Offers one more given row as a candidate after the real candidates. Imitates a store bug. */
     private static final class LeakyStore implements CommandStore {
 
         private final CommandStore real;

@@ -1,7 +1,7 @@
-# superpowers 설계·계획 문서는 커밋하지 않는다
+# superpowers design and plan documents are not committed
 docs/superpowers/
 
-# superpowers 실행 작업공간
+# superpowers run workspace
 .superpowers/
 
 # Gradle

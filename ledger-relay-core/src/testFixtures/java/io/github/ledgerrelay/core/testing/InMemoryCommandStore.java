@@ -23,20 +23,23 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
 /**
- * 메모리 저장소. 계약 테스트의 기준 구현이자 6단계 무작위 검증(E6a)의 저장소다. 판단은 하지 않는다.
- * 트랜잭션은 잠금 하나와 스냅샷이다. 한 번에 한 트랜잭션만 돌므로 SKIP LOCKED가 할 일이 없다.
+ * The in-memory store. The reference implementation for the contract tests, and the store for the stage 6 randomized
+ * checks (E6a). It makes no decisions.
+ * A transaction is one lock plus a snapshot. Only one transaction runs at a time, so SKIP LOCKED has nothing to do.
  */
 public final class InMemoryCommandStore implements OrderingKeys, CommandStore, Transactions {
 
     private final Supplier<Instant> clock;
     private final ReentrantLock lock = new ReentrantLock();
 
-    /** 행 ID → 행. 넣은 순서(= 접수 순서)를 지킨다. 행은 불변이며, 바꿀 때는 통째로 갈아 끼운다. */
+    /**
+     * Row id → row. Keeps insertion order (= acceptance order). Rows are immutable; a change replaces the whole row.
+     */
     private Map<Long, Row> rows = new LinkedHashMap<>();
     private Map<String, Long> rowIdByCommandId = new HashMap<>();
     private Map<String, Long> lastSeqByKey = new HashMap<>();
     private long lastRowId;
-    /** 바깥 트랜잭션을 열 때마다 오른다. 롤백해도 되돌리지 않는다 */
+    /** Goes up each time an outer transaction opens. A rollback does not undo it */
     private long transactionNumber;
 
     public InMemoryCommandStore(Supplier<Instant> clock) {
@@ -46,7 +49,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
     @Override
     public <T> T inTransaction(Supplier<T> work) {
         if (lock.isHeldByCurrentThread()) {
-            return work.get(); // 합류. 바깥 트랜잭션이 롤백을 맡는다
+            return work.get(); // Join. The outer transaction owns the rollback
         }
         lock.lock();
         transactionNumber++;
@@ -64,7 +67,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
     @Override
     public void requireActive() {
         if (!lock.isHeldByCurrentThread()) {
-            throw new IllegalStateException("트랜잭션 밖에서는 명령을 접수할 수 없습니다(G1). 앱 트랜잭션 안에서 submit()을 부르세요");
+            throw new IllegalStateException("Cannot accept a command outside a transaction (G1). Call submit() inside the app transaction");
         }
     }
 
@@ -73,13 +76,13 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
         return lock.isHeldByCurrentThread();
     }
 
-    /** 테스트 전용: 행 하나를 지운다(보관 작업 흉내). 트랜잭션 밖에서 부른다. */
+    /** Test only: deletes one row (models the retention job). Call it outside a transaction. */
     public void delete(String commandId) {
         lock.lock();
         try {
             Long rowId = rowIdByCommandId.remove(commandId);
             if (rowId == null) {
-                throw new IllegalStateException("given 준비 실패: 지울 " + commandId + "가 없다");
+                throw new IllegalStateException("given setup failed: no " + commandId + " to delete");
             }
             rows.remove(rowId);
         } finally {
@@ -93,7 +96,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
         return lastSeqByKey.merge(orderingKey, 1L, Long::sum);
     }
 
-    /** 맨 앞을 {@link #lockDue}마다 행에서 계산하므로 넘길 표시가 없다. */
+    /** The head is computed from the rows on every {@link #lockDue}, so there is no marker to advance. */
     @Override
     public void passOnFinishedHeads(int limit) {
         requireTransaction();
@@ -167,7 +170,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
     public List<DueCommand> lockDue(int limit) {
         requireTransaction();
         Instant now = clock.get();
-        // 순서 키마다 맨 앞(가장 작은 seq)의 미완료 명령
+        // The unfinished head (smallest seq) command of each ordering key
         Map<String, Long> headSeqByKey = new HashMap<>();
         for (Row row : rows.values()) {
             CommandRecord r = row.record();
@@ -175,7 +178,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
                 headSeqByKey.merge(r.orderingKey(), r.seq(), Math::min);
             }
         }
-        // 보낼 수 있게 된 시각 순서, 같으면 접수 순서
+        // In the order they became sendable; ties in acceptance order
         List<Row> heads = new ArrayList<>();
         for (Row row : rows.values()) {
             CommandRecord r = row.record();
@@ -204,7 +207,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
         Row next = switch (change.stamp()) {
             case RowChange.Stamp.LeaseFor lease -> row.with(change.next(), now.plus(lease.lease()), row.nextAttemptAt(),
                     row.record().completedAt(), Optional.empty());
-            // first_submitted_at은 조회 결과에 나가지 않으므로 메모리 저장소는 기록하지 않는다
+            // first_submitted_at is not part of the query result, so the in-memory store does not record it
             case RowChange.Stamp.FirstSubmission submission -> row.with(change.next(), row.leaseExpiresAt(),
                     row.nextAttemptAt(), row.record().completedAt(), Optional.empty());
             case RowChange.Stamp.RetryAfter retry -> row.with(change.next(), row.leaseExpiresAt(),
@@ -227,7 +230,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
                         reservation.row().state()));
     }
 
-    /** 저장한 기록에 "지금 트랜잭션이 넣었는가"를 붙여 돌려준다 */
+    /** Returns the stored record with "did the current transaction insert it" attached */
     private CommandRecord recordOf(Row row) {
         CommandRecord r = row.record();
         return new CommandRecord(r.rowId(), r.commandId(), r.orderingKey(), r.seq(), r.reservationCommandId(),
@@ -237,7 +240,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
 
     private void requireTransaction() {
         if (!lock.isHeldByCurrentThread()) {
-            throw new IllegalStateException("버그: 저장소는 트랜잭션 안에서만 부른다");
+            throw new IllegalStateException("Bug: call the store only inside a transaction");
         }
     }
 
@@ -258,25 +261,32 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
     }
 
     /**
-     * 저장된 행과, 저장소만 쓰는 시각 컬럼.
+     * A stored row, plus the timestamp columns only the store uses.
      *
-     * @param leaseExpiresAt claim 전에는 null
-     * @param nextAttemptAt  접수 상태의 행이 claim 후보가 되는 시각
-     * @param acceptedIn     넣은 트랜잭션의 번호
+     * @param leaseExpiresAt null before a claim
+     * @param nextAttemptAt  when an accepted row becomes a claim candidate
+     * @param acceptedIn     the number of the transaction that inserted it
      */
     private record Row(CommandRecord record, Instant leaseExpiresAt, Instant nextAttemptAt, long acceptedIn) {
 
-        /** claim 후보가 될 시각이 됐는가. 접수 상태는 다음 시도 시각이 됐을 때, 처리 중은 lease가 끝났을 때. */
+        /**
+         * Whether it is time for it to be a claim candidate: for an accepted row when the next attempt time arrives, in
+         * progress when the lease expires.
+         */
         boolean isDue(Instant now) {
             return switch (record.row().state()) {
                 case PENDING -> !nextAttemptAt.isAfter(now);
                 case CLAIMED -> leaseExpiresAt.isBefore(now);
-                // 멈춘 명령은 운영자가 풀 때까지 후보가 아니다. 맨 앞이므로 그 키의 뒤 명령도 후보가 되지 않는다
+                // A halted command is not a candidate until an operator resolves it. It is the head, so the later
+                // commands of its key are not candidates either
                 case APPLIED, REJECTED, CONFLICT, SKIPPED, HALTED -> false;
             };
         }
 
-        /** 보낼 수 있게 되는 시각: 처리 중은 lease 만료 시각, 그 밖에는 다음 시도 시각(jdbc의 ready_at과 같다). */
+        /**
+         * When it becomes sendable: the lease expiry when in progress, otherwise the next attempt time (same as
+         * ready_at in jdbc).
+         */
         Instant readyAt() {
             return record.row().state() == io.github.ledgerrelay.core.domain.StoredState.CLAIMED ? leaseExpiresAt
                     : nextAttemptAt;

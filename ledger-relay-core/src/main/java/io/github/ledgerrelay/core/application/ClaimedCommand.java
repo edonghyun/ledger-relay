@@ -6,12 +6,13 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * claim으로 잡은 명령 하나. 워커는 이것으로 다음 일을 고른다.
- * {@link #skip()}이면 TB에 보내지 않고 {@code skip}한다. {@link #knownResult()}가 있으면 TB에 보내지 않고 그 결과로
- * {@code complete}한다. 둘 다 아니면 {@code markSubmitted} 뒤 TB에 보낸다.
+ * One command taken by a claim. The worker uses it to choose the next step.
+ * If {@link #skip()}, it calls {@code skip} without sending to TB. If {@link #knownResult()} is present, it calls
+ * {@code complete} with that result without sending to TB. Otherwise it calls {@code markSubmitted} and then sends to
+ * TB.
  *
- * @param leaseToken 이 claim이 받은 토큰. 이후의 모든 쓰기에 내민다
- * @param skip       post·void가 참조한 예약이 적용되지 않고 끝났다
+ * @param leaseToken the token this claim received. Every later write presents it
+ * @param skip       the reservation that the post or void refers to ended without being applied
  */
 public record ClaimedCommand(
         long rowId,

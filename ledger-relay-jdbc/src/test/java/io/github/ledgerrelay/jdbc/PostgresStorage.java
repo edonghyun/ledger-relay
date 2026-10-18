@@ -30,12 +30,12 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * PostgreSQL 저장소 한 벌. 컨테이너는 JVM에 하나이며 처음 쓸 때 띄우고 스키마를 한 번 적용한다.
- * 커넥션 풀은 기본 격리 수준마다 하나씩 만들어 재사용한다. 격리는 테스트마다 {@link #clear()}로 한다.
+ * One set of PostgreSQL storage. There is one container per JVM; it starts on first use and the schema is applied once.
+ * One connection pool is created per default isolation level and reused. Tests are isolated with {@link #clear()}.
  */
 final class PostgresStorage implements StorageUnderTest {
 
-    /** 풀의 기본 격리 수준을 정하지 않는다: 드라이버와 서버의 기본(READ COMMITTED)을 따른다 */
+    /** Sets no default isolation level on the pool: the driver and server default (READ COMMITTED) applies */
     static final String SERVER_DEFAULT = "";
 
     private static final PostgreSQLContainer CONTAINER = startContainer();
@@ -57,14 +57,14 @@ final class PostgresStorage implements StorageUnderTest {
         this.store = new JdbcCommandStore(dataSource);
     }
 
-    /** 앱이 DataSource 트랜잭션 매니저를 쓰는 경우. 비운 저장소를 돌려준다. */
+    /** For apps that use a DataSource transaction manager. Returns an emptied store. */
     static PostgresStorage withDataSourceTransactions() {
         return withDataSourceTransactions(SERVER_DEFAULT);
     }
 
     /**
-     * 풀의 기본 격리 수준을 정한 경우. 값은 Hikari의 {@code transactionIsolation} 이름이다(예:
-     * {@code TRANSACTION_REPEATABLE_READ}).
+     * With a default isolation level set on the pool. The value is a Hikari {@code transactionIsolation} name (for
+     * example {@code TRANSACTION_REPEATABLE_READ}).
      */
     static PostgresStorage withDataSourceTransactions(String poolIsolation) {
         DataSource dataSource = pool(poolIsolation);
@@ -74,15 +74,15 @@ final class PostgresStorage implements StorageUnderTest {
     }
 
     /**
-     * 앱이 JPA 트랜잭션 매니저를 쓰는 경우. 같은 DataSource 위의 Hibernate와 {@link JpaTransactionManager}다.
-     * 매니저가 DataSource를 알고 {@code HibernateJpaDialect}가 JDBC 커넥션을 노출해야 {@code JdbcClient}가 같은 트랜잭션에
-     * 합류한다. 앱 테이블 {@code orders}와 엔터티 하나를 둔다.
+     * For apps that use a JPA transaction manager: Hibernate and {@link JpaTransactionManager} on the same DataSource.
+     * {@code JdbcClient} joins the same transaction only if the manager knows the DataSource and
+     * {@code HibernateJpaDialect} exposes the JDBC connection. It has an app table {@code orders} and one entity.
      */
     static PostgresStorage withJpaTransactions() {
         return withJpaTransactions(new HibernateJpaDialect());
     }
 
-    /** 대조군용: 매니저의 JPA dialect를 바꾼다. */
+    /** For control experiments: replaces the manager's JPA dialect. */
     static PostgresStorage withJpaTransactions(JpaDialect dialect) {
         DataSource dataSource = pool(SERVER_DEFAULT);
         JpaTransactionManager manager = new JpaTransactionManager(entityManagerFactory(dataSource));
@@ -95,15 +95,15 @@ final class PostgresStorage implements StorageUnderTest {
     }
 
     /**
-     * 커넥션 하나만 계속 쓰는 DataSource. 서버 준비 문장(pgjdbc prepareThreshold)이 그 커넥션에 쌓이는 동작을 확인할 때 쓴다.
-     * 호출자가 {@code destroy()}로 닫는다.
+     * A DataSource that keeps using a single connection. Used to check how server-side prepared statements (pgjdbc
+     * prepareThreshold) accumulate on that connection. The caller closes it with {@code destroy()}.
      */
     static org.springframework.jdbc.datasource.SingleConnectionDataSource singleConnection() {
         return new org.springframework.jdbc.datasource.SingleConnectionDataSource(CONTAINER.getJdbcUrl(),
                 CONTAINER.getUsername(), CONTAINER.getPassword(), true);
     }
 
-    /** 대조군: 격리 수준은 받아들이지만 JDBC 커넥션을 노출하지 않는 dialect */
+    /** Control experiment: a dialect that accepts the isolation level but does not expose the JDBC connection */
     static final class NonExposingJpaDialect extends org.springframework.orm.jpa.DefaultJpaDialect {
         @Override
         public Object beginTransaction(EntityManager entityManager,
@@ -113,7 +113,7 @@ final class PostgresStorage implements StorageUnderTest {
         }
     }
 
-    /** 앱 코드가 쓰는 EntityManager: 지금 트랜잭션의 것을 쓴다. */
+    /** The EntityManager that app code uses: it uses the one of the current transaction. */
     EntityManager sharedEntityManager() {
         return SharedEntityManagerCreator.createSharedEntityManager(entityManagerFactory(dataSource));
     }
@@ -142,7 +142,7 @@ final class PostgresStorage implements StorageUnderTest {
     public void deleteCommand(String commandId) {
         int deleted = sql().sql("DELETE FROM ledger_command WHERE command_id = :id").param("id", commandId).update();
         if (deleted != 1) {
-            throw new IllegalStateException("given 준비 실패: 지울 " + commandId + "가 없다");
+            throw new IllegalStateException("given setup failed: no command " + commandId + " to delete");
         }
         rebuildHeads();
     }
@@ -166,7 +166,7 @@ final class PostgresStorage implements StorageUnderTest {
         return true;
     }
 
-    /** PG {@code now()}는 트랜잭션마다 실제 시간으로 흐른다 */
+    /** PG {@code now()} advances with real time in each transaction */
     @Override
     public boolean clockStandsStill() {
         return false;
@@ -185,17 +185,18 @@ final class PostgresStorage implements StorageUnderTest {
     }
 
     /**
-     * 맨 앞 표시와 키 행을 행에서 다시 계산한다. 직접 SQL로 행을 바꾼 준비 뒤에 부른다. 스크립트의 표 잠금은
-     * 트랜잭션 안에서만 되므로 트랜잭션을 열거나, 열린 것에 합류한다.
+     * Recomputes the head marks and the key rows from the command rows. Called after setup that changes rows with
+     * plain SQL. The script's table lock works only inside a transaction, so it opens one or joins the open one.
      */
     void rebuildHeads() {
         transactions.inTransaction(() -> sql().sql(resource("rebuild-heads.sql")).update());
     }
 
     /**
-     * 키마다 표시가 행과 맞는지 본다: 표시는 0~1개다. 미완료가 있으면 표시가 있고, 그것은 가장 앞 미완료이거나
-     * 그보다 앞 순번의 끝난 명령(다음 claim이 넘길 것)이다. 미완료가 없으면 표시가 없거나 끝난 명령이다. 명령이 있는 키는
-     * 키 행이 있다(넘기기가 그 행을 잡는다). 어긋난 키를 모두 담아 던진다.
+     * Checks per key that the mark matches the rows: there are 0 or 1 marks. If there are unfinished commands, there is
+     * a mark, and it is on the first unfinished command or on a finished command with a lower sequence number (which
+     * the next claim passes on). If there are none, there is no mark or it is on a finished command. A key with
+     * commands has a key row (passing on locks that row). Throws with all keys that do not match.
      */
     void assertHeadsConsistent() {
         java.util.List<String> broken = sql().sql("""
@@ -206,10 +207,10 @@ final class PostgresStorage implements StorageUnderTest {
                            min(seq) FILTER (WHERE is_head) AS head_seq,
                            bool_or(is_head AND state IN ('PENDING','CLAIMED','HALTED')) AS head_unfinished
                     FROM ledger_command GROUP BY ordering_key)
-                SELECT a.ordering_key || ': 맨 앞 표시 ' || a.heads || '개(seq ' || coalesce(a.head_seq::text, '-')
-                       || CASE WHEN a.head_unfinished THEN ', 미완료' ELSE ', 끝남' END
-                       || '), 가장 앞 미완료 seq ' || coalesce(a.first_unfinished::text, '-')
-                       || CASE WHEN k.ordering_key IS NULL THEN ', 키 행 없음' ELSE '' END
+                SELECT a.ordering_key || ': ' || a.heads || ' head marks (seq ' || coalesce(a.head_seq::text, '-')
+                       || CASE WHEN a.head_unfinished THEN ', unfinished' ELSE ', finished' END
+                       || '), first unfinished seq ' || coalesce(a.first_unfinished::text, '-')
+                       || CASE WHEN k.ordering_key IS NULL THEN ', no key row' ELSE '' END
                 FROM actual a LEFT JOIN ledger_ordering_key k ON k.ordering_key = a.ordering_key
                 WHERE a.heads > 1
                    OR k.ordering_key IS NULL
@@ -220,7 +221,7 @@ final class PostgresStorage implements StorageUnderTest {
                 ORDER BY 1
                 """).query(String.class).list();
         if (!broken.isEmpty()) {
-            throw new AssertionError("맨 앞 표시가 행과 어긋난 키: " + broken);
+            throw new AssertionError("Keys whose head marks do not match the rows: " + broken);
         }
     }
 
@@ -272,7 +273,7 @@ final class PostgresStorage implements StorageUnderTest {
     private static String resource(String name) {
         try (InputStream in = JdbcCommandStore.class.getResourceAsStream(name)) {
             if (in == null) {
-                throw new IllegalStateException(name + "을 찾지 못했다");
+                throw new IllegalStateException(name + " not found");
             }
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {

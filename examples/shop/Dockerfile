@@ -1,5 +1,5 @@
-# 샘플 쇼핑몰 이미지. 호스트에 JDK가 없어도 compose가 이 안에서 Gradle로 빌드한다.
-# 빌드 컨텍스트는 저장소 루트다(라이브러리 모듈을 함께 빌드한다).
+# Sample shop image. compose builds it with Gradle inside the image, so the host needs no JDK.
+# The build context is the repository root (the library modules are built along with it).
 
 FROM eclipse-temurin:21-jdk AS build
 WORKDIR /src

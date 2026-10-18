@@ -15,10 +15,10 @@ import java.math.BigInteger;
 import java.time.Duration;
 
 /**
- * 테스트가 실제 TigerBeetle을 다루는 말. 계좌를 열고, 이체를 보내고, 잔액을 본다.
+ * Vocabulary for tests that work with a real TigerBeetle. Opens accounts, sends transfers, reads balances.
  *
- * <p>given 전용 메서드({@link #recorded}, {@link #rejected})는 전제가 성립하지 않으면 그 자리에서
- * "given 준비 실패"로 멈춘다. then 단계까지 가서 엉뚱한 이유로 실패하지 않게 하려는 것이다.
+ * <p>The given-only methods ({@link #recorded}, {@link #rejected}) stop on the spot with "given setup failed" when the
+ * precondition does not hold. This keeps a test from reaching the then step and failing for an unrelated reason.
  */
 public final class TigerBeetleTestLedger implements AutoCloseable {
 
@@ -38,30 +38,30 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
         return open(Account.notOpened(name), AccountFlags.NONE);
     }
 
-    /** {@code ledger}에 계좌를 연다. 다른 ledger의 계좌끼리는 이체할 수 없다. */
+    /** Opens an account on {@code ledger}. Accounts on different ledgers cannot transfer to each other. */
     public Account openAccount(String name, int ledger) {
         return open(Account.notOpened(name), AccountFlags.NONE, ledger);
     }
 
-    /** 잔액보다 많이 출금할 수 없는 계좌(지갑). 새 계좌의 잔액은 0이다. */
+    /** An account that cannot be debited beyond its balance (a wallet). A new account has a balance of 0. */
     public Account openAccountThatCannotOverdraw(String name) {
         return open(Account.notOpened(name), AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS);
     }
 
-    /** given: 아직 열지 않은 계좌({@link Account#notOpened})를 그 ID 그대로 연다. */
+    /** given: opens a not-yet-opened account ({@link Account#notOpened}) with its existing id. */
     public Account open(Account account) {
         return open(account, AccountFlags.NONE);
     }
 
-    /** 테스트 바깥의 입금 계좌에서 {@code amount}를 넣어 준다. */
+    /** Deposits {@code amount} from a deposit account outside the test. */
     public void deposit(Account to, long amount) {
         if (depositSource == null) {
-            depositSource = openAccount("입금 계좌");
+            depositSource = openAccount("deposit source");
         }
         recorded(Transfer.transfer(amount).from(depositSource).to(to));
     }
 
-    /** when: 이체를 보내고 결과 코드를 돌려준다. */
+    /** when: sends the transfer and returns the result code. */
     public CreateTransferStatus submit(Transfer transfer) {
         try {
             return singleStatus(client.createTransfers(batchOf(transfer)));
@@ -71,37 +71,42 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
         }
     }
 
-    /** when: 이체를 보내되 응답을 기다리지 않는다. */
+    /** when: sends the transfer without waiting for the reply. */
     public PendingTransfer submitInBackground(Transfer transfer) {
         return new PendingTransfer(transfer, client.createTransfersAsync(batchOf(transfer)));
     }
 
-    /** given: 이 이체가 이미 기록되어 있다. */
+    /** given: this transfer is already recorded. */
     public Transfer recorded(Transfer transfer) {
         CreateTransferStatus result = submit(transfer);
         if (result != CreateTransferStatus.Created) {
             throw new IllegalStateException(
-                    "given 준비 실패: " + transfer + " 이체가 기록되어야 했지만 결과는 " + result);
+                    "given setup failed: transfer " + transfer + " should have been recorded, but the result is "
+                            + result);
         }
         return transfer;
     }
 
-    /** given: 이 이체가 {@code reason}으로 거부된 적이 있다. */
+    /** given: this transfer has been rejected with {@code reason}. */
     public Transfer rejected(Transfer transfer, CreateTransferStatus reason) {
         CreateTransferStatus result = submit(transfer);
         if (result != reason) {
             throw new IllegalStateException(
-                    "given 준비 실패: " + transfer + " 이체가 " + reason + " 사유로 거부되어야 했지만 결과는 " + result);
+                    "given setup failed: transfer " + transfer + " should have been rejected for " + reason
+                            + ", but the result is " + result);
         }
         return transfer;
     }
 
-    /** 원장에 실제로 저장된 이체를 읽는다. 확정·해제가 예약에서 물려받은 값을 확인할 때 쓴다. */
+    /**
+     * Reads a transfer as actually stored in the ledger. Used to check the values a post or void inherits from the
+     * reservation.
+     */
     public StoredTransfer stored(Transfer transfer) {
         return stored(transfer.id(), transfer.toString());
     }
 
-    /** 이체 ID로 원장에 저장된 이체를 읽는다. 모듈의 어댑터가 보낸 이체를 확인할 때 쓴다. */
+    /** Reads the transfer stored in the ledger by transfer id. Used to check transfers sent by the module's adapter. */
     public StoredTransfer stored(BigInteger transferId) {
         return stored(UInt128.asBytes(transferId), "ID " + transferId);
     }
@@ -112,7 +117,7 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
         try {
             TransferBatch found = client.lookupTransfers(ids);
             if (!found.next()) {
-                throw new IllegalStateException(shown + " 이체가 원장에 없습니다");
+                throw new IllegalStateException("Transfer " + shown + " is not in the ledger");
             }
             return new StoredTransfer(found.getAmount(), found.getDebitAccountId(), found.getCreditAccountId(),
                     found.getLedger(), found.getCode(), UInt128.asBigInteger(found.getUserData128()), found.getUserData64(),
@@ -125,12 +130,12 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
     }
 
     /**
-     * given: 이 계좌를 닫는다. 이 계좌에서 나가는 0원 닫기 예약({@code PENDING | CLOSING_DEBIT})을 기록한다.
-     * 닫힌 계좌에서는 예약 해제만 허용된다.
+     * given: closes this account. Records a zero-amount closing reservation ({@code PENDING | CLOSING_DEBIT}) out of
+     * this account. A closed account allows only voiding reservations.
      */
     public Transfer closeAccount(Account account) {
         if (depositSource == null) {
-            depositSource = openAccount("입금 계좌");
+            depositSource = openAccount("deposit source");
         }
         Transfer closing = Transfer.reservation(0).from(account).to(depositSource);
         return recorded(new Transfer(closing.id(), account, depositSource, BigInteger.ZERO, closing.ledger(),
@@ -138,15 +143,15 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
     }
 
     /**
-     * given: 예약이 만료될 때까지 기다린다. TB는 만료된 예약의 보류 금액을 스스로 풀므로, 보내는 계좌의 보류 출금이 0이
-     * 되는 것을 본다. 보내는 계좌에 다른 예약이 없어야 한다.
+     * given: waits until the reservation expires. TB releases the held amount of an expired reservation by itself, so
+     * this watches the sending account's pending debits drop to 0. The sending account must have no other reservation.
      */
     public void waitUntilExpired(Transfer hold) {
         long deadline = System.nanoTime() + EXPIRY_LIMIT.toNanos();
         while (balanceOf(hold.from()).debitsPending() != 0) {
             if (System.nanoTime() > deadline) {
-                throw new IllegalStateException("given 준비 실패: " + hold + " 예약이 "
-                        + EXPIRY_LIMIT.toSeconds() + "초 안에 만료되지 않았습니다");
+                throw new IllegalStateException("given setup failed: reservation " + hold + " did not expire within "
+                        + EXPIRY_LIMIT.toSeconds() + " seconds");
             }
             try {
                 Thread.sleep(100);
@@ -163,7 +168,7 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
         try {
             AccountBatch found = client.lookupAccounts(ids);
             if (!found.next()) {
-                throw new IllegalStateException(account + " 계좌가 원장에 없습니다");
+                throw new IllegalStateException("Account " + account + " is not in the ledger");
             }
             return new Balance(exact(found.getDebitsPosted()), exact(found.getCreditsPosted()),
                     exact(found.getDebitsPending()), exact(found.getCreditsPending()));
@@ -180,11 +185,11 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
 
     static CreateTransferStatus singleStatus(CreateTransferResultBatch results) {
         if (!results.next()) {
-            throw new IllegalStateException("결과가 비어 있습니다");
+            throw new IllegalStateException("The result is empty");
         }
         CreateTransferStatus status = results.getStatus();
         if (results.next()) {
-            throw new IllegalStateException("결과가 2개 이상입니다");
+            throw new IllegalStateException("The result has more than one entry");
         }
         return status;
     }
@@ -204,7 +209,8 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
             CreateAccountResultBatch results = client.createAccounts(batch);
             while (results.next()) {
                 if (results.getStatus() != CreateAccountStatus.Created) {
-                    throw new IllegalStateException("given 준비 실패: " + account + " 계좌를 열지 못했습니다 — " + results.getStatus());
+                    throw new IllegalStateException("given setup failed: could not open account " + account + " — "
+                            + results.getStatus());
                 }
             }
         } catch (InterruptedException e) {
@@ -234,7 +240,7 @@ public final class TigerBeetleTestLedger implements AutoCloseable {
         return batch;
     }
 
-    /** 확정·해제는 계좌를 비워(0) 보내 예약의 계좌를 물려받는다. */
+    /** A post or void sends the accounts empty (0) so it inherits the reservation's accounts. */
     private static byte[] idOrZero(Account account) {
         return account == null ? new byte[16] : account.id();
     }

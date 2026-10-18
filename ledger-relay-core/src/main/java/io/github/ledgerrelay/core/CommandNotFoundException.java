@@ -1,12 +1,12 @@
 package io.github.ledgerrelay.core;
 
-/** 접수한 적 없는 명령을 가리켰다. */
+/** The caller referred to a command that was never accepted. */
 public class CommandNotFoundException extends RuntimeException {
 
     private final String commandId;
 
     public CommandNotFoundException(String commandId) {
-        super("접수한 적 없는 명령입니다: " + commandId);
+        super("No command was accepted with this id: " + commandId);
         this.commandId = commandId;
     }
 

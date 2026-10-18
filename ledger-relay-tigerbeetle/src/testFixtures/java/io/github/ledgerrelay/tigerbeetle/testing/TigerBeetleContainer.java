@@ -16,14 +16,14 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * 개발 모드 단일 레플리카 TigerBeetle 컨테이너.
+ * Single-replica TigerBeetle container in development mode.
  *
- * <p>TB는 io_uring을 쓰므로 Docker 기본 seccomp 프로필에서는 기동하지 못한다.
- * format과 start를 한 컨테이너에서 실행하려고 엔트리포인트를 셸로 바꾼다.
+ * <p>TB uses io_uring, so it cannot start under Docker's default seccomp profile.
+ * The entrypoint is replaced with a shell so that format and start run in one container.
  *
- * <p>TB 클라이언트는 timeout이 없어 서버가 죽으면 요청이 영원히 대기한다. 그래서 이 픽스처는
- * 컨테이너 로그를 항상 보관하고, 기동 직후 크래시(docs/development.md "알려진 문제")와 기동 후 사망을
- * 로그와 함께 즉시 실패로 드러낸다.
+ * <p>The TB client has no timeout, so when the server dies, requests wait forever. That is why this fixture always
+ * keeps the container logs and surfaces a crash right after startup (docs/development.md "Known issues") and a death
+ * after startup immediately as a failure, together with the logs.
  */
 public final class TigerBeetleContainer extends GenericContainer<TigerBeetleContainer> {
 
@@ -32,13 +32,13 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
 
     static final String VERSION_PROPERTY = "ledgerrelay.tigerbeetle.version";
     private static final String DATA_FILE = "/tmp/0_0.tigerbeetle";
-    /** 관찰된 크래시는 "listening on" 뒤 2~130ms 안에 일어났다. 그보다 넉넉한 안정 확인 구간. */
+    /** Observed crashes happened 2–130 ms after "listening on". A stability window with a comfortable margin. */
     private static final Duration STABILITY_WINDOW = Duration.ofSeconds(1);
     private static final int LOG_TAIL_CHARS = 2_000;
     /**
-     * listening 직후 죽으면 새 컨테이너로 다시 띄우는 최대 횟수(O4). TB 0.17.9는 listening 직후의 짧은 구간에 TCP 접속이
-     * 들어오면 panic한다. Docker Desktop이 공개 포트를 잇는 접속을 그 구간에 넣을 수 있어 테스트가 막을 수 없다
-     * (docs/failure-modes.md F26).
+     * Maximum number of times to start a new container when the server dies right after listening (O4). TB 0.17.9
+     * panics when a TCP connection arrives in a short window right after listening. Docker Desktop can open a
+     * connection to the published port in that window, so the tests cannot prevent it (docs/failure-modes.md F26).
      */
     static final int START_ATTEMPTS = 3;
 
@@ -54,12 +54,12 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
         this(unconfinedSeccomp, startScript());
     }
 
-    /** 테스트 전용: 시작 스크립트를 바꿔 크래시 같은 서버 동작을 흉내 낸다. 다시 띄울 때도 같은 스크립트다. */
+    /** Test only: replaces the start script to imitate server behavior such as a crash. Restarts reuse the script. */
     TigerBeetleContainer(boolean unconfinedSeccomp, String script) {
         this(unconfinedSeccomp, List.of(script));
     }
 
-    /** 테스트 전용: 시도마다 다른 스크립트를 쓴다. 시도가 스크립트보다 많으면 마지막 것을 쓴다. */
+    /** Test only: uses a different script per attempt. With more attempts than scripts, the last one is used. */
     TigerBeetleContainer(boolean unconfinedSeccomp, List<String> scriptsPerAttempt) {
         super(DockerImageName.parse(imageTag()));
         this.scriptsPerAttempt = List.copyOf(scriptsPerAttempt);
@@ -78,7 +78,8 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
         String version = System.getProperty(VERSION_PROPERTY);
         if (version == null || version.isBlank()) {
             throw new IllegalStateException(
-                    VERSION_PROPERTY + " 시스템 프로퍼티가 없습니다. Gradle test 태스크가 버전 카탈로그 값을 넘겨야 합니다.");
+                    VERSION_PROPERTY + " system property is missing. The Gradle test task must pass the version "
+                            + "catalog value.");
         }
         return "ghcr.io/tigerbeetle/tigerbeetle:" + version;
     }
@@ -89,8 +90,10 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
     }
 
     /**
-     * 기동한다. listening 직후 죽으면 새 컨테이너로 {@link #START_ATTEMPTS}번까지 다시 띄운다(O4). 그 밖의 기동 실패(io_uring
-     * 등)는 다시 띄워도 같으므로 바로 던진다. 실패는 컨테이너 로그 끝부분과 함께 던진다. 원인(io_uring, panic)이 메시지에 남는다.
+     * Starts the container. If the server dies right after listening, a new container is started, up to
+     * {@link #START_ATTEMPTS} times (O4). Other startup failures (io_uring and so on) repeat on restart, so they are
+     * thrown at once. Failures are thrown with the tail of the container log, so the cause (io_uring, panic) stays in
+     * the message.
      */
     @Override
     public void start() {
@@ -102,21 +105,23 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
                 super.start();
                 return;
             } catch (RuntimeException e) {
-                // 어느 단계(Testcontainers의 기동 검사, 로그 대기, 안정 확인)가 죽음을 먼저 봤는지가 아니라, 이번 시도가
-                // listening까지 갔는지로 판단한다. Testcontainers는 실패한 컨테이너를 이미 지웠다
+                // Decide by whether this attempt reached listening, not by which step (the Testcontainers startup
+                // check, the log wait, the stability check) saw the death first. Testcontainers has already removed
+                // the failed container
                 boolean listenedThenDied = listenedSince(attemptStart);
                 if (!listenedThenDied || attempt == START_ATTEMPTS) {
-                    String tries = listenedThenDied ? attempt + "번 시도 모두 listening 직후 종료. " : "";
-                    throw new ContainerLaunchException("TigerBeetle 컨테이너 기동 실패. " + tries + "로그 끝부분:\n"
+                    String tries = listenedThenDied ? attempt + " attempts all exited right after listening. " : "";
+                    throw new ContainerLaunchException("TigerBeetle container failed to start. " + tries + "Log tail:\n"
                             + logTail(), e);
                 }
-                // 재시도 빈도를 테스트 결과(XML의 system-err)에서 셀 수 있게 남긴다
-                System.err.println("O4: TigerBeetle가 listening 직후 종료되어 새 컨테이너로 다시 띄운다(시도 " + attempt + ")");
+                // Logged so that the retry rate can be counted in the test results (system-err in the XML)
+                System.err.println("O4: TigerBeetle exited right after listening; starting a new container (attempt "
+                        + attempt + ")");
             }
         }
     }
 
-    /** 이번 시도의 로그에 listening이 찍혔는가. 로그는 따로 흘러오므로 잠깐 기다려 본다. */
+    /** Whether listening appears in this attempt's log. The log arrives separately, so this waits briefly. */
     private boolean listenedSince(int attemptStart) {
         long deadline = System.nanoTime() + Duration.ofMillis(500).toNanos();
         do {
@@ -139,7 +144,7 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
             Thread.sleep(STABILITY_WINDOW.toMillis());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("안정 확인 중 인터럽트", e);
+            throw new IllegalStateException("Interrupted during the stability check", e);
         }
         if (!isRunning()) {
             throw new DiedRightAfterListening();
@@ -147,36 +152,40 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
     }
 
     /**
-     * 서버가 아직 살아 있는지 확인한다. 죽었다면 로그와 함께 실패한다. 테스트의 {@code @BeforeEach}에서 불러,
-     * 죽은 서버에 보낸 요청이 timeout까지 매달리는 일이 테스트마다 반복되지 않게 한다.
+     * Checks that the server is still alive. If it died, fails with the logs. Call it from a test's
+     * {@code @BeforeEach} so that requests to a dead server do not hang until timeout in every test.
      */
     public void assertAlive() {
         if (!isRunning()) {
-            throw new IllegalStateException("TigerBeetle 컨테이너가 종료되었습니다. 로그 끝부분:\n" + logTail());
+            throw new IllegalStateException("The TigerBeetle container has exited. Log tail:\n" + logTail());
         }
     }
 
     /**
-     * 호스트에 포트를 공개하지 않는다. 같은 Docker 네트워크의 프록시로만 접속할 때 쓴다. 공개 포트 경로의 접속이 listening
-     * 직후의 panic을 부르므로(F26), 공개할 필요가 없으면 공개하지 않는다.
+     * Does not publish the port on the host. Used when connecting only through a proxy on the same Docker network.
+     * A connection through the published port causes the panic right after listening (F26), so the port is not
+     * published when there is no need.
      */
     public TigerBeetleContainer withoutPublishedPort() {
         setExposedPorts(new java.util.ArrayList<>());
         return this;
     }
 
-    /** 테스트 전용: 모든 시도의 로그. 시도마다 구분선이 있다. */
+    /** Test only: logs of all attempts, with a separator line per attempt. */
     String allLogs() {
         return withAttemptMarks(logs.toUtf8String());
     }
 
-    /** 시도마다 {@code --- TB 시작 시도 n ---} 구분선을 넣는다. 재시도 뒤의 로그에서 앞 시도의 panic을 지금 것으로 오해하지 않게. */
+    /**
+     * Inserts a {@code --- TB start attempt n ---} separator per attempt, so that after a retry a panic from an earlier
+     * attempt is not mistaken for the current one.
+     */
     private String withAttemptMarks(String all) {
         StringBuilder marked = new StringBuilder();
         int from = 0;
         for (int[] mark : attemptMarks) {
             int at = Math.min(mark[1], all.length());
-            marked.append(all, from, at).append("--- TB 시작 시도 ").append(mark[0]).append(" ---\n");
+            marked.append(all, from, at).append("--- TB start attempt ").append(mark[0]).append(" ---\n");
             from = at;
         }
         return marked.append(all.substring(from)).toString();
@@ -187,19 +196,22 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
         return all.length() <= LOG_TAIL_CHARS ? all : all.substring(all.length() - LOG_TAIL_CHARS);
     }
 
-    /** 안정 확인 구간 안에 서버가 죽었다. 다시 띄울지는 이 예외가 아니라 이번 시도의 로그로 정한다. */
+    /**
+     * The server died within the stability window. Whether to restart is decided by this attempt's log, not by this
+     * exception.
+     */
     private static final class DiedRightAfterListening extends IllegalStateException {
         DiedRightAfterListening() {
-            super("TigerBeetle가 listening 직후 종료되었습니다");
+            super("TigerBeetle exited right after listening");
         }
     }
 
-    /** TB 클라이언트가 해석할 수 있는 {@code IPv4:포트} 주소. */
+    /** An {@code IPv4:port} address the TB client can parse. */
     public String replicaAddress() {
         return ipv4(getHost()) + ":" + getMappedPort(PORT);
     }
 
-    /** 새 클라이언트(새 세션). 호출자가 닫아야 한다. */
+    /** A new client (a new session). The caller must close it. */
     public Client newClient() {
         return new Client(UInt128.asBytes(0), new String[] {replicaAddress()});
     }
@@ -209,10 +221,10 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
             return Arrays.stream(InetAddress.getAllByName(host))
                     .filter(Inet4Address.class::isInstance)
                     .findFirst()
-                    .orElseThrow(() -> new IllegalStateException("IPv4 주소가 없습니다: " + host))
+                    .orElseThrow(() -> new IllegalStateException("No IPv4 address: " + host))
                     .getHostAddress();
         } catch (UnknownHostException e) {
-            throw new IllegalStateException("호스트를 해석할 수 없습니다: " + host, e);
+            throw new IllegalStateException("Cannot resolve host: " + host, e);
         }
     }
 }

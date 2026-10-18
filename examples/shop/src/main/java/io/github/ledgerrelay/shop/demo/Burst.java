@@ -13,15 +13,15 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
- * 여러 구매자의 주문을 각기 다른 키로 한꺼번에 넣는다. 워커 둘이 같은 명령을 함께 집지 않고 나눠 처리하는 것을
- * 보이려는 장면이다. 같은 키 경쟁은 더블 클릭 장면이 맡는다.
+ * Places orders from several buyers at once, each on its own ordering key. The scenario shows that two workers split
+ * the work and never claim the same command together. Contention on one key is covered by the double-click scenario.
  */
 @Component
 @Profile("demo")
 class Burst {
 
     static final int MAX = 200;
-    /** 잔액을 비우는 테스트가 쓰는 마지막 구매자(1005)는 빼고 돌린다. */
+    /** Leaves out the last buyer (1005), which the balance-draining test uses. */
     private static final List<Long> BUYERS = Accounts.BUYERS.subList(0, 4);
 
     private final OrderService shop;
@@ -32,7 +32,7 @@ class Burst {
 
     List<Long> run(int count) {
         if (count < 1 || count > MAX) {
-            throw new IllegalArgumentException("몰아넣기는 1~" + MAX + "건입니다: " + count);
+            throw new IllegalArgumentException("A burst must have 1 to " + MAX + " orders: " + count);
         }
         List<Catalog.Product> products = Catalog.all();
         try (ExecutorService pool = Executors.newFixedThreadPool(8)) {

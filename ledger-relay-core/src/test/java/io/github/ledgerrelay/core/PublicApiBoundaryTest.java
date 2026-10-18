@@ -7,10 +7,13 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("공개 API의 경계 — 앱이 import하는 패키지에는 앱이 쓸 타입만 둔다")
+@DisplayName("Public API boundary — the package the app imports holds only types the app uses")
 class PublicApiBoundaryTest {
 
-    /** 공개 패키지의 최상위 공개 타입. 늘리거나 줄이는 것은 공개 API를 바꾸는 일이므로 손으로 고친다. */
+    /**
+     * Top-level public types of the public package. Adding or removing one changes the public API, so edit this by
+     * hand.
+     */
     static final List<String> PUBLIC_TYPES = List.of(
             "CommandConflictException",
             "CommandKind",
@@ -36,17 +39,20 @@ class PublicApiBoundaryTest {
     static final String PACKAGE = "io.github.ledgerrelay.core";
 
     @Test
-    @DisplayName("공개 패키지에는 정해 둔 타입만 있다 — 규칙은 domain에, 서비스는 application에, 포트는 spi에 둔다")
+    @DisplayName("The public package holds only the listed types — rules go in domain, services in application, ports in spi")
     void onlyTheListedTypesArePublic() {
         // then
         assertThat(publicTopLevelTypes())
-                .as("공개 패키지 %s의 최상위 공개 타입", PACKAGE)
+                .as("top-level public types of public package %s", PACKAGE)
                 .containsExactlyInAnyOrderElementsOf(PUBLIC_TYPES);
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ──────────────────────────────────────────
 
-    /** main 소스셋에서 가져온 클래스({@link ArchitectureTest#MAIN}) 중 공개 패키지의 최상위 공개 타입 이름. */
+    /**
+     * Names of the top-level public types in the public package, among classes from the main source set ({@link
+     * ArchitectureTest#MAIN}).
+     */
     private static List<String> publicTopLevelTypes() {
         return ArchitectureTest.MAIN.stream()
                 .filter(type -> type.getPackageName().equals(PACKAGE))

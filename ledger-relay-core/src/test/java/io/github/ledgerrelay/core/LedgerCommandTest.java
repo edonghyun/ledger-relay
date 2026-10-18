@@ -22,16 +22,16 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
-@DisplayName("명령 모델 — 빌더와 정규화")
+@DisplayName("Command model — builder and normalization")
 class LedgerCommandTest {
 
     @Nested
     @Order(1)
-    @DisplayName("올바른 명령을 만들면")
+    @DisplayName("When a valid command is built")
     class ValidCommands {
 
         @Test
-        @DisplayName("이체는 적은 값을 그대로 담고, 생략한 user_data는 0이 된다")
+        @DisplayName("A transfer keeps the values written, and omitted user_data becomes 0")
         void transferKeepsWhatWasWritten() {
             // when
             LedgerCommand payment = LedgerCommand.transfer("pay-1").orderingKey("order-42")
@@ -43,7 +43,7 @@ class LedgerCommandTest {
         }
 
         @Test
-        @DisplayName("예약은 만료 시간(timeoutSeconds)을 함께 담는다")
+        @DisplayName("A reservation also carries its expiry (timeoutSeconds)")
         void reserveKeepsItsTimeout() {
             // when
             LedgerCommand hold = LedgerCommand.reserve("hold-1").orderingKey("order-42")
@@ -55,7 +55,7 @@ class LedgerCommandTest {
         }
 
         @Test
-        @DisplayName("금액을 생략한 확정은 전액 확정(AMOUNT_MAX)이 되고, 계좌·ledger·code는 예약을 따르도록 0이 된다")
+        @DisplayName("A post without an amount becomes a full post (AMOUNT_MAX), and accounts, ledger and code become 0 so they follow the reservation")
         void postWithoutAmountCapturesEverything() {
             // when
             LedgerCommand capture = LedgerCommand.post("capture-1").orderingKey("order-42")
@@ -67,7 +67,7 @@ class LedgerCommandTest {
         }
 
         @Test
-        @DisplayName("금액을 적은 확정은 그 금액만 확정한다(부분 확정)")
+        @DisplayName("A post with an amount posts only that amount (partial post)")
         void postWithAmountCapturesPart() {
             // when
             LedgerCommand capture = LedgerCommand.post("capture-1").orderingKey("order-42")
@@ -78,7 +78,7 @@ class LedgerCommandTest {
         }
 
         @Test
-        @DisplayName("해제는 금액 0으로 담긴다")
+        @DisplayName("A void is stored with amount 0")
         void voidHasNoAmount() {
             // when
             LedgerCommand release = LedgerCommand.voidReservation("release-1").orderingKey("order-42")
@@ -89,7 +89,7 @@ class LedgerCommandTest {
                     BigInteger.ZERO, BigInteger.ZERO, BigInteger.ZERO, 0, 0, 0, "hold-1", 0, 0));
         }
         @Test
-        @DisplayName("UTF-8 512바이트의 commandId는 담긴다 — 상한 바로 아래")
+        @DisplayName("A commandId of 512 UTF-8 bytes is accepted — just under the limit")
         void aCommandIdOf512BytesIsAccepted() {
             // when
             LedgerCommand payment = aTransfer("a".repeat(512)).build();
@@ -99,17 +99,17 @@ class LedgerCommandTest {
         }
 
         @Test
-        @DisplayName("짝이 맞는 서로게이트(이모지)는 순서 키에 그대로 담긴다")
+        @DisplayName("A paired surrogate (emoji) in the ordering key is kept as is")
         void aTransferWithAPairedSurrogateIsAccepted() {
             // when
-            LedgerCommand payment = aTransfer("pay-1").orderingKey("주문-😀").build();
+            LedgerCommand payment = aTransfer("pay-1").orderingKey("order-😀").build();
 
             // then
-            assertThat(payment.orderingKey()).isEqualTo("주문-😀");
+            assertThat(payment.orderingKey()).isEqualTo("order-😀");
         }
 
         @Test
-        @DisplayName("TB 필드의 최댓값(ledger 2^32-1, code 65535, 만료 2^32-1초)은 그대로 담긴다")
+        @DisplayName("The largest TB field values (ledger 2^32-1, code 65535, expiry 2^32-1 seconds) are kept as is")
         void acceptsTheLargestTigerBeetleValues() {
             // when
             LedgerCommand hold = LedgerCommand.reserve("hold-1").orderingKey("order-42")
@@ -125,125 +125,126 @@ class LedgerCommandTest {
 
     @Nested
     @Order(2)
-    @DisplayName("규칙을 어긴 명령을 만들면")
+    @DisplayName("When a command that breaks a rule is built")
     class InvalidCommands {
 
         @ParameterizedTest(name = "{argumentSetName} → \"{1}\"", quoteTextArguments = false)
         @MethodSource("invalidCommands")
-        @DisplayName("만들 수 없고, 무엇이 틀렸는지 알려 준다")
+        @DisplayName("It cannot be built, and the error says what was wrong")
         void isRejectedWithTheReason(ThrowingCallable building, String reason) {
             assertRejectedAsInvalid(building, reason);
         }
 
         static Stream<Arguments> invalidCommands() {
             return Stream.of(
-                    argumentSet("commandId가 비어 있으면",
+                    argumentSet("a blank commandId",
                             (ThrowingCallable) () -> aTransfer(" ").build(),
-                            "commandId가 필요합니다"),
-                    argumentSet("orderingKey가 없으면",
-                            (ThrowingCallable) () -> aTransfer("pay-1").orderingKey(null).build(), "orderingKey가 필요합니다"),
-                    argumentSet("보내는 계좌가 0(없음)이면",
-                            (ThrowingCallable) () -> aTransfer("pay-1").debit(0).build(), "debitAccountId가 필요합니다"),
-                    argumentSet("받는 계좌가 2^128-1(TB 예약값)이면",
+                            "commandId is required"),
+                    argumentSet("no orderingKey",
+                            (ThrowingCallable) () -> aTransfer("pay-1").orderingKey(null).build(), "orderingKey is required"),
+                    argumentSet("debit account 0 (none)",
+                            (ThrowingCallable) () -> aTransfer("pay-1").debit(0).build(), "debitAccountId is required"),
+                    argumentSet("credit account 2^128-1 (reserved by TB)",
                             (ThrowingCallable) () -> aTransfer("pay-1").credit(UINT128_MAX).build(),
-                            "creditAccountId는 1 이상 2^128-2 이하여야 합니다"),
-                    argumentSet("보내는 계좌와 받는 계좌가 같으면",
-                            (ThrowingCallable) () -> aTransfer("pay-1").credit(1001).build(), "같은 계좌일 수 없습니다"),
-                    argumentSet("이체에 금액이 없으면",
+                            "creditAccountId must be between 1 and 2^128-2"),
+                    argumentSet("the same debit and credit account",
+                            (ThrowingCallable) () -> aTransfer("pay-1").credit(1001).build(), "cannot be the same account"),
+                    argumentSet("a transfer without an amount",
                             (ThrowingCallable) () -> aTransferWithoutAmount().build(),
-                            "amount가 필요합니다"),
-                    argumentSet("금액이 음수면",
-                            (ThrowingCallable) () -> aTransfer("pay-1").amount(-1).build(), "amount는 0 이상 2^128-1 이하여야 합니다"),
-                    argumentSet("금액이 2^128 이상이면",
+                            "amount is required"),
+                    argumentSet("a negative amount",
+                            (ThrowingCallable) () -> aTransfer("pay-1").amount(-1).build(), "amount must be between 0 and 2^128-1"),
+                    argumentSet("an amount of 2^128 or more",
                             (ThrowingCallable) () -> aTransfer("pay-1").amount(UINT128_MAX.add(BigInteger.ONE)).build(),
-                            "amount는 0 이상 2^128-1 이하여야 합니다"),
-                    argumentSet("ledger가 0이면",
-                            (ThrowingCallable) () -> aTransfer("pay-1").ledger(0).build(), "ledger는 1 이상 2^32-1 이하여야 합니다"),
-                    argumentSet("code가 65535를 넘으면",
-                            (ThrowingCallable) () -> aTransfer("pay-1").code(65536).build(), "code는 1 이상 65535 이하여야 합니다"),
-                    argumentSet("이체에 timeoutSeconds를 주면",
-                            (ThrowingCallable) () -> aTransfer("pay-1").timeoutSeconds(30).build(), "timeoutSeconds는 reserve 전용입니다"),
-                    argumentSet("예약의 timeoutSeconds가 2^32 이상이면",
+                            "amount must be between 0 and 2^128-1"),
+                    argumentSet("ledger 0",
+                            (ThrowingCallable) () -> aTransfer("pay-1").ledger(0).build(), "ledger must be between 1 and 2^32-1"),
+                    argumentSet("code above 65535",
+                            (ThrowingCallable) () -> aTransfer("pay-1").code(65536).build(), "code must be between 1 and 65535"),
+                    argumentSet("timeoutSeconds on a transfer",
+                            (ThrowingCallable) () -> aTransfer("pay-1").timeoutSeconds(30).build(), "timeoutSeconds is only for reserve"),
+                    argumentSet("reservation timeoutSeconds of 2^32 or more",
                             (ThrowingCallable) () -> aReserve().timeoutSeconds(1L << 32).build(),
-                            "timeoutSeconds는 0 이상 2^32-1 이하여야 합니다"),
-                    argumentSet("이체에 reservation을 주면",
-                            (ThrowingCallable) () -> aTransfer("pay-1").reservation("hold-1").build(), "reservation은 post·void 전용입니다"),
-                    argumentSet("확정에 reservation이 없으면",
+                            "timeoutSeconds must be between 0 and 2^32-1"),
+                    argumentSet("reservation on a transfer",
+                            (ThrowingCallable) () -> aTransfer("pay-1").reservation("hold-1").build(), "reservation is only for post and void"),
+                    argumentSet("a post without a reservation",
                             (ThrowingCallable) () -> LedgerCommand.post("capture-1").orderingKey("order-42").build(),
-                            "post·void에는 reservation이 필요합니다"),
-                    argumentSet("확정에 보내는 계좌를 주면",
-                            (ThrowingCallable) () -> aPost().debit(1001).build(), "post·void는 예약의 계좌·ledger·code를 따르므로"),
-                    argumentSet("확정 금액이 0이면 — TB는 0원 확정 후 나머지를 풀므로, 전액 확정을 기대한 사용자가 돈을 못 받는다",
-                            (ThrowingCallable) () -> aPost().amount(0).build(), "post의 amount는 0일 수 없습니다"),
-                    argumentSet("orderingKey가 공백이면",
-                            (ThrowingCallable) () -> aTransfer("pay-1").orderingKey(" ").build(), "orderingKey가 필요합니다"),
-                    argumentSet("보내는 계좌가 음수면",
-                            (ThrowingCallable) () -> aTransfer("pay-1").debit(-5).build(), "debitAccountId는 1 이상 2^128-2 이하여야 합니다"),
-                    argumentSet("ledger가 2^32 이상이면",
-                            (ThrowingCallable) () -> aTransfer("pay-1").ledger(1L << 32).build(), "ledger는 1 이상 2^32-1 이하여야 합니다"),
-                    argumentSet("code가 0이면",
-                            (ThrowingCallable) () -> aTransfer("pay-1").code(0).build(), "code는 1 이상 65535 이하여야 합니다"),
-                    argumentSet("예약의 timeoutSeconds가 음수면",
+                            "post and void require a reservation"),
+                    argumentSet("a debit account on a post",
+                            (ThrowingCallable) () -> aPost().debit(1001).build(), "post and void take the accounts, ledger and code from the reservation"),
+                    argumentSet("a post amount of 0 — TB posts 0 and releases the rest, so a user who expected a full post gets no money",
+                            (ThrowingCallable) () -> aPost().amount(0).build(), "post amount cannot be 0"),
+                    argumentSet("a blank orderingKey",
+                            (ThrowingCallable) () -> aTransfer("pay-1").orderingKey(" ").build(), "orderingKey is required"),
+                    argumentSet("a negative debit account",
+                            (ThrowingCallable) () -> aTransfer("pay-1").debit(-5).build(), "debitAccountId must be between 1 and 2^128-2"),
+                    argumentSet("ledger 2^32 or more",
+                            (ThrowingCallable) () -> aTransfer("pay-1").ledger(1L << 32).build(), "ledger must be between 1 and 2^32-1"),
+                    argumentSet("code 0",
+                            (ThrowingCallable) () -> aTransfer("pay-1").code(0).build(), "code must be between 1 and 65535"),
+                    argumentSet("a negative reservation timeoutSeconds",
                             (ThrowingCallable) () -> aReserve().timeoutSeconds(-1).build(),
-                            "timeoutSeconds는 0 이상 2^32-1 이하여야 합니다"),
-                    argumentSet("확정에 timeoutSeconds를 주면",
-                            (ThrowingCallable) () -> aPost().timeoutSeconds(30).build(), "timeoutSeconds는 reserve 전용입니다"),
-                    argumentSet("확정에 받는 계좌를 주면",
-                            (ThrowingCallable) () -> aPost().credit(2002).build(), "post·void는 예약의 계좌·ledger·code를 따르므로"),
-                    argumentSet("확정에 ledger를 주면",
-                            (ThrowingCallable) () -> aPost().ledger(1).build(), "post·void는 예약의 계좌·ledger·code를 따르므로"),
-                    argumentSet("해제에 code를 주면",
-                            (ThrowingCallable) () -> aVoid().code(10).build(), "post·void는 예약의 계좌·ledger·code를 따르므로"),
-                    argumentSet("해제에 reservation이 없으면",
+                            "timeoutSeconds must be between 0 and 2^32-1"),
+                    argumentSet("timeoutSeconds on a post",
+                            (ThrowingCallable) () -> aPost().timeoutSeconds(30).build(), "timeoutSeconds is only for reserve"),
+                    argumentSet("a credit account on a post",
+                            (ThrowingCallable) () -> aPost().credit(2002).build(), "post and void take the accounts, ledger and code from the reservation"),
+                    argumentSet("a ledger on a post",
+                            (ThrowingCallable) () -> aPost().ledger(1).build(), "post and void take the accounts, ledger and code from the reservation"),
+                    argumentSet("a code on a void",
+                            (ThrowingCallable) () -> aVoid().code(10).build(), "post and void take the accounts, ledger and code from the reservation"),
+                    argumentSet("a void without a reservation",
                             (ThrowingCallable) () -> LedgerCommand.voidReservation("release-1").orderingKey("order-42").build(),
-                            "post·void에는 reservation이 필요합니다"),
-                    argumentSet("확정의 reservation이 공백이면",
-                            (ThrowingCallable) () -> aPost().reservation(" ").build(), "post·void에는 reservation이 필요합니다"),
-                    argumentSet("해제에 금액을 주면",
-                            (ThrowingCallable) () -> aVoid().amount(100).build(), "void는 amount를 받지 않습니다"),
-                    argumentSet("commandId에 U+0000이 있으면 — PG text가 받지 않아 접수가 SQL 오류로 앱 트랜잭션을 깬다",
+                            "post and void require a reservation"),
+                    argumentSet("a blank reservation on a post",
+                            (ThrowingCallable) () -> aPost().reservation(" ").build(), "post and void require a reservation"),
+                    argumentSet("an amount on a void",
+                            (ThrowingCallable) () -> aVoid().amount(100).build(), "void does not take an amount"),
+                    argumentSet("U+0000 in commandId — PG text rejects it, so the submit breaks the app transaction with an SQL error",
                             (ThrowingCallable) () -> aTransfer("pay\u00001").build(),
-                            "commandId에 U+0000이나 짝 없는 서로게이트를 쓸 수 없습니다"),
-                    argumentSet("순서 키에 짝 없는 서로게이트가 있으면 — UTF-8로 바꿀 때 '?'가 되어 해시가 충돌한다",
+                            "commandId cannot contain U+0000 or a lone surrogate"),
+                    argumentSet("an unpaired surrogate in the ordering key — it becomes '?' when encoded as UTF-8, so hashes collide",
                             (ThrowingCallable) () -> aTransfer("pay-1").orderingKey("order-\uD800").build(),
-                            "orderingKey에 U+0000이나 짝 없는 서로게이트를 쓸 수 없습니다"),
-                    argumentSet("확정의 reservation에 U+0000이 있으면",
+                            "orderingKey cannot contain U+0000 or a lone surrogate"),
+                    argumentSet("U+0000 in a post's reservation",
                             (ThrowingCallable) () -> aPost().reservation("hold\u00001").build(),
-                            "reservationCommandId에 U+0000이나 짝 없는 서로게이트를 쓸 수 없습니다"),
-                    argumentSet("commandId가 UTF-8 513바이트면 — PG 인덱스 항목 한계에 닿기 전에 막는다",
+                            "reservationCommandId cannot contain U+0000 or a lone surrogate"),
+                    argumentSet("a commandId of 513 UTF-8 bytes — stopped before it reaches the PG index entry limit",
                             (ThrowingCallable) () -> aTransfer("a".repeat(513)).build(),
-                            "commandId는 UTF-8 512바이트 이하여야 합니다"),
-                    argumentSet("순서 키가 한글 171자(513바이트)면",
+                            "commandId must be at most 512 bytes in UTF-8"),
+                    argumentSet("an ordering key of 171 Hangul syllables (513 bytes)",
                             (ThrowingCallable) () -> aTransfer("pay-1").orderingKey("가".repeat(171)).build(),
-                            "orderingKey는 UTF-8 512바이트 이하여야 합니다"),
-                    argumentSet("보내는 계좌가 null이면",
+                            "orderingKey must be at most 512 bytes in UTF-8"),
+                    argumentSet("a null debit account",
                             (ThrowingCallable) () -> aTransfer("pay-1").debit((BigInteger) null).build(),
-                            "debitAccountId가 필요합니다"),
-                    argumentSet("받는 계좌가 null이면",
+                            "debitAccountId is required"),
+                    argumentSet("a null credit account",
                             (ThrowingCallable) () -> aTransfer("pay-1").credit((BigInteger) null).build(),
-                            "creditAccountId가 필요합니다"),
-                    argumentSet("확정이 자기 자신을 reservation으로 적으면",
+                            "creditAccountId is required"),
+                    argumentSet("a post that names itself as the reservation",
                             (ThrowingCallable) () -> LedgerCommand.post("capture-1").orderingKey("order-42")
                                     .reservation("capture-1").build(),
-                            "post·void는 자기 자신을 reservation으로 참조할 수 없습니다"));
+                            "post and void cannot refer to themselves as the reservation"));
         }
     }
 
     @Nested
     @Order(3)
-    @DisplayName("문자열이 commandId로 접수될 수 있는지 물으면 — 조회·포기가 DB에 보내기 전에 쓴다 (F20)")
+    @DisplayName("When asked whether a string could be accepted as a commandId — used by query and abandon before going to the DB (F20)")
     class AcceptableIds {
 
         @Test
-        @DisplayName("UTF-8 513바이트면 접수될 수 없다")
+        @DisplayName("513 UTF-8 bytes cannot be accepted")
         void anIdOver512BytesIsNotAcceptable() {
-            assertThat(LedgerCommand.isAcceptableId("가".repeat(171))).as("513바이트 id를 접수할 수 있는가").isFalse();
+            // Each Hangul syllable is 3 bytes in UTF-8, so 171 of them make 513 bytes.
+            assertThat(LedgerCommand.isAcceptableId("가".repeat(171))).as("whether a 513-byte id can be accepted").isFalse();
         }
 
         @ParameterizedTest(name = "{0} → {1}", quoteTextArguments = false)
         @CsvSource(delimiter = '|', nullValues = "null", textBlock = """
                 pay-1        | true
-                주문-😀      | true
+                order-😀     | true
                 null         | false
                 ' '          | false
                 pay\u00001   | false
@@ -251,22 +252,24 @@ class LedgerCommandTest {
                 \uDC00-pay   | false
                 pay\uD800x   | false
                 """)
-        @DisplayName("공백이 아니고 U+0000과 짝 없는 서로게이트가 없을 때만 그렇다")
+        @DisplayName("Only when it is not blank and has no U+0000 and no unpaired surrogate")
         void answersWhetherTheIdCouldHaveBeenAccepted(String commandId, boolean acceptable) {
-            // 표의 \\uXXXX는 컴파일러가 실제 문자(U+0000, 서로게이트 반쪽)로 바꾼다
-            assertThat(LedgerCommand.isAcceptableId(commandId)).as("%s를 commandId로 접수할 수 있는가", commandId)
+            // The compiler turns \\uXXXX in the table into the actual characters (U+0000, surrogate halves)
+            assertThat(LedgerCommand.isAcceptableId(commandId)).as("whether %s can be accepted as a commandId", commandId)
                     .isEqualTo(acceptable);
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ──────────────────────────────────────────
 
-    /** 기준 이체: order-42 키에서 1001 → 2002로 500, ledger 1, code 10. 각 행은 여기서 한 가지만 바꾼다. */
+    /**
+     * Base transfer: 500 from 1001 to 2002 on key order-42, ledger 1, code 10. Each row changes only one thing from it.
+     */
     private static LedgerCommand.Builder aTransfer(String commandId) {
         return aTransferWithoutAmount(commandId).amount(500);
     }
 
-    /** 금액만 빠진 기준 이체. */
+    /** The base transfer without the amount. */
     private static LedgerCommand.Builder aTransferWithoutAmount() {
         return aTransferWithoutAmount("pay-1");
     }
@@ -276,18 +279,18 @@ class LedgerCommandTest {
                 .debit(1001).credit(2002).ledger(1).code(10);
     }
 
-    /** 기준 예약: 기준 이체와 같은 값에 만료 30초. */
+    /** Base reservation: the same values as the base transfer, with a 30-second expiry. */
     private static LedgerCommand.Builder aReserve() {
         return LedgerCommand.reserve("hold-1").orderingKey("order-42")
                 .debit(1001).credit(2002).amount(500).ledger(1).code(10).timeoutSeconds(30);
     }
 
-    /** 기준 확정: hold-1 전액 확정. */
+    /** Base post: full post of hold-1. */
     private static LedgerCommand.Builder aPost() {
         return LedgerCommand.post("capture-1").orderingKey("order-42").reservation("hold-1");
     }
 
-    /** 기준 해제: hold-1 해제. */
+    /** Base void: void of hold-1. */
     private static LedgerCommand.Builder aVoid() {
         return LedgerCommand.voidReservation("release-1").orderingKey("order-42").reservation("hold-1");
     }
@@ -298,7 +301,7 @@ class LedgerCommandTest {
 
     private static void assertRejectedAsInvalid(ThrowingCallable building, String reason) {
         assertThatThrownBy(building)
-                .as("명령을 만들 수 없기(InvalidCommandException: %s)", reason)
+                .as("command cannot be built (InvalidCommandException: %s)", reason)
                 .isInstanceOf(InvalidCommandException.class)
                 .hasMessageContaining(reason);
     }

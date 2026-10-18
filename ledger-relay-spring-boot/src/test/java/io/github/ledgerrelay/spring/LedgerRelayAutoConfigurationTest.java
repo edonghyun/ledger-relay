@@ -23,13 +23,13 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
- * 자동 설정이 무엇을 만들고 언제 기동을 막는지. DB와 TB에는 연결하지 않는다: 빈을 만드는 것만으로는 연결하지 않고,
- * 워커는 끈다(켜는 장은 연결 실패를 로그로 남기며 돈다).
+ * What the auto-configuration creates and when it blocks startup. It connects to neither the DB nor TB: creating the
+ * beans does not connect, and the worker is off (a running worker keeps logging connection failures).
  */
-@DisplayName("자동 설정 — 의존성 하나와 ledger-relay.* 설정으로 릴레이를 쓴다")
+@DisplayName("Auto-configuration — one dependency and ledger-relay.* settings are enough to use the relay")
 class LedgerRelayAutoConfigurationTest {
 
-    /** 연결할 수 없는 주소다. 빈을 만드는 데에는 연결이 필요 없다. */
+    /** An address that cannot be reached. Creating the beans needs no connection. */
     final DataSource dataSource = new DriverManagerDataSource("jdbc:postgresql://127.0.0.1:1/none");
 
     final ApplicationContextRunner app = new ApplicationContextRunner()
@@ -40,11 +40,11 @@ class LedgerRelayAutoConfigurationTest {
 
     @Nested
     @Order(1)
-    @DisplayName("앱이 DataSource와 핸들러를 주면")
+    @DisplayName("When the app provides a DataSource and a handler")
     class WithTheAppsBeans {
 
         @Test
-        @DisplayName("접수 포트와 운영자 포트가 하나씩 생긴다")
+        @DisplayName("Exactly one accept port and one operator port are created")
         void theRelayAndOperatorAreProvided() {
             app.withBean(LedgerOutcomeHandler.class, RecordingHandler::new).run(context -> {
                 assertThat(context).hasSingleBean(LedgerRelay.class);
@@ -53,56 +53,58 @@ class LedgerRelayAutoConfigurationTest {
         }
 
         @Test
-        @DisplayName("앱이 TB 클라이언트를 주면 그것을 쓰고 새로 만들지 않는다")
+        @DisplayName("When the app provides a TB client, that client is used and no new one is created")
         void anAppClientIsUsedInsteadOfOurs() {
             Client appClient = new Client(UInt128.asBytes(0), new String[] {"127.0.0.1:1"});
             app.withBean(LedgerOutcomeHandler.class, RecordingHandler::new).withBean(Client.class, () -> appClient)
-                    .run(context -> assertThat(context.getBean(Client.class)).as("쓰는 TB 클라이언트").isSameAs(appClient));
+                    .run(context -> assertThat(context.getBean(Client.class)).as("TB client in use")
+                            .isSameAs(appClient));
             appClient.close();
         }
 
         @Test
-        @DisplayName("워커를 끄면 워커 루프가 없다 — 접수·조회만 하는 앱")
+        @DisplayName("With the worker off there is no worker loop — an app that only accepts and queries")
         void disabledWorkerStartsNoThreads() {
             app.withBean(LedgerOutcomeHandler.class, RecordingHandler::new)
                     .run(context -> assertThat(context).doesNotHaveBean(RelayWorkerLoop.class));
         }
 
         @Test
-        @DisplayName("in-flight 슬롯 수는 설정의 max-in-flight다")
+        @DisplayName("The number of in-flight slots is the max-in-flight setting")
         void slotsFollowMaxInFlight() {
             app.withBean(LedgerOutcomeHandler.class, RecordingHandler::new)
                     .withPropertyValues("ledger-relay.worker.enabled=true", "ledger-relay.worker.max-in-flight=512")
-                    .run(context -> assertThat(context.getBean(InFlightLimit.class).capacity()).as("슬롯 수")
+                    .run(context -> assertThat(context.getBean(InFlightLimit.class).capacity()).as("slot count")
                             .isEqualTo(512));
         }
     }
 
     @Nested
     @Order(2)
-    @DisplayName("기동을 막는 경우")
+    @DisplayName("When startup is blocked")
     class StartupFailures {
 
         @Test
-        @DisplayName("핸들러 빈이 없으면 무엇이 필요한지 말하며 실패한다")
+        @DisplayName("Without a handler bean, startup fails and the message says what is needed")
         void withoutAHandlerStartupFails() {
             app.run(context -> {
                 assertThat(context).hasFailed();
-                assertThat(context.getStartupFailure()).as("기동 실패").rootCause()
-                        .hasMessageContaining("LedgerOutcomeHandler 빈이 필요합니다");
+                assertThat(context.getStartupFailure()).as("startup failure").rootCause()
+                        .hasMessageContaining("a LedgerOutcomeHandler bean is required");
             });
         }
 
         @ParameterizedTest(name = "{0}")
         @CsvSource(delimiter = '|', value = {
-                "lease가 submit-timeout의 두 배보다 짧다 | ledger-relay.worker.lease-duration=5s | 5S",
-                "batch-size가 TB 한 요청의 상한(8189)을 넘는다 | ledger-relay.worker.batch-size=9000 | 9000",
-                "max-in-flight가 batch-size보다 작다 | ledger-relay.worker.max-in-flight=64 | 64"})
-        @DisplayName("워커 설정이 어긋나면 어긋난 값을 말하며 실패한다 — 돌다가 깨지지 않게")
+                "lease is shorter than twice submit-timeout | ledger-relay.worker.lease-duration=5s | 5S",
+                "batch-size exceeds the limit of one TB request (8189) | ledger-relay.worker.batch-size=9000 | 9000",
+                "max-in-flight is smaller than batch-size | ledger-relay.worker.max-in-flight=64 | 64"})
+        @DisplayName("Inconsistent worker settings fail startup naming the offending value — not breaking later while running")
         void invalidWorkerSettingsFailStartup(String situation, String property, String offendingValue) {
             app.withBean(LedgerOutcomeHandler.class, RecordingHandler::new).withPropertyValues(property).run(context -> {
                 assertThat(context).as(situation).hasFailed();
-                assertThat(context.getStartupFailure()).as("기동 실패").rootCause().hasMessageContaining(offendingValue);
+                assertThat(context.getStartupFailure()).as("startup failure").rootCause()
+                        .hasMessageContaining(offendingValue);
             });
         }
     }

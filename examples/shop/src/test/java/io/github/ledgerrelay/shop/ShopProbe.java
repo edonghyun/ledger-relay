@@ -12,10 +12,10 @@ import java.time.Duration;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-/** 테스트에서 주문이 어디까지 갔는지와 원장의 실제 잔액을 본다. */
+/** Lets tests see how far an order has progressed and the actual balances in the ledger. */
 public final class ShopProbe {
 
-    /** TB를 끊었다 이은 뒤 재시도 backoff까지 넉넉히 기다린다. */
+    /** Waits long enough to cover the retry backoff after TB is cut and restored. */
     public static final Duration SETTLE = Duration.ofSeconds(20);
 
     private final Orders orders;
@@ -29,8 +29,9 @@ public final class ShopProbe {
     }
 
     /**
-     * 대기·처리 중인 명령이 없을 때까지 기다린다. 앞 테스트가 남긴 명령이 잔액을 바꾸는 중에 "전" 잔액을 재지 않으려고, 잔액의
-     * 차이를 보는 테스트가 given 맨 앞에서 부른다. 멈춘(HALTED) 명령은 운영자가 풀기 전에는 끝나지 않으므로 세지 않는다.
+     * Waits until no command is pending or in flight. Tests that compare balances call it at the very start of given,
+     * so that the "before" balance is not measured while commands left by an earlier test still change it. HALTED
+     * commands are not counted, because they never finish until an operator resolves them.
      */
     public void awaitQuiet() throws InterruptedException {
         long deadline = System.nanoTime() + SETTLE.toNanos();
@@ -42,7 +43,7 @@ public final class ShopProbe {
             }
             Thread.sleep(50);
         }
-        throw new AssertionError("대기·처리 중인 명령이 " + SETTLE + " 안에 비지 않았다");
+        throw new AssertionError("Pending and in-flight commands did not drain within " + SETTLE);
     }
 
     public ShopOrder awaitState(long orderId, OrderState expected) throws InterruptedException {
@@ -55,20 +56,20 @@ public final class ShopProbe {
             }
             Thread.sleep(50);
         }
-        throw new AssertionError("주문 " + orderId + "이 " + SETTLE + " 안에 " + expected + "가 되지 않았다. 마지막 상태: " + last);
+        throw new AssertionError("Order " + orderId + " did not reach " + expected + " within " + SETTLE + ". Last state: " + last);
     }
 
-    /** 구매자 돈 중 예약으로 묶인 금액(사탕). */
+    /** Amount of the buyer's money held by reservations (satang). */
     public long heldBy(long buyer) {
         return Accounts.balanceOf(client, buyer).debitsPending();
     }
 
-    /** 가맹점이 확정으로 받은 금액(사탕). */
+    /** Amount the merchant received through posts (satang). */
     public long merchantReceived() {
         return Accounts.balanceOf(client, Accounts.MERCHANT).creditsPosted();
     }
 
-    /** given 준비: 구매자가 쓸 수 있는 돈을 자금 계좌로 모두 돌려보낸다. 그 뒤 결제는 잔액 부족으로 거절된다. */
+    /** given setup: moves all of the buyer's available money back to the funding account. Later payments are rejected for insufficient funds. */
     public void drain(long buyer) throws InterruptedException {
         Accounts.AccountBalance balance = Accounts.balanceOf(client, buyer);
         long available = balance.creditsPosted() - balance.debitsPosted() - balance.debitsPending();
@@ -85,7 +86,7 @@ public final class ShopProbe {
         drain.setCode(Accounts.TOP_UP_CODE);
         CreateTransferResultBatch result = client.createTransfers(drain);
         if (result.next() && result.getStatus() != CreateTransferStatus.Created) {
-            throw new IllegalStateException("given 준비 실패: 구매자 " + buyer + "를 비우지 못했다 — " + result.getStatus());
+            throw new IllegalStateException("given setup failed: could not drain buyer " + buyer + " — " + result.getStatus());
         }
     }
 }

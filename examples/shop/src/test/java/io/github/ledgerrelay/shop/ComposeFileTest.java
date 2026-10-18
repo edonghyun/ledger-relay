@@ -9,24 +9,24 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/** 저장소 루트의 compose.yaml이 지켜야 하는 것. 띄우지 않고 파일만 읽는다(띄워서 보는 것은 ShopComposeTest). */
-@DisplayName("compose.yaml — 데모가 다시 띄워도 거짓 숫자를 보이지 않는다")
+/** What the compose.yaml at the repository root must keep. Reads the file only; ShopComposeTest starts it. */
+@DisplayName("compose.yaml — the demo shows no false numbers after a restart")
 class ComposeFileTest {
 
     static final Path COMPOSE = Path.of("../../compose.yaml");
 
     @Test
-    @DisplayName("PostgreSQL과 TigerBeetle은 이름 붙은 볼륨에 남지 않는다 — down 뒤 한쪽만 남아 중복 이체가 보이지 않게")
+    @DisplayName("Neither PostgreSQL nor TigerBeetle keeps data in a named volume — so that one store never outlives down without the other and shows double transfers")
     void neitherStoreOutlivesTheOther() throws IOException {
         // given
         List<String> lines = Files.readAllLines(COMPOSE);
 
-        // then: 맨 위 volumes: 가 있으면 그 볼륨은 down(-v 없이) 뒤에도 남는다
-        assertThat(lines).as("맨 위 volumes 선언").noneMatch(line -> line.startsWith("volumes:"));
+        // then: a top-level volumes: entry would survive down (without -v)
+        assertThat(lines).as("top-level volumes declaration").noneMatch(line -> line.startsWith("volumes:"));
     }
 
     @Test
-    @DisplayName("PostgreSQL과 TigerBeetle 이미지는 테스트가 쓰는 버전과 같다 — 버전 목록 한 곳만 고치고 데모를 잊지 않게")
+    @DisplayName("The PostgreSQL and TigerBeetle images match the versions the tests use — so that a version bump in the catalog does not forget the demo")
     void imagesMatchTheVersionCatalog() throws IOException {
         // given
         String compose = Files.readString(COMPOSE);

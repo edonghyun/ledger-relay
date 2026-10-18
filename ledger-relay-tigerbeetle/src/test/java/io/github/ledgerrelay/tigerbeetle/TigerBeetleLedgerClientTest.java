@@ -36,11 +36,11 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("TB 어댑터 — 명령 종류를 TB flags로, 결과를 결과 코드로")
+@DisplayName("TB adapter — command kinds to TB flags, results to result codes")
 class TigerBeetleLedgerClientTest {
 
     static final TigerBeetleContainer TB = new TigerBeetleContainer();
-    /** 컨테이너는 이 클래스만 쓰므로 고정된 양수에서 센다(System.nanoTime은 음수일 수 있다). */
+    /** Only this class uses the container, so ids count up from a fixed positive number (nanoTime can be negative). */
     static final AtomicLong TRANSFER_IDS = new AtomicLong(1_000_000);
     static TigerBeetleTestLedger ledger;
     static com.tigerbeetle.Client adapterClient;
@@ -71,41 +71,41 @@ class TigerBeetleLedgerClientTest {
     @BeforeEach
     void givenTwoAccounts() {
         TB.assertAlive();
-        payer = ledger.openAccount("구매자");
-        payee = ledger.openAccount("가맹점");
+        payer = ledger.openAccount("buyer");
+        payee = ledger.openAccount("merchant");
     }
 
     @Nested
     @Order(1)
-    @DisplayName("명령 종류마다 보내면")
+    @DisplayName("When each command kind is sent")
     class EachKind {
 
         @Test
-        @DisplayName("이체는 바로 확정된다")
+        @DisplayName("A transfer is posted immediately")
         void aTransferIsPostedImmediately() {
             // when
             List<LedgerResultCode> results = submitted(transfer(500));
 
             // then
-            assertThat(results).as("TB 결과").containsExactly(Created);
+            assertThat(results).as("TB results").containsExactly(Created);
             assertMovedExactly(ledger, payer, payee, 500);
         }
 
         @Test
-        @DisplayName("예약은 금액을 보류하고 timeout을 함께 저장한다")
+        @DisplayName("A reservation holds the amount and stores its timeout with it")
         void aReserveHoldsTheAmountWithItsTimeout() {
             // when
             Submission hold = reserve(500, 30);
             List<LedgerResultCode> results = submitted(hold);
 
             // then
-            assertThat(results).as("TB 결과").containsExactly(Created);
+            assertThat(results).as("TB results").containsExactly(Created);
             assertReserved(ledger, payer, payee, 500);
-            assertThat(ledger.stored(hold.transferId()).timeoutSeconds()).as("저장된 timeout").isEqualTo(30);
+            assertThat(ledger.stored(hold.transferId()).timeoutSeconds()).as("stored timeout").isEqualTo(30);
         }
 
         @Test
-        @DisplayName("금액 없는 확정은 예약의 계좌·ledger·code를 물려받아 전액을 확정한다")
+        @DisplayName("A post without an amount inherits the reservation's accounts, ledger and code and posts the full amount")
         void aPostCapturesTheReservationInheritingItsFields() {
             // given
             Submission hold = reserve(500, 30);
@@ -115,12 +115,12 @@ class TigerBeetleLedgerClientTest {
             List<LedgerResultCode> results = submitted(post(hold.transferId()));
 
             // then
-            assertThat(results).as("TB 결과").containsExactly(Created);
+            assertThat(results).as("TB results").containsExactly(Created);
             assertPostedAndReleased(ledger, payer, payee, 500);
         }
 
         @Test
-        @DisplayName("해제는 예약 금액을 모두 푼다")
+        @DisplayName("A void releases the whole reserved amount")
         void aVoidReleasesTheReservation() {
             // given
             Submission hold = reserve(500, 30);
@@ -130,12 +130,12 @@ class TigerBeetleLedgerClientTest {
             List<LedgerResultCode> results = submitted(voidOf(hold.transferId()));
 
             // then
-            assertThat(results).as("TB 결과").containsExactly(Created);
+            assertThat(results).as("TB results").containsExactly(Created);
             assertNothingMoved(ledger, payer);
         }
 
         @Test
-        @DisplayName("user_data_128에는 명령의 행 id가 저장된다 — TB에서 PG를 역참조한다")
+        @DisplayName("user_data_128 stores the command's row id — a back-reference from TB to PG")
         void userData128CarriesTheRowId() {
             // when
             Submission payment = new Submission(nextTransferId(), BigInteger.valueOf(42), body(CommandKind.TRANSFER,
@@ -143,21 +143,21 @@ class TigerBeetleLedgerClientTest {
             submitted(payment);
 
             // then
-            assertThat(ledger.stored(payment.transferId()).userData128()).as("저장된 user_data_128")
+            assertThat(ledger.stored(payment.transferId()).userData128()).as("stored user_data_128")
                     .isEqualTo(BigInteger.valueOf(42));
         }
     }
 
     @Nested
     @Order(2)
-    @DisplayName("여러 이체를 한 요청으로 보내면")
+    @DisplayName("When several transfers are sent in one request")
     class OneRequest {
 
         @Test
-        @DisplayName("결과는 요청 순서대로 온다")
+        @DisplayName("Results come back in request order")
         void resultsComeBackInRequestOrder() {
             // given
-            Account wallet = ledger.openAccountThatCannotOverdraw("지갑");
+            Account wallet = ledger.openAccountThatCannotOverdraw("wallet");
             Submission fromWallet = new Submission(nextTransferId(), BigInteger.ONE, body(CommandKind.TRANSFER,
                     accountIdOf(wallet), accountIdOf(payee), BigInteger.valueOf(100), 1, 1, 0, Optional.empty()));
 
@@ -165,11 +165,11 @@ class TigerBeetleLedgerClientTest {
             List<LedgerResultCode> results = submitted(transfer(1), fromWallet, transfer(2));
 
             // then
-            assertThat(results).as("TB 결과").containsExactly(Created, ExceedsCredits, Created);
+            assertThat(results).as("TB results").containsExactly(Created, ExceedsCredits, Created);
         }
 
         @Test
-        @DisplayName("같은 요청을 다시 보내면 이미 기록된 것으로 인정된다")
+        @DisplayName("Resending the same request is accepted as already recorded")
         void aResubmittedBatchIsAlreadyRecorded() {
             // given
             Submission first = transfer(1);
@@ -180,22 +180,22 @@ class TigerBeetleLedgerClientTest {
             List<LedgerResultCode> results = submitted(first, second);
 
             // then
-            assertThat(results).as("TB 결과").containsExactly(Exists, Exists);
+            assertThat(results).as("TB results").containsExactly(Exists, Exists);
             assertMovedExactly(ledger, payer, payee, 3);
         }
     }
 
     @Nested
     @Order(3)
-    @DisplayName("부호 없는 큰 값과 user_data를 보내면")
+    @DisplayName("When large unsigned values and user_data are sent")
     class LargeValues {
 
         @Test
-        @DisplayName("u32 최댓값(ledger, timeout)과 user_data_64·32 최댓값이 그대로 저장된다 — int로 자르지 않는다")
+        @DisplayName("The u32 maximum (ledger, timeout) and the user_data_64 and user_data_32 maximums are stored unchanged — not truncated to int")
         void nonZeroUserDataAndTheLargestU32ValuesRoundTrip() {
-            // given: ledger 2^32-1의 계좌 둘
-            Account from = ledger.openAccount("큰 ledger의 구매자", -1);
-            Account to = ledger.openAccount("큰 ledger의 가맹점", -1);
+            // given: two accounts on ledger 2^32-1
+            Account from = ledger.openAccount("buyer on the large ledger", -1);
+            Account to = ledger.openAccount("merchant on the large ledger", -1);
             Submission hold = new Submission(nextTransferId(), BigInteger.ONE, new TransferBody(CommandKind.RESERVE,
                     accountIdOf(from), accountIdOf(to), BigInteger.valueOf(1), 4_294_967_295L, 65_535,
                     4_294_967_295L, Optional.empty(), -1L, -1));
@@ -204,23 +204,23 @@ class TigerBeetleLedgerClientTest {
             List<LedgerResultCode> results = submitted(hold);
 
             // then
-            assertThat(results).as("TB 결과").containsExactly(Created);
+            assertThat(results).as("TB results").containsExactly(Created);
             StoredTransfer stored = ledger.stored(hold.transferId());
-            assertThat(Integer.toUnsignedLong(stored.ledger())).as("저장된 ledger").isEqualTo(4_294_967_295L);
-            assertThat(stored.timeoutSeconds()).as("저장된 timeout").isEqualTo(4_294_967_295L);
-            assertThat(stored.code()).as("저장된 code").isEqualTo(65_535);
-            assertThat(stored.userData64()).as("저장된 user_data_64").isEqualTo(-1L);
-            assertThat(stored.userData32()).as("저장된 user_data_32").isEqualTo(-1);
+            assertThat(Integer.toUnsignedLong(stored.ledger())).as("stored ledger").isEqualTo(4_294_967_295L);
+            assertThat(stored.timeoutSeconds()).as("stored timeout").isEqualTo(4_294_967_295L);
+            assertThat(stored.code()).as("stored code").isEqualTo(65_535);
+            assertThat(stored.userData64()).as("stored user_data_64").isEqualTo(-1L);
+            assertThat(stored.userData32()).as("stored user_data_32").isEqualTo(-1);
         }
     }
 
     @Nested
     @Order(5)
-    @DisplayName("이체를 ID로 조회하면 — 대사")
+    @DisplayName("When transfers are looked up by id — reconciliation")
     class Lookup {
 
         @Test
-        @DisplayName("저장된 이체를 계좌·금액과 함께, 종류는 flags에서 정해 돌려준다")
+        @DisplayName("Stored transfers come back with accounts and amount, and the kind is derived from the flags")
         void lookupReturnsStoredTransfersWithTheirKind() {
             // given
             Submission payment = transfer(500);
@@ -236,19 +236,19 @@ class TigerBeetleLedgerClientTest {
             Map<BigInteger, LedgerTransfer> found = lookedUp(payment, hold, capture, otherHold, release);
 
             // then
-            assertThat(found.get(payment.transferId()).kind()).as("이체의 종류").isEqualTo(CommandKind.TRANSFER);
-            assertThat(found.get(hold.transferId()).kind()).as("예약의 종류").isEqualTo(CommandKind.RESERVE);
-            assertThat(found.get(capture.transferId()).kind()).as("확정의 종류").isEqualTo(CommandKind.POST);
-            assertThat(found.get(otherHold.transferId()).kind()).as("둘째 예약의 종류").isEqualTo(CommandKind.RESERVE);
-            assertThat(found.get(release.transferId()).kind()).as("해제의 종류").isEqualTo(CommandKind.VOID);
-            assertThat(found.get(payment.transferId()).amount()).as("이체 금액").isEqualTo(BigInteger.valueOf(500));
-            assertThat(found.get(payment.transferId()).debitAccountId()).as("이체의 출금 계좌")
+            assertThat(found.get(payment.transferId()).kind()).as("kind of the transfer").isEqualTo(CommandKind.TRANSFER);
+            assertThat(found.get(hold.transferId()).kind()).as("kind of the reservation").isEqualTo(CommandKind.RESERVE);
+            assertThat(found.get(capture.transferId()).kind()).as("kind of the post").isEqualTo(CommandKind.POST);
+            assertThat(found.get(otherHold.transferId()).kind()).as("kind of the second reservation").isEqualTo(CommandKind.RESERVE);
+            assertThat(found.get(release.transferId()).kind()).as("kind of the void").isEqualTo(CommandKind.VOID);
+            assertThat(found.get(payment.transferId()).amount()).as("transfer amount").isEqualTo(BigInteger.valueOf(500));
+            assertThat(found.get(payment.transferId()).debitAccountId()).as("debit account of the transfer")
                     .isEqualTo(accountIdOf(payer));
-            assertThat(found.get(capture.transferId()).amount()).as("전액 확정된 금액").isEqualTo(BigInteger.valueOf(500));
+            assertThat(found.get(capture.transferId()).amount()).as("amount of the full-amount post").isEqualTo(BigInteger.valueOf(500));
         }
 
         @Test
-        @DisplayName("TB에 없는 ID는 결과에서 빠진다")
+        @DisplayName("Ids that TB does not have are left out of the result")
         void lookupOmitsUnknownIds() {
             // given
             Submission payment = transfer(500);
@@ -259,7 +259,7 @@ class TigerBeetleLedgerClientTest {
             Map<BigInteger, LedgerTransfer> found = lookedUpIds(List.of(payment.transferId(), unknown));
 
             // then
-            assertThat(found).as("찾은 이체").containsOnlyKeys(payment.transferId());
+            assertThat(found).as("transfers found").containsOnlyKeys(payment.transferId());
         }
 
         private Map<BigInteger, LedgerTransfer> lookedUp(Submission... submissions) {
@@ -271,18 +271,18 @@ class TigerBeetleLedgerClientTest {
                 return adapter.lookup(ids).get(30, TimeUnit.SECONDS).stream()
                         .collect(java.util.stream.Collectors.toMap(LedgerTransfer::transferId, t -> t));
             } catch (Exception e) {
-                throw new AssertionError("TB 조회 응답을 받지 못했다", e);
+                throw new AssertionError("No reply to the TB lookup", e);
             }
         }
     }
 
     @Nested
     @Order(4)
-    @DisplayName("닫힌 클라이언트로 보내면")
+    @DisplayName("When sent through a closed client")
     class ClosedClient {
 
         @Test
-        @DisplayName("다시 써도 회복되지 않는 실패(LedgerUnavailableException)로 알린다 — 일시적 실패와 구분되게")
+        @DisplayName("It is reported as a failure that retrying does not fix (LedgerUnavailableException) — distinct from transient failures")
         void aClosedClientIsReportedAsUnavailable() {
             // given
             com.tigerbeetle.Client closed = TB.newClient();
@@ -294,17 +294,17 @@ class TigerBeetleLedgerClientTest {
 
             // then
             Throwable cause = failure instanceof java.util.concurrent.ExecutionException ? failure.getCause() : failure;
-            assertThat(cause).as("닫힌 클라이언트로 보낸 결과").isInstanceOf(LedgerUnavailableException.class);
+            assertThat(cause).as("result of sending through a closed client").isInstanceOf(LedgerUnavailableException.class);
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Vocabulary used only in this file ──────────────────────────────────────────
 
     private List<LedgerResultCode> submitted(Submission... batch) {
         try {
             return adapter.submit(List.of(batch)).get(30, TimeUnit.SECONDS);
         } catch (Exception e) {
-            throw new AssertionError("TB 응답을 받지 못했다", e);
+            throw new AssertionError("No reply from TB", e);
         }
     }
 
@@ -318,7 +318,7 @@ class TigerBeetleLedgerClientTest {
                 accountIdOf(payee), BigInteger.valueOf(amount), 1, 1, timeoutSeconds, Optional.empty()));
     }
 
-    /** 금액을 생략한 확정: 계좌·ledger·code 0, AMOUNT_MAX. core가 만드는 것과 같은 꼴이다. */
+    /** A post with the amount left out: accounts, ledger and code 0, AMOUNT_MAX. The same shape core builds. */
     private static Submission post(BigInteger reservationTransferId) {
         return new Submission(nextTransferId(), BigInteger.ONE, body(CommandKind.POST, BigInteger.ZERO,
                 BigInteger.ZERO, LedgerCommand.AMOUNT_MAX, 0, 0, 0, Optional.of(reservationTransferId)));

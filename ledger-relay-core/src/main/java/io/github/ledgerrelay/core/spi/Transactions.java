@@ -3,27 +3,30 @@ package io.github.ledgerrelay.core.spi;
 import java.util.function.Supplier;
 
 /**
- * 트랜잭션 경계(G1, G6). jdbc는 Spring 트랜잭션으로, 메모리 저장소는 스냅샷으로 구현한다.
- * 서비스는 이 포트로만 트랜잭션을 다룬다. {@link CommandStore}의 메서드는 늘 트랜잭션 안에서 불린다.
+ * Transaction boundaries (G1, G6). jdbc implements them with Spring transactions, the in-memory store with snapshots.
+ * Services handle transactions only through this port. {@link CommandStore} methods are always called inside a
+ * transaction.
  */
 public interface Transactions {
 
     /**
-     * 트랜잭션 안에서 work를 실행한다. 활성 트랜잭션이 있으면 합류하고, 없으면 새로 열어 커밋한다(Spring REQUIRED).
-     * work가 던지면 새로 연 트랜잭션은 롤백하고, 그 예외를 그대로 던진다.
+     * Runs work inside a transaction. It joins an active transaction if there is one; otherwise it opens a new one and
+     * commits it (Spring REQUIRED). If work throws, a newly opened transaction rolls back and the exception is rethrown
+     * unchanged.
      */
     <T> T inTransaction(Supplier<T> work);
 
     /**
-     * 호출한 스레드에 활성 트랜잭션이 없으면 던진다(G1). 접수가 앱 트랜잭션에 묶여야 하기 때문이다.
-     * 예외 타입은 구현이 정한다. jdbc는 Spring의 IllegalTransactionStateException을 던진다.
+     * Throws if the calling thread has no active transaction (G1), because acceptance must be bound to the app
+     * transaction. The implementation decides the exception type. jdbc throws Spring's
+     * IllegalTransactionStateException.
      */
     void requireActive();
 
     /**
-     * 호출한 스레드에 활성 트랜잭션이 있는가. 워커 단계는 트랜잭션 밖에서만 불려야 하므로 서비스가 이것으로 막는다.
-     * 바깥 트랜잭션에 합류하면 핸들러 실패의 롤백이 바깥에 묻혀 G6이 깨지기 때문이다. jdbc는
-     * {@code TransactionSynchronizationManager.isActualTransactionActive()}다.
+     * Whether the calling thread has an active transaction. Worker steps must be called only outside a transaction, so
+     * the service uses this to block them. Joining an outer transaction buries the rollback from a handler failure in
+     * the outer one and breaks G6. In jdbc it is {@code TransactionSynchronizationManager.isActualTransactionActive()}.
      */
     boolean isActive();
 }

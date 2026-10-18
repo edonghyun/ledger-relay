@@ -9,8 +9,8 @@ import com.tigerbeetle.CreateTransferStatus;
 import java.time.Duration;
 
 /**
- * then 단계의 말. 메서드 하나가 일어난 효과 하나를 확인하고, 실패하면 같은 말로 무엇이 달랐는지 알려 준다.
- * TB 원래 결과 코드는 메시지의 괄호 안에 남긴다.
+ * Vocabulary for the then step. Each method checks one effect that happened, and on failure it says in the same words
+ * what was different. The original TB result code stays in parentheses in the message.
  */
 public final class LedgerAssertions {
 
@@ -18,72 +18,74 @@ public final class LedgerAssertions {
     }
 
     public static void assertCreated(CreateTransferStatus result) {
-        expect(result, Created, "새로 기록되기");
+        expect(result, Created, "the transfer to be newly recorded");
     }
 
     public static void assertAlreadyRecorded(CreateTransferStatus result) {
-        expect(result, Exists, "같은 ID·같은 본문의 이체가 이미 기록된 것으로 인정되기");
+        expect(result, Exists, "a transfer with the same id and body to be recognized as already recorded");
     }
 
     public static void assertConflictOnAmount(CreateTransferStatus result) {
-        expect(result, ExistsWithDifferentAmount, "같은 ID인데 금액이 달라 내용 충돌로 거부되기");
+        expect(result, ExistsWithDifferentAmount,
+                "a rejection as a content conflict because the amount differs for the same id");
     }
 
-    /** {@code conflict}는 어느 필드가 달랐는지를 뜻하는 {@code ExistsWithDifferent…} 코드다. */
+    /** {@code conflict} is the {@code ExistsWithDifferent…} code that names the field that differed. */
     public static void assertContentConflict(CreateTransferStatus result, CreateTransferStatus conflict) {
         if (!conflict.name().startsWith("ExistsWithDifferent")) {
-            throw new IllegalArgumentException(conflict + "는 내용 충돌 코드(ExistsWithDifferent…)가 아닙니다");
+            throw new IllegalArgumentException(conflict + " is not a content conflict code (ExistsWithDifferent…)");
         }
-        expect(result, conflict, "같은 ID인데 내용이 달라 충돌로 거부되기");
+        expect(result, conflict, "a rejection as a conflict because the content differs for the same id");
     }
 
     public static void assertRejectedBecauseIdAlreadyFailed(CreateTransferStatus result) {
-        expect(result, IdAlreadyFailed, "이 ID가 이미 실패했으므로 다시 판정되지 않고 거부되기");
+        expect(result, IdAlreadyFailed, "a rejection without a new decision because this id already failed");
     }
 
     public static void assertRejectedFor(CreateTransferStatus result, CreateTransferStatus reason) {
-        expect(result, reason, "이 사유로 거부되기");
+        expect(result, reason, "a rejection for this reason");
     }
 
     public static void assertMovedExactly(TigerBeetleTestLedger ledger, Account from, Account to, long amount) {
         Balance source = ledger.balanceOf(from);
         Balance destination = ledger.balanceOf(to);
         if (source.debitsPosted() != amount || destination.creditsPosted() != amount) {
-            throw new AssertionError(from + " → " + to + "로 정확히 " + amount + "이 움직이기를 기대했지만, "
-                    + from + "은 [" + source + "], " + to + "은 [" + destination + "]입니다");
+            throw new AssertionError("Expected exactly " + amount + " to move " + from + " → " + to + ", but "
+                    + from + " is [" + source + "] and " + to + " is [" + destination + "]");
         }
     }
 
     public static void assertNothingMoved(TigerBeetleTestLedger ledger, Account account) {
         Balance balance = ledger.balanceOf(account);
         if (!balance.isUntouched()) {
-            throw new AssertionError(account + " 계좌에 아무 변화가 없기를 기대했지만 [" + balance + "]입니다");
+            throw new AssertionError("Expected no change on account " + account + ", but it is [" + balance + "]");
         }
     }
 
-    /** from에서 to로 정확히 amount가 보류되어 있고, 아직 아무것도 확정되지 않았다. */
+    /** Exactly {@code amount} is held from {@code from} to {@code to}, and nothing is posted yet. */
     public static void assertReserved(TigerBeetleTestLedger ledger, Account from, Account to, long amount) {
         Balance source = ledger.balanceOf(from);
         Balance destination = ledger.balanceOf(to);
         if (source.debitsPending() != amount || destination.creditsPending() != amount
                 || source.debitsPosted() != 0 || destination.creditsPosted() != 0) {
-            throw new AssertionError(from + " → " + to + "로 정확히 " + amount + "이 보류만 되어 있기를 기대했지만, "
-                    + from + "은 [" + source + "], " + to + "은 [" + destination + "]입니다");
+            throw new AssertionError("Expected exactly " + amount + " held " + from + " → " + to
+                    + " with nothing posted, but " + from + " is [" + source + "] and " + to
+                    + " is [" + destination + "]");
         }
     }
 
-    /** from에서 to로 정확히 posted가 확정되었고, 두 계좌에 보류된 금액은 남지 않았다. */
+    /** Exactly {@code posted} is posted from {@code from} to {@code to}, and no held amount remains on either side. */
     public static void assertPostedAndReleased(TigerBeetleTestLedger ledger, Account from, Account to, long posted) {
         Balance source = ledger.balanceOf(from);
         Balance destination = ledger.balanceOf(to);
         if (source.debitsPosted() != posted || destination.creditsPosted() != posted
                 || source.debitsPending() != 0 || destination.creditsPending() != 0) {
-            throw new AssertionError(from + " → " + to + "로 정확히 " + posted + "이 확정되고 보류가 모두 풀리기를 "
-                    + "기대했지만, " + from + "은 [" + source + "], " + to + "은 [" + destination + "]입니다");
+            throw new AssertionError("Expected exactly " + posted + " to be posted " + from + " → " + to + " and all "
+                    + "holds released, but " + from + " is [" + source + "] and " + to + " is [" + destination + "]");
         }
     }
 
-    /** "아무 일도 없어야 한다"를 관찰하므로 고정된 관찰 시간을 쓴다(docs/testing.md). */
+    /** Observes that "nothing happens", so it uses a fixed observation window (docs/testing.md). */
     public static void assertStillWaitingAfter(PendingTransfer pending, Duration window) {
         try {
             Thread.sleep(window.toMillis());
@@ -92,22 +94,23 @@ public final class LedgerAssertions {
             throw new IllegalStateException(e);
         }
         if (pending.hasReply()) {
-            throw new AssertionError(pending.transfer() + " 이체가 " + window
-                    + " 동안 응답 없이 대기하기를 기대했지만, 이미 응답이 왔습니다");
+            throw new AssertionError("Expected transfer " + pending.transfer() + " to wait without a reply for "
+                    + window + ", but a reply already arrived");
         }
     }
 
     private static void expect(CreateTransferStatus actual, CreateTransferStatus expected, String meaning) {
         if (actual != expected) {
-            throw new AssertionError(meaning + "(" + expected + ")를 기대했지만 실제 결과는 " + actual + describe(actual));
+            throw new AssertionError("Expected " + meaning + " (" + expected + "), but the actual result is " + actual
+                    + describe(actual));
         }
     }
 
     private static String describe(CreateTransferStatus status) {
         return switch (status) {
-            case Created -> " — 처음 보내는 이체로 기록됨";
-            case Exists -> " — 같은 이체가 이미 기록되어 있음";
-            case IdAlreadyFailed -> " — 이 ID는 이전에 실패함";
+            case Created -> " — recorded as a transfer sent for the first time";
+            case Exists -> " — the same transfer is already recorded";
+            case IdAlreadyFailed -> " — this id failed before";
             default -> "";
         };
     }

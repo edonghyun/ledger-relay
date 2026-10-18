@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("워커 루프 — 스레드가 바퀴를 반복하고, 종료는 상한 안에 끝난다")
+@DisplayName("Worker loop — threads repeat cycles, and shutdown finishes within its limit")
 class RelayWorkerLoopTest {
 
     static final Duration SHORT = Duration.ofMillis(10);
@@ -32,19 +32,19 @@ class RelayWorkerLoopTest {
 
     @Nested
     @Order(1)
-    @DisplayName("돌다가")
+    @DisplayName("While running")
     class Running {
 
         @Test
-        @DisplayName("한 바퀴가 예외를 던져도 스레드가 죽지 않고 다음 바퀴를 돈다")
+        @DisplayName("A cycle that throws does not kill the thread, and the next cycle runs")
         void aLoopSurvivesAThrowingCycle() throws InterruptedException {
-            // given: 처음 두 바퀴는 DB가 끊긴 것처럼 던진다
+            // given: the first two cycles throw as if the DB connection were lost
             AtomicInteger cycles = new AtomicInteger();
             CountDownLatch thirdCycle = new CountDownLatch(1);
             loop = new RelayWorkerLoop(() -> {
                 int n = cycles.incrementAndGet();
                 if (n <= 2) {
-                    throw new IllegalStateException("DB 연결이 끊겼다");
+                    throw new IllegalStateException("DB connection lost");
                 }
                 thirdCycle.countDown();
                 return CycleReport.IDLE;
@@ -54,19 +54,19 @@ class RelayWorkerLoopTest {
             loop.start();
 
             // then
-            assertThat(thirdCycle.await(2, TimeUnit.SECONDS)).as("세 번째 바퀴가 돌았는가").isTrue();
+            assertThat(thirdCycle.await(2, TimeUnit.SECONDS)).as("third cycle ran").isTrue();
         }
     }
 
     @Nested
     @Order(2)
-    @DisplayName("멈추라고 하면")
+    @DisplayName("When asked to stop")
     class Stopping {
 
         @Test
-        @DisplayName("돌고 있는 바퀴가 끝날 때까지 기다렸다가 돌아온다 — 받은 결과를 쓰고 끝나게")
+        @DisplayName("Stopping waits for the running cycle to finish before returning — so it writes the results it got")
         void stoppingWaitsForTheRunningCycle() throws Exception {
-            // given: 한 바퀴가 결과를 쓰는 중이다
+            // given: a cycle is writing its result
             CountDownLatch entered = new CountDownLatch(1);
             CountDownLatch finishWriting = new CountDownLatch(1);
             AtomicBoolean written = new AtomicBoolean();
@@ -77,7 +77,7 @@ class RelayWorkerLoopTest {
                 return new CycleReport(1, 1, 1, 0);
             }), 1, SHORT, SHORT, Duration.ofSeconds(5));
             loop.start();
-            assertThat(entered.await(2, TimeUnit.SECONDS)).as("바퀴가 시작됐는가").isTrue();
+            assertThat(entered.await(2, TimeUnit.SECONDS)).as("cycle started").isTrue();
 
             // when
             CompletableFuture<Void> stopping = CompletableFuture.runAsync(loop::stop);
@@ -87,15 +87,15 @@ class RelayWorkerLoopTest {
             stopping.get(2, TimeUnit.SECONDS);
 
             // then
-            assertThat(returnedEarly).as("바퀴가 끝나기 전에 돌아왔는가").isFalse();
-            assertThat(written).as("바퀴가 결과를 다 썼는가").isTrue();
-            assertThat(loop.isRunning()).as("멈춘 뒤 도는가").isFalse();
+            assertThat(returnedEarly).as("returned before the cycle finished").isFalse();
+            assertThat(written).as("cycle wrote all its results").isTrue();
+            assertThat(loop.isRunning()).as("running after stop").isFalse();
         }
 
         @Test
-        @DisplayName("바퀴가 끝나지 않아도 상한이 지나면 돌아온다 — TB가 끊긴 채 앱을 끄는 경우")
+        @DisplayName("Stopping returns after the limit even if the cycle does not finish — shutting the app down while TB is unreachable")
         void stoppingWhileTheLedgerIsUnreachableEndsInTime() throws InterruptedException {
-            // given: 바퀴가 끝나지 않는다(응답 없는 TB)
+            // given: the cycle never finishes (TB does not reply)
             CountDownLatch entered = new CountDownLatch(1);
             loop = new RelayWorkerLoop(() -> {
                 entered.countDown();
@@ -103,7 +103,7 @@ class RelayWorkerLoopTest {
                 return CycleReport.IDLE;
             }, 1, SHORT, SHORT, Duration.ofMillis(500));
             loop.start();
-            assertThat(entered.await(2, TimeUnit.SECONDS)).as("바퀴가 시작됐는가").isTrue();
+            assertThat(entered.await(2, TimeUnit.SECONDS)).as("cycle started").isTrue();
 
             // when
             long started = System.nanoTime();
@@ -111,18 +111,18 @@ class RelayWorkerLoopTest {
             Duration took = Duration.ofNanos(System.nanoTime() - started);
 
             // then
-            assertThat(took).as("멈추는 데 걸린 시간").isLessThan(Duration.ofMillis(1500));
-            assertThat(loop.isRunning()).as("멈춘 뒤 도는가").isFalse();
+            assertThat(took).as("time taken to stop").isLessThan(Duration.ofMillis(1500));
+            assertThat(loop.isRunning()).as("running after stop").isFalse();
         }
     }
 
-    /** 처음 한 번만 일하고, 그 뒤로는 할 일이 없다. */
+    /** Works once, then has nothing to do. */
     private static Supplier<CycleReport> once(Supplier<CycleReport> first) {
         AtomicBoolean done = new AtomicBoolean();
         return () -> done.compareAndSet(false, true) ? first.get() : CycleReport.IDLE;
     }
 
-    /** 인터럽트되면 그대로 끝난다(인터럽트 표시는 남긴다). */
+    /** Returns as soon as it is interrupted (the interrupt flag stays set). */
     private static void awaitQuietly(CountDownLatch latch) {
         try {
             latch.await();

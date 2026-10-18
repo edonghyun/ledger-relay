@@ -1,13 +1,13 @@
 package io.github.ledgerrelay.core;
 
-/** 명령 종류. */
+/** The kind of command. */
 public enum CommandKind {
     TRANSFER,
     RESERVE,
     POST,
     VOID;
 
-    /** post와 void는 앞서 접수한 예약 명령을 참조한다. */
+    /** post and void refer to a reservation command accepted earlier. */
     public boolean referencesReservation() {
         return this == POST || this == VOID;
     }

@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 화면이 1초마다 부르는 숫자. 모두 PG나 TB의 실제 상태에서 온다(반목표 "가짜 숫자 없음"). */
+/** Numbers the UI polls every second. All come from the real state of PG or TB (anti-goal "no fake numbers"). */
 @RestController
 class StatusController {
 
@@ -105,7 +105,7 @@ class StatusController {
         return new MerchantBalance(balance.creditsPending(), balance.creditsPosted());
     }
 
-    /** 라이브러리 health의 TB 확인. 기다리지 않는다(F36). */
+    /** TB check from the library health indicator. Does not wait (F36). */
     private boolean ledgerUp() {
         Object ledgerDetail = health.health().getDetails().get("ledger");
         return "UP".equals(ledgerDetail);

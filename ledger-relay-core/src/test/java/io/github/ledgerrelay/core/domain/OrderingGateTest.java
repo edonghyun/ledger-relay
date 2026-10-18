@@ -17,16 +17,16 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
-@DisplayName("순서 게이트 — G4")
+@DisplayName("Ordering gate — G4")
 class OrderingGateTest {
 
     @Nested
     @Order(1)
-    @DisplayName("같은 키에 앞 명령이 없으면")
+    @DisplayName("When there is no earlier command on the same key")
     class NoEarlierCommand {
 
         @Test
-        @DisplayName("바로 제출한다")
+        @DisplayName("It submits right away")
         void submitsRightAway() {
             // when
             GateDecision decision = OrderingGate.decide(aTransfer("pay-1"), 1, sameKey());
@@ -36,9 +36,9 @@ class OrderingGateTest {
         }
 
         @Test
-        @DisplayName("뒤 명령이 미완료여도 제출한다")
+        @DisplayName("It submits even if a later command is unfinished")
         void laterCommandsDoNotBlock() {
-            // given: 뒤에 접수된 pay-2(seq 2)가 아직 PENDING이다
+            // given: pay-2 (seq 2), accepted later, is still PENDING
             List<QueuedCommand> sameKey = sameKey(queued("pay-2", 2, PENDING));
 
             // when
@@ -49,7 +49,7 @@ class OrderingGateTest {
         }
 
         @Test
-        @DisplayName("같은 키 명령들 속에 자기 자신(PENDING)이 있어도 제출한다")
+        @DisplayName("It submits even if the commands on the same key include itself (PENDING)")
         void doesNotBlockItself() {
             // given
             List<QueuedCommand> sameKey = sameKey(queued("pay-1", 1, PENDING));
@@ -64,17 +64,17 @@ class OrderingGateTest {
 
     @Nested
     @Order(2)
-    @DisplayName("같은 키에 미완료인 앞 명령이 있으면")
+    @DisplayName("When an earlier command on the same key is unfinished")
     class UnfinishedEarlierCommand {
 
-        @ParameterizedTest(name = "앞 명령이 {0}")
+        @ParameterizedTest(name = "earlier command {0}")
         @EnumSource(value = StoredState.class, names = {"PENDING", "CLAIMED"})
-        @DisplayName("G2: 앞 명령이 끝날 때까지 기다린다 — 결과가 미확정이어도, 뒤 명령이 재시도여도")
+        @DisplayName("G2: it waits until the earlier command ends — even if that result is still unknown, and even if the later command is a retry")
         void waitsForTheEarlierCommand(StoredState unfinished) {
-            // given: pay-1(seq 1)이 아직 끝나지 않았다
+            // given: pay-1 (seq 1) has not ended yet
             List<QueuedCommand> sameKey = sameKey(queued("pay-1", 1, unfinished));
 
-            // when: 그 재시도인 pay-1-retry(seq 2)를 claim하면
+            // when: its retry pay-1-retry (seq 2) is claimed
             GateDecision decision = OrderingGate.decide(aTransfer("pay-1-retry"), 2, sameKey);
 
             // then
@@ -84,12 +84,12 @@ class OrderingGateTest {
 
     @Nested
     @Order(3)
-    @DisplayName("같은 키의 앞 명령이 모두 최종 상태면")
+    @DisplayName("When every earlier command on the same key is in a final state")
     class FinishedEarlierCommands {
 
-        @ParameterizedTest(name = "앞 명령이 {0}")
+        @ParameterizedTest(name = "earlier command {0}")
         @EnumSource(value = StoredState.class, names = {"APPLIED", "REJECTED", "CONFLICT", "SKIPPED"})
-        @DisplayName("결과와 관계없이 제출한다 — 거절된 앞 명령이 키를 막지 않는다")
+        @DisplayName("It submits whatever the result — a rejected earlier command does not block the key")
         void submitsWhateverTheEarlierOutcome(StoredState finished) {
             // given
             List<QueuedCommand> sameKey = sameKey(queued("pay-1", 1, finished));
@@ -102,7 +102,7 @@ class OrderingGateTest {
         }
 
         @Test
-        @DisplayName("seq에 빈 번호(2·3·5·6)가 있어도 제출한다")
+        @DisplayName("It submits even if seq has gaps (2, 3, 5, 6)")
         void seqGapsDoNotMatter() {
             // given
             List<QueuedCommand> sameKey = sameKey(
@@ -119,11 +119,11 @@ class OrderingGateTest {
 
     @Nested
     @Order(4)
-    @DisplayName("예약(reserve)은")
+    @DisplayName("A reservation (reserve)")
     class Reserve {
 
         @Test
-        @DisplayName("참조할 예약이 없으므로, 앞 명령이 끝났으면 이체처럼 제출한다")
+        @DisplayName("Has no reservation to refer to, so it submits like a transfer once the earlier commands have ended")
         void submitsLikeATransfer() {
             // given
             List<QueuedCommand> sameKey = sameKey(queued("pay-1", 1, APPLIED));
@@ -138,12 +138,12 @@ class OrderingGateTest {
 
     @Nested
     @Order(5)
-    @DisplayName("확정·해제가 참조한 예약이")
+    @DisplayName("When the reservation a post or void refers to")
     class ReferencedReservation {
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(value = CommandKind.class, names = {"POST", "VOID"})
-        @DisplayName("적용(APPLIED)됐으면 제출한다")
+        @DisplayName("Was applied (APPLIED), it submits")
         void submitsWhenTheReservationIsApplied(CommandKind kind) {
             // given
             List<QueuedCommand> sameKey = sameKey(queued("hold-1", 1, APPLIED));
@@ -156,9 +156,9 @@ class OrderingGateTest {
         }
 
         @Test
-        @DisplayName("적용됐으면, 같은 키에 거절된 다른 명령이 함께 있어도 제출한다 — 다른 명령의 결과를 예약의 결과로 읽지 않는다")
+        @DisplayName("Was applied, it submits even if a rejected command sits on the same key — another command's result is not read as the reservation's")
         void readsOnlyTheReferencedReservation() {
-            // given: 같은 키에 거절된 pay-0과 적용된 hold-1이 있다
+            // given: the same key holds the rejected pay-0 and the applied hold-1
             List<QueuedCommand> sameKey = sameKey(
                     queued("pay-0", 1, REJECTED),
                     queued("hold-1", 2, APPLIED));
@@ -170,7 +170,7 @@ class OrderingGateTest {
             assertSubmits(decision);
         }
 
-        @ParameterizedTest(name = "{0}, 예약이 {1}", quoteTextArguments = false)
+        @ParameterizedTest(name = "{0}, reservation {1}", quoteTextArguments = false)
         @CsvSource(textBlock = """
                 POST, REJECTED
                 POST, CONFLICT
@@ -179,7 +179,7 @@ class OrderingGateTest {
                 VOID, CONFLICT
                 VOID, SKIPPED
                 """)
-        @DisplayName("적용되지 않은 최종 상태로 끝났으면 TB에 보내지 않고 건너뛴다(SKIPPED)")
+        @DisplayName("Ended in a final state that is not applied, it is skipped (SKIPPED) without being sent to TB")
         void skipsWhenTheReservationEndedUnapplied(CommandKind kind, StoredState unapplied) {
             // given
             List<QueuedCommand> sameKey = sameKey(queued("hold-1", 1, unapplied));
@@ -191,9 +191,9 @@ class OrderingGateTest {
             assertSkips(decision);
         }
 
-        @ParameterizedTest(name = "예약이 {0}")
+        @ParameterizedTest(name = "reservation {0}")
         @EnumSource(value = StoredState.class, names = {"PENDING", "CLAIMED"})
-        @DisplayName("아직 끝나지 않았으면 끝날 때까지 기다린다")
+        @DisplayName("Has not ended yet, it waits until it ends")
         void waitsForAnUnfinishedReservation(StoredState unfinished) {
             // given
             List<QueuedCommand> sameKey = sameKey(queued("hold-1", 1, unfinished));
@@ -206,9 +206,9 @@ class OrderingGateTest {
         }
 
         @Test
-        @DisplayName("거절됐더라도 다른 앞 명령이 미완료면 건너뛰지 않고 먼저 기다린다")
+        @DisplayName("Was rejected but another earlier command is unfinished, it waits first instead of skipping")
         void waitsForOtherEarlierCommandsBeforeSkipping() {
-            // given: hold-1은 거절됐고, 그 뒤의 pay-2는 아직 PENDING이다
+            // given: hold-1 was rejected, and pay-2 after it is still PENDING
             List<QueuedCommand> sameKey = sameKey(
                     queued("hold-1", 1, REJECTED),
                     queued("pay-2", 2, PENDING));
@@ -223,13 +223,14 @@ class OrderingGateTest {
 
     @Nested
     @Order(6)
-    @DisplayName("정상 경로에서 나올 수 없는 입력이면")
+    @DisplayName("When the input cannot occur on the normal path")
     class Anomalies {
 
         @Test
-        @DisplayName("참조한 예약이 같은 키 명령들 속에 없으면 제출하지 않고 멈춘다 — 예약이 충돌로 끝났다면 같은 TB ID에 남의 이체가 있다")
+        @DisplayName("If the referenced reservation is not among the commands on the same key, it halts instead of submitting — if the reservation ended in conflict, someone else's transfer has the same TB id")
         void haltsWhenTheReservationIsMissing() {
-            // given: hold-1은 없고, 거절된 다른 명령 pay-5만 있다. 보관 정책은 미완료 확정이 참조하는 예약을 지우지 않는다
+            // given: hold-1 is absent; only another rejected command pay-5 is there. The retention policy does not
+            // delete a reservation that an unfinished post refers to
             List<QueuedCommand> sameKey = sameKey(queued("pay-5", 5, REJECTED));
 
             // when
@@ -239,11 +240,12 @@ class OrderingGateTest {
             assertHalts(decision);
         }
 
-        @ParameterizedTest(name = "예약이 {0}")
+        @ParameterizedTest(name = "reservation {0}")
         @EnumSource(value = StoredState.class, names = {"PENDING", "CLAIMED"})
-        @DisplayName("참조한 예약이 자기보다 뒤 seq에서 아직 끝나지 않았으면 제출하지 않고 멈춘 뒤 알린다")
+        @DisplayName("If the referenced reservation has a later seq and is not finished yet, it halts instead of submitting and then alerts")
         void haltsWhenTheReservationComesLater(StoredState unfinished) {
-            // given: 예약 hold-1(seq 3)이 확정(seq 2)보다 뒤에 있다. 접수 검사가 막았어야 하는 순서다
+            // given: reservation hold-1 (seq 3) comes after the post (seq 2). The acceptance checks should have stopped
+            // this order
             List<QueuedCommand> sameKey = sameKey(queued("hold-1", 3, unfinished));
 
             // when
@@ -256,7 +258,7 @@ class OrderingGateTest {
 
     @Nested
     @Order(7)
-    @DisplayName("게이트 결정은")
+    @DisplayName("A gate decision")
     class Decisions {
 
         @ParameterizedTest(name = "{0} → {1}", quoteTextArguments = false)
@@ -266,54 +268,54 @@ class OrderingGateTest {
                 CLOSED, CLAIM_WITH_GATE_CLOSED
                 HALT,   CLAIM_WITH_GATE_HALTED
                 """)
-        @DisplayName("전이표의 claim 사건이 된다 — 건너뛸 명령도 먼저 claim하고, 멈출 명령은 멈춤 사건이 된다 (→)")
+        @DisplayName("Becomes a claim event of the transition table — a command to be skipped is also claimed first, and a command to be halted becomes a halt event (→)")
         void becomesAClaimEvent(GateDecision decision, CommandEvent expected) {
             // when
             CommandEvent event = decision.claimEvent();
 
             // then
-            assertThat(event).as("%s 결정의 claim 사건", decision).isEqualTo(expected);
+            assertThat(event).as("claim event of decision %s", decision).isEqualTo(expected);
         }
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(GateDecision.class)
-        @DisplayName("멈춤(HALT)만 사람에게 알린다")
+        @DisplayName("Only halt (HALT) alerts a person")
         void onlyHaltAlerts(GateDecision decision) {
             // when
             boolean alerts = decision.alerts();
 
             // then
-            assertThat(alerts).as("%s 결정의 알림 여부", decision).isEqualTo(decision == GateDecision.HALT);
+            assertThat(alerts).as("whether decision %s alerts", decision).isEqualTo(decision == GateDecision.HALT);
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ──────────────────────────────────────────
 
     @Nested
     @Order(8)
-    @DisplayName("멈춘 이유를 물으면 — 운영자가 무엇을 고칠지 알게")
+    @DisplayName("When asked why a command halted — so the operator knows what to fix")
     class WhyHalted {
 
         @Test
-        @DisplayName("참조한 예약이 같은 키 명령들 속에 없으면 예약 없음이다")
+        @DisplayName("If the referenced reservation is not among the commands on the same key, the reason is reservation missing")
         void aMissingReservationIsExplained() {
             // when
             HaltReason reason = OrderingGate.explainHalt(CommandKind.POST, java.util.Optional.of("hold-1"), 2,
                     sameKey(queued("capture-1", 2, PENDING)));
 
             // then
-            assertThat(reason).as("멈춘 이유").isEqualTo(HaltReason.RESERVATION_MISSING);
+            assertThat(reason).as("halt reason").isEqualTo(HaltReason.RESERVATION_MISSING);
         }
 
         @Test
-        @DisplayName("참조한 예약이 확정보다 앞 순번이 아니면 예약 순서 위반이다")
+        @DisplayName("If the referenced reservation is not sequenced before the post, the reason is reservation out of order")
         void aReservationNotEarlierIsExplained() {
             // when
             HaltReason reason = OrderingGate.explainHalt(CommandKind.POST, java.util.Optional.of("hold-1"), 1,
                     sameKey(queued("capture-1", 1, PENDING), queued("hold-1", 2, PENDING)));
 
             // then
-            assertThat(reason).as("멈춘 이유").isEqualTo(HaltReason.RESERVATION_NOT_EARLIER);
+            assertThat(reason).as("halt reason").isEqualTo(HaltReason.RESERVATION_NOT_EARLIER);
         }
     }
 
@@ -327,7 +329,7 @@ class OrderingGateTest {
                 .debit(1001).credit(2002).amount(500).ledger(1).code(10).timeoutSeconds(30).build();
     }
 
-    /** {@code reservationCommandId}를 참조하는 확정(POST) 또는 해제(VOID). */
+    /** A post (POST) or void (VOID) that refers to {@code reservationCommandId}. */
     private static LedgerCommand referencing(CommandKind kind, String reservationCommandId) {
         LedgerCommand.Builder builder = kind == CommandKind.POST
                 ? LedgerCommand.post("capture-of-" + reservationCommandId)
@@ -335,7 +337,7 @@ class OrderingGateTest {
         return builder.orderingKey("order-42").reservation(reservationCommandId).build();
     }
 
-    /** 게이트가 보는 같은 순서 키의 명령들. */
+    /** The commands on the same ordering key that the gate looks at. */
     private static List<QueuedCommand> sameKey(QueuedCommand... commands) {
         return List.of(commands);
     }
@@ -345,24 +347,24 @@ class OrderingGateTest {
     }
 
     private static void assertSubmits(GateDecision decision) {
-        expect(decision, GateDecision.OPEN, "제출하기");
+        expect(decision, GateDecision.OPEN, "submitting");
     }
 
     private static void assertWaits(GateDecision decision) {
-        expect(decision, GateDecision.CLOSED, "앞 명령을 기다리기");
+        expect(decision, GateDecision.CLOSED, "waiting for the earlier command");
     }
 
     private static void assertSkips(GateDecision decision) {
-        expect(decision, GateDecision.SKIP, "TB에 보내지 않고 건너뛰기");
+        expect(decision, GateDecision.SKIP, "skipping without sending to TB");
     }
 
     private static void assertHalts(GateDecision decision) {
-        expect(decision, GateDecision.HALT, "제출하지 않고 멈춘 뒤 알리기");
+        expect(decision, GateDecision.HALT, "halting instead of submitting, then alerting");
     }
 
     private static void expect(GateDecision actual, GateDecision expected, String meaning) {
         if (actual != expected) {
-            throw new AssertionError(meaning + "(" + expected + ")를 기대했지만 실제 결과는 " + actual);
+            throw new AssertionError(meaning + " (" + expected + ") was expected, but the actual result is " + actual);
         }
     }
 }

@@ -6,8 +6,8 @@ import java.math.BigInteger;
 import java.util.function.Supplier;
 
 /**
- * TB가 권장하는 시간순 128비트 이체 ID({@link UInt128#id()}). 시간순이라 TB의 LSM 트리에 쓰기가 몰리지 않는다. TB는 0과
- * 2^128-1을 ID로 받지 않으므로 그런 값은 내지 않고 거부한다.
+ * TB's recommended time-ordered 128-bit transfer id ({@link UInt128#id()}). Because the ids are time-ordered, writes do
+ * not scatter across TB's LSM tree. TB does not accept 0 or 2^128-1 as an id, so such values are rejected.
  */
 public final class TigerBeetleTransferIds implements TransferIdGenerator {
 
@@ -27,7 +27,7 @@ public final class TigerBeetleTransferIds implements TransferIdGenerator {
     public BigInteger next() {
         BigInteger id = source.get();
         if (id.signum() == 0 || id.equals(U128_MAX)) {
-            throw new IllegalStateException("TB가 받지 않는 이체 ID입니다: " + id);
+            throw new IllegalStateException("TB does not accept this transfer id: " + id);
         }
         return id;
     }

@@ -1,4 +1,4 @@
-# Windows에서 받아도 셸 스크립트의 줄바꿈이 LF로 남게 한다. 그렇지 않으면 Docker 안의 ./gradlew가 깨진다
+# Keep LF line endings in shell scripts even when checked out on Windows. Otherwise ./gradlew breaks inside Docker
 * text=auto
 gradlew text eol=lf
 *.sh text eol=lf

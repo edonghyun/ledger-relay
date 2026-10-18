@@ -5,7 +5,7 @@ plugins {
     alias(libs.plugins.spring.boot)
 }
 
-// 끝-끝 테스트: 실제 compose.yaml을 띄운다. 이미지 빌드가 있어 느리므로 test와 나누고 check에 건다
+// End-to-end tests: start the real compose.yaml. They build images and are slow, so they are kept out of test and wired into check
 val composeTest by sourceSets.creating {
     compileClasspath += sourceSets.main.get().output
     runtimeClasspath += sourceSets.main.get().output
@@ -28,11 +28,11 @@ dependencies {
 }
 
 val composeTestTask = tasks.register<Test>("composeTest") {
-    description = "docker compose up 한 번으로 뜬 샘플 쇼핑몰에 장면 1~5를 돌린다"
+    description = "Runs scenarios 1-5 against the sample shop started with a single docker compose up"
     group = "verification"
     testClassesDirs = composeTest.output.classesDirs
     classpath = composeTest.runtimeClasspath
-    // 이미지 빌드(Gradle 안의 Gradle)가 처음에는 몇 분 걸린다
+    // The first image build (Gradle inside Gradle) takes a few minutes
     systemProperty("junit.jupiter.execution.timeout.default", "15m")
     timeout = Duration.ofMinutes(30)
     shouldRunAfter(tasks.test)

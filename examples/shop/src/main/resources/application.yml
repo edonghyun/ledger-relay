@@ -16,8 +16,8 @@ ledger-relay:
     max-in-flight: 64
     lease-duration: 10s
     submit-timeout: 2s
-  # TB가 끊긴 동안 재시도 간격이 늘어난다. 라이브러리 기본 최대(30초)면 다시 이은 뒤 대기가 비기까지 30초를 기다리게 된다.
-  # 데모에서는 이으면 곧 비워지는 것이 보이도록 짧게 둔다
+  # The retry interval grows while TB is unreachable. With the library default maximum (30 s), the backlog can wait up to 30 s after the connection returns before it drains.
+  # The demo keeps it short so that the backlog visibly drains right after the connection is restored
   backoff:
     initial: 200ms
     max: 2s

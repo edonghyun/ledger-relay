@@ -29,11 +29,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * 명령 저장소({@code CommandStore})는 순서 키 행을 잡지 않는다. 핸들러가 도는 워커 쓰기가 이 저장소만 쓰므로,
- * 저장소가 속에서 키 행을 잡으면 앱의 "주문 행 → 접수" 트랜잭션과 교착한다. 그래서 다른 트랜잭션이 키 행을 쥔 동안에도
- * 저장소의 모든 메서드가 기다리지 않고 끝나야 한다.
+ * The command store ({@code CommandStore}) does not lock ordering key rows. Worker writes, during which the handler
+ * runs, use only this store, so if the store locked key rows internally it would deadlock with an app transaction
+ * that does "order row → submit". So every store method must finish without waiting even while another transaction
+ * holds the key row.
  */
-@DisplayName("명령 저장소는 순서 키 행을 잡지 않는다 — 키 행을 쥔 트랜잭션이 있어도 기다리지 않는다")
+@DisplayName("The command store does not lock ordering key rows — it does not wait even when a transaction holds the key row")
 class KeyLockFreeStoreTest {
 
     static final Duration NOT_BLOCKED = Duration.ofSeconds(2);
@@ -65,38 +66,38 @@ class KeyLockFreeStoreTest {
     }
 
     @Test
-    @DisplayName("맨 앞의 결과를 써도 기다리지 않는다 — 핸들러가 키 행을 쥔 채 돌지 않게")
+    @DisplayName("Writing the result of the head does not wait — so the handler never runs while holding the key row")
     void writingTheHeadsResultDoesNotWait() {
         // when
         boolean written = finishedWithin(() -> storage.store().compareAndSet(appliedPay1()));
 
         // then
-        assertThat(written).as("pay-1의 결과 쓰기").isTrue();
+        assertThat(written).as("writing the result of pay-1").isTrue();
     }
 
     @Test
-    @DisplayName("찾기와 후보 잠그기도 기다리지 않는다")
+    @DisplayName("Finding and locking candidates do not wait either")
     void findingAndLockingCandidatesDoNotWait() {
         // when
         Optional<CommandRecord> found = finishedWithin(() -> storage.store().find("pay-1"));
         List<DueCommand> due = finishedWithin(() -> storage.store().lockDue(10));
 
         // then
-        assertThat(found).as("찾은 pay-1").isPresent();
-        assertThat(due).as("lease가 남은 맨 앞뿐인 후보").isEmpty();
+        assertThat(found).as("found pay-1").isPresent();
+        assertThat(due).as("candidates when the only head still has its lease").isEmpty();
     }
 
     @Test
-    @DisplayName("같은 키에 행을 넣어도 기다리지 않는다 — 순번을 이미 받은 접수만 넣으므로 키 행은 순번이 잡는다")
+    @DisplayName("Inserting a row on the same key does not wait — only a submit that already took its sequence number inserts, so taking the sequence number locks the key row")
     void insertingOnTheKeyDoesNotWait() {
         // when
         Optional<CommandRecord> existing = finishedWithin(() -> storage.store().insertIfAbsent(pay2()));
 
         // then
-        assertThat(existing).as("이미 있던 행").isEmpty();
+        assertThat(existing).as("existing row").isEmpty();
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Vocabulary used only in this file ──────────────────────────────
 
     private <T> T finishedWithin(java.util.function.Supplier<T> work) {
         try (OtherTransaction<T> other = OtherTransaction.start(storage.transactions(), work)) {

@@ -14,12 +14,12 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-@DisplayName("결과 코드의 저장 이름 — result_code·known_result 컬럼")
+@DisplayName("Stored names of result codes — result_code and known_result columns")
 class ResultCodeWireNameTest {
 
     /**
-     * TB 0.17.9 소스 {@code tigerbeetle.zig}의 {@code CreateTransferStatus} 이름을 그대로 옮긴 것.
-     * 이 이름은 DB에 저장되므로 한 번 정하면 바꾸지 않는다. 바꾸면 이미 저장된 행을 읽지 못한다.
+     * A direct copy of the {@code CreateTransferStatus} names in the TB 0.17.9 source {@code tigerbeetle.zig}.
+     * These names are stored in the DB, so once chosen they never change. Changing one makes stored rows unreadable.
      */
     static final String WIRE_NAME_TABLE = """
             Created, created
@@ -94,23 +94,23 @@ class ResultCodeWireNameTest {
 
     @Nested
     @Order(1)
-    @DisplayName("결과 코드를 저장하면")
+    @DisplayName("When a result code is stored")
     class StoringACode {
 
         @ParameterizedTest(name = "{0} ↔ {1}", quoteTextArguments = false)
         @CsvSource(textBlock = WIRE_NAME_TABLE)
-        @DisplayName("TB 문서의 snake_case 이름으로 저장되고, 그 이름으로 다시 읽힌다")
+        @DisplayName("It is stored under the snake_case name from the TB docs and read back from that name")
         void storesUnderItsTigerBeetleName(LedgerResultCode code, String wireName) {
             // when
             String stored = code.wireName();
 
             // then
-            assertThat(stored).as("%s의 저장 이름", code).isEqualTo(wireName);
-            assertThat(LedgerResultCode.fromWireName(wireName)).as("저장 이름 %s를 읽은 코드", wireName).isEqualTo(code);
+            assertThat(stored).as("stored name of %s", code).isEqualTo(wireName);
+            assertThat(LedgerResultCode.fromWireName(wireName)).as("code read from stored name %s", wireName).isEqualTo(code);
         }
 
         @Test
-        @DisplayName("저장 이름 표는 모든 코드를 정확히 한 번씩 담고, 이름이 겹치지 않는다")
+        @DisplayName("The stored-name table lists every code exactly once, and no two names collide")
         void tableListsEveryCodeOnce() {
             // when
             List<String[]> rows = WIRE_NAME_TABLE.lines()
@@ -130,12 +130,12 @@ class ResultCodeWireNameTest {
 
     @Nested
     @Order(2)
-    @DisplayName("저장 이름이 아닌 문자열을 읽으면")
+    @DisplayName("When a string that is not a stored name is read")
     class UnknownNames {
 
         @ParameterizedTest(name = "\"{0}\"")
         @ValueSource(strings = {"ExceedsCredits", "EXCEEDS_CREDITS", "exceeds_credit", "", "deprecated_18"})
-        @DisplayName("코드로 바꾸지 않고 거부한다 — Java 상수 이름이나 비슷한 철자를 저장 이름으로 받지 않는다")
+        @DisplayName("It is refused instead of turned into a code — Java constant names and near spellings are not accepted as stored names")
         void refusesAnythingButAWireName(String notAWireName) {
             // when
             ThrowingCallable reading = () -> LedgerResultCode.fromWireName(notAWireName);
@@ -145,7 +145,7 @@ class ResultCodeWireNameTest {
         }
 
         @Test
-        @DisplayName("null도 같은 이유로 거부한다")
+        @DisplayName("null is refused for the same reason")
         void refusesNull() {
             // when
             ThrowingCallable reading = () -> LedgerResultCode.fromWireName(null);
@@ -155,12 +155,12 @@ class ResultCodeWireNameTest {
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ──────────────────────────────────────────
 
     private static void assertRefusedAsUnknownWireName(ThrowingCallable reading) {
         assertThatThrownBy(reading)
-                .as("저장 이름이 아니라서 거부되기를 기대했다")
+                .as("expected refusal because it is not a stored name")
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("알 수 없는 결과 코드 저장 이름");
+                .hasMessageContaining("Unknown stored result code name");
     }
 }

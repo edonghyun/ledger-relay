@@ -20,18 +20,18 @@ import org.springframework.jdbc.datasource.DelegatingDataSource;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.support.TransactionTemplate;
 
-@DisplayName("트랜잭션 어댑터 — 격리 수준과 접수할 트랜잭션의 확인(F18)")
+@DisplayName("Transaction adapter — isolation level and the check of the transaction to accept in (F18)")
 class JdbcTransactionsTest {
 
     static final String TRANSACTION_REPEATABLE_READ = "TRANSACTION_REPEATABLE_READ";
 
     @Nested
     @Order(1)
-    @DisplayName("커넥션 풀의 기본 격리 수준이 REPEATABLE READ이면")
+    @DisplayName("When the connection pool defaults to REPEATABLE READ")
     class WhenThePoolDefaultsToRepeatableRead {
 
         @Test
-        @DisplayName("어댑터가 새로 여는 트랜잭션은 READ COMMITTED다 — 워커는 기다리지 직렬화 실패로 터지지 않는다")
+        @DisplayName("A transaction the adapter opens runs at READ COMMITTED — workers wait instead of failing with a serialization failure")
         void aNewTransactionRunsAtReadCommitted() {
             // given
             PostgresStorage storage = PostgresStorage.withDataSourceTransactions(TRANSACTION_REPEATABLE_READ);
@@ -40,11 +40,11 @@ class JdbcTransactionsTest {
             String level = storage.transactions().inTransaction(() -> currentIsolation(storage));
 
             // then
-            assertThat(level).as("새 트랜잭션의 격리 수준").isEqualTo("read committed");
+            assertThat(level).as("isolation level of the new transaction").isEqualTo("read committed");
         }
 
         @Test
-        @DisplayName("앱이 연 SERIALIZABLE 트랜잭션에 합류하면 앱의 수준을 바꾸지 않는다")
+        @DisplayName("Joining a SERIALIZABLE transaction opened by the app keeps the app's level")
         void joiningKeepsTheAppsLevel() {
             // given
             PostgresStorage storage = PostgresStorage.withDataSourceTransactions(TRANSACTION_REPEATABLE_READ);
@@ -54,17 +54,17 @@ class JdbcTransactionsTest {
             String level = app.execute(status -> storage.transactions().inTransaction(() -> currentIsolation(storage)));
 
             // then
-            assertThat(level).as("합류한 트랜잭션의 격리 수준").isEqualTo("serializable");
+            assertThat(level).as("isolation level of the joined transaction").isEqualTo("serializable");
         }
     }
 
     @Nested
     @Order(2)
-    @DisplayName("열린 트랜잭션에 저장소의 커넥션이 묶여 있지 않으면 — G1, F18")
+    @DisplayName("When the store's connection is not bound to the open transaction — G1, F18")
     class WhenTheStoresConnectionIsNotInTheTransaction {
 
         @Test
-        @DisplayName("JPA 트랜잭션이 JDBC 커넥션을 노출하지 않으면 접수는 거부되고, 명령은 따로 커밋되지 않는다")
+        @DisplayName("If the JPA transaction does not expose the JDBC connection, the submit is rejected and no command commits separately")
         void aJpaTransactionHidingTheConnectionIsRefused() {
             // given
             PostgresStorage storage = PostgresStorage.withJpaTransactions(new PostgresStorage.NonExposingJpaDialect());
@@ -79,11 +79,11 @@ class JdbcTransactionsTest {
             // then
             assertRefusedAsNotJoined(submitting);
             assertThat(storage.sql().sql("SELECT count(*) FROM ledger_command").query(Long.class).single())
-                    .as("따로 커밋된 명령").isZero();
+                    .as("separately committed commands").isZero();
         }
 
         @Test
-        @DisplayName("트랜잭션 매니저가 다른 DataSource(프록시)를 쥐고 있으면 접수할 트랜잭션으로 인정하지 않는다")
+        @DisplayName("If the transaction manager holds a different DataSource (a proxy), the transaction is not accepted for submits")
         void aTransactionOnAnotherDataSourceIsRefused() {
             // given
             PostgresStorage storage = PostgresStorage.withDataSourceTransactions();
@@ -103,7 +103,7 @@ class JdbcTransactionsTest {
     }
 
     private static void assertRefusedAsNotJoined(ThrowingCallable submitting) {
-        assertThatThrownBy(submitting).as("저장소의 커넥션이 묶이지 않은 트랜잭션에서의 접수")
+        assertThatThrownBy(submitting).as("submit in a transaction without the store's connection bound")
                 .isInstanceOf(IllegalTransactionStateException.class)
                 .hasMessageContaining("DataSource");
     }

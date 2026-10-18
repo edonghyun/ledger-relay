@@ -1,27 +1,30 @@
 package io.github.ledgerrelay.core.domain;
 
-/** 순서 게이트의 결정. */
+/** The decision of the ordering gate. */
 public enum GateDecision {
-    /** 제출한다. */
+    /** Submit. */
     OPEN,
-    /** 같은 키의 앞 명령을 기다린다. */
+    /** Wait for the earlier command of the same key. */
     CLOSED,
-    /** post·void가 참조한 예약이 적용되지 않고 끝났다. claim한 뒤 TB에 보내지 않고 SKIPPED로 끝낸다. */
+    /**
+     * The reservation that the post or void refers to ended without being applied. After the claim, end as SKIPPED
+     * without sending to TB.
+     */
     SKIP,
-    /** 정상 경로에서 나올 수 없는 입력이다. 제출하지 않고 멈추며 알린다. */
+    /** The input cannot occur on the normal path. Do not submit; halt and report. */
     HALT;
 
-    /** 전이표의 claim 사건으로 바꾼다. */
+    /** Maps to the claim event of the transition table. */
     public CommandEvent claimEvent() {
         return switch (this) {
-            // 건너뛸 명령도 먼저 claim한다. 건너뜀(RESERVATION_NOT_APPLIED)은 claim 뒤의 사건이다.
+            // A command to skip is claimed first too. The skip (RESERVATION_NOT_APPLIED) is an event after the claim.
             case OPEN, SKIP -> CommandEvent.CLAIM_WITH_GATE_OPEN;
             case CLOSED -> CommandEvent.CLAIM_WITH_GATE_CLOSED;
             case HALT -> CommandEvent.CLAIM_WITH_GATE_HALTED;
         };
     }
 
-    /** 사람이 봐야 하는 결정인가. */
+    /** Whether a person needs to look at this decision. */
     public boolean alerts() {
         return this == HALT;
     }

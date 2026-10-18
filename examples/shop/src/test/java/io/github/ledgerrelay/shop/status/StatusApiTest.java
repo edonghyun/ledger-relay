@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 
-@DisplayName("상태 API — 화면의 숫자는 모두 PG와 TB에서 온다 (반목표)")
+@DisplayName("Status API — every number in the UI comes from PG and TB (anti-goal)")
 class StatusApiTest extends ShopSpringTest {
 
     @Autowired
@@ -46,7 +46,7 @@ class StatusApiTest extends ShopSpringTest {
     }
 
     @Test
-    @DisplayName("결제 하나를 출고까지 보내면 접수·완료가 각각 2씩 늘고 대기는 그대로다")
+    @DisplayName("Taking one payment through shipping raises accepted and completed by 2 each and leaves the backlog unchanged")
     void tilesCountCommands() throws Exception {
         // given
         probe.awaitQuiet();
@@ -58,14 +58,14 @@ class StatusApiTest extends ShopSpringTest {
 
         // then
         String after = get("/api/status");
-        assertThat(number(after, "$.tiles.accepted") - number(before, "$.tiles.accepted")).as("접수 증가").isEqualTo(2);
-        assertThat(number(after, "$.tiles.completed") - number(before, "$.tiles.completed")).as("완료 증가").isEqualTo(2);
-        assertThat(number(after, "$.tiles.backlog")).as("대기").isEqualTo(number(before, "$.tiles.backlog"));
-        assertThat(number(after, "$.tiles.p99Millis")).as("p99 접수→완료(ms)").isPositive();
+        assertThat(number(after, "$.tiles.accepted") - number(before, "$.tiles.accepted")).as("accepted increase").isEqualTo(2);
+        assertThat(number(after, "$.tiles.completed") - number(before, "$.tiles.completed")).as("completed increase").isEqualTo(2);
+        assertThat(number(after, "$.tiles.backlog")).as("backlog").isEqualTo(number(before, "$.tiles.backlog"));
+        assertThat(number(after, "$.tiles.p99Millis")).as("p99 accept→done (ms)").isPositive();
     }
 
     @Test
-    @DisplayName("결제 완료 뒤 정합성은 ok이고, 가맹점 확정 잔액이 결제 완료 주문 합과 같다")
+    @DisplayName("After a paid order the verdict is ok and the merchant posted balance equals the sum of paid orders")
     void consistencyIsOkAfterAPaidOrder() throws Exception {
         // given
         paidOrder();
@@ -77,45 +77,45 @@ class StatusApiTest extends ShopSpringTest {
                 && number(json, "$.paidOrdersSatang") > 0);
 
         // then
-        assertThat(number(consistency, "$.mismatches")).as("대사 불일치").isZero();
-        assertThat(number(consistency, "$.checked")).as("대사로 확인한 명령").isEqualTo(number(consistency, "$.matched"));
-        assertThat(number(consistency, "$.doubleTransfers")).as("중복 이체").isZero();
+        assertThat(number(consistency, "$.mismatches")).as("reconciliation mismatches").isZero();
+        assertThat(number(consistency, "$.checked")).as("commands checked by reconciliation").isEqualTo(number(consistency, "$.matched"));
+        assertThat(number(consistency, "$.doubleTransfers")).as("double transfers").isZero();
     }
 
     @Test
-    @DisplayName("타임라인은 예약과 확정 단계, TB 전송 횟수, 실제 잔액을 보여 준다")
+    @DisplayName("The timeline shows the reserve and post steps, the TB submit counts and the actual balances")
     void timelineShowsStepsAndBalances() throws Exception {
         // given
         ShopOrder order = paidOrder();
 
-        // when: 잔액은 1초마다 모으는 값이라 결제 완료가 반영될 때까지 기다린다
+        // when: balances are collected every second, so wait until the paid order shows up
         String timeline = await("/api/orders/" + order.id() + "/timeline",
                 json -> JsonPath.read(json, "$.buyer") != null && number(json, "$.buyer.paidSatang") >= 89_000);
 
         // then
-        assertThat((List<String>) JsonPath.read(timeline, "$.steps[*].kind")).as("단계").containsExactly("RESERVE", "POST");
-        assertThat((List<String>) JsonPath.read(timeline, "$.steps[*].state")).as("단계 결과")
+        assertThat((List<String>) JsonPath.read(timeline, "$.steps[*].kind")).as("steps").containsExactly("RESERVE", "POST");
+        assertThat((List<String>) JsonPath.read(timeline, "$.steps[*].state")).as("step results")
                 .containsExactly("APPLIED", "APPLIED");
-        assertThat((List<Number>) JsonPath.read(timeline, "$.steps[*].submitCount")).as("TB 전송 횟수")
+        assertThat((List<Number>) JsonPath.read(timeline, "$.steps[*].submitCount")).as("TB submit counts")
                 .allSatisfy(count -> assertThat(count.longValue()).isGreaterThanOrEqualTo(1));
-        assertThat((String) JsonPath.read(timeline, "$.steps[0].transferId")).as("예약 이체 ID(16진)").startsWith("0x");
-        assertThat(number(timeline, "$.order.amountSatang")).as("주문 금액").isEqualTo(89_000);
-        assertThat(number(timeline, "$.merchant.postedSatang")).as("가맹점 확정 잔액").isGreaterThanOrEqualTo(89_000);
-        assertThat(number(timeline, "$.buyer.paidSatang")).as("구매자가 낸 돈").isGreaterThanOrEqualTo(89_000);
+        assertThat((String) JsonPath.read(timeline, "$.steps[0].transferId")).as("reservation transfer id (hex)").startsWith("0x");
+        assertThat(number(timeline, "$.order.amountSatang")).as("order amount").isEqualTo(89_000);
+        assertThat(number(timeline, "$.merchant.postedSatang")).as("merchant posted balance").isGreaterThanOrEqualTo(89_000);
+        assertThat(number(timeline, "$.buyer.paidSatang")).as("money paid by the buyer").isGreaterThanOrEqualTo(89_000);
     }
 
     @Test
-    @DisplayName("이 인스턴스가 몇 초 안에 Workers 목록에 보이고, TB 연결은 UP으로 보인다")
+    @DisplayName("This instance appears in the Workers list within seconds and the TB connection shows as UP")
     void theInstanceShowsUpWithinSeconds() throws Exception {
-        // TB 확인은 기다리지 않고 뒤에서 돈다(F36). 첫 응답은 아직 답을 받기 전일 수 있어 폴링으로 기다린다
+        // The TB check runs in the background without waiting (F36). The first response may come before any answer, so poll
         String status = await("/api/status", json -> !((List<?>) JsonPath.read(json,
                 "$.instances[?(@.name == '" + properties.instanceName() + "')]")).isEmpty()
                 && Boolean.TRUE.equals(JsonPath.read(json, "$.ledgerUp")));
 
-        assertThat(number(status, "$.instances.length()")).as("살아 있는 인스턴스 수").isPositive();
+        assertThat(number(status, "$.instances.length()")).as("live instances").isPositive();
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ───────────────────────────────────
 
     private ShopOrder paidOrder() throws InterruptedException {
         ShopOrder order = shop.checkout("status-" + UUID.randomUUID(), 1002, "mouse").order();
@@ -138,7 +138,7 @@ class StatusApiTest extends ShopSpringTest {
             }
             Thread.sleep(100);
         }
-        throw new AssertionError(path + "가 " + ShopProbe.SETTLE + " 안에 기대한 값이 되지 않았다. 마지막 응답: " + last);
+        throw new AssertionError(path + " did not reach the expected value within " + ShopProbe.SETTLE + ". Last response: " + last);
     }
 
     static long number(String json, String path) {

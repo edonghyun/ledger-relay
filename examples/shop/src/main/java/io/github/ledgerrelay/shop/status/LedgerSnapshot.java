@@ -25,21 +25,29 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * TB에서 읽는 화면 숫자(잔액, 중복 이체, 대사)를 1초마다 전용 스레드에서 모아 둔다. API는 모아 둔 최신 값을 바로 돌려준다.
+ * Collects the UI numbers read from TB (balances, double transfers, reconciliation) every second on a dedicated thread.
+ * The API returns the latest collected values immediately.
  *
- * <p>TB 클라이언트에는 timeout이 없다. TB가 끊기면 조회가 연결이 돌아올 때까지 기다린다. 화면 요청이 TB를 직접 부르면 장면 2에서
- * 화면이 멈추고, 매초 새 조회가 클라이언트에 쌓인다. 그래서 TB를 부르는 것은 이 스레드 하나뿐이고, 앞 갱신이 끝나지 않았으면 새로
- * 시작하지 않는다. 그동안 API는 마지막 값을 {@code stale}로 표시해 돌려준다.
+ * <p>The TB client has no timeout. When TB is unreachable, a lookup waits until the connection returns. If UI requests
+ * called TB directly, the UI would freeze in scenario 2 and a new lookup would pile up in the client every second. So
+ * this one thread is the only caller of TB, and it does not start a new refresh while the previous one is unfinished.
+ * Meanwhile the API returns the last values marked {@code stale}.
  */
 @Component
 class LedgerSnapshot {
 
     private static final Log log = LogFactory.getLog(LedgerSnapshot.class);
-    /** 이보다 오래된 값은 화면에 "오래됨"으로 보인다. */
+    /** Values older than this are shown as stale in the UI. */
     static final Duration STALE_AFTER = Duration.ofSeconds(3);
-    /** 처리 중인 확정 없이 이만큼 연달아 어긋나야 broken이다. 한 번은 TB 적용과 PG 커밋 사이를 본 것일 수 있다. */
+    /**
+     * The verdict is broken only after this many unequal refreshes in a row with no post in flight. A single one may
+     * have caught the gap between the TB apply and the PG commit.
+     */
     static final int BROKEN_AFTER = 3;
-    /** 갱신마다 대사하는 페이지 상한(1,000건씩). 데모 크기에서는 늘 전부다. 넘으면 앞 5만 건만 본다. */
+    /**
+     * Pages reconciled per refresh (1,000 commands each). At demo size this always covers everything; beyond it only the
+     * first 50,000 are checked.
+     */
     private static final int RECONCILE_PAGES = 50;
     private static final int TRANSFER_PAGE = 8189;
 
@@ -54,7 +62,7 @@ class LedgerSnapshot {
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> new Thread(r, "shop-ledger-snapshot"));
     private final AtomicBoolean busy = new AtomicBoolean();
 
-    // 중복 이체 세기의 위치와 누계. 갱신 스레드만 쓴다
+    // Position and running totals of the double-transfer count. Only the refresh thread uses them
     private long transfersAfter;
     private final Map<Long, Long> capturedByOrder = new HashMap<>();
     private int unequalInARow;
@@ -83,7 +91,7 @@ class LedgerSnapshot {
                 try {
                     latest = refresh();
                 } catch (RuntimeException e) {
-                    log.debug("원장 숫자를 갱신하지 못했다. 마지막 값을 그대로 둔다", e);
+                    log.debug("Could not refresh the ledger numbers; keeping the last values", e);
                 } finally {
                     busy.set(false);
                 }
@@ -97,7 +105,7 @@ class LedgerSnapshot {
     }
 
     private Snapshot refresh() {
-        // PG를 먼저 읽는다. TB는 PG보다 앞서기만 한다(TB 적용 → PG 커밋 순서)
+        // Read PG first. TB can only be ahead of PG (TB apply happens before the PG commit)
         long paid = stats.paidOrdersSatang();
         long capturesInFlight = stats.capturesInFlight();
         Map<Long, AccountBalance> balances = new HashMap<>();
@@ -126,8 +134,10 @@ class LedgerSnapshot {
     }
 
     /**
-     * 끝난 명령을 처음부터 모두 대사한다. 지난 위치부터 이어서 하면 안 된다. 명령은 행 순서대로 끝나지 않는다(멈췄다 포기된 확정, 워커
-     * 둘의 묶음, 늦게 커밋된 트랜잭션). 위치가 아직 안 끝난 행을 지나가면 그 행은 끝난 뒤에도 영영 대사되지 않는다.
+     * Reconciles every completed command from the start. Continuing from the last position is wrong: commands do not
+     * complete in row order (a post that halted and was abandoned, batches of two workers, a transaction that committed
+     * late). If the position passes a row that is not yet complete, that row is never reconciled, even after it
+     * completes.
      */
     private Reconciled reconcileAll() {
         long after = 0;
@@ -146,8 +156,10 @@ class LedgerSnapshot {
     }
 
     /**
-     * 가맹점에 들어온 확정 이체를 주문(이체의 user_data_64)별로 더해, 주문 금액보다 많이 받은 주문 수를 센다. TB의 이체 ID 유일성 때문에
-     * 늘 0인 "같은 ID 두 번"을 세지 않는다. 같은 주문에 다른 ID로 확정이 두 번 들어오는 것을 센다. 새 이체만 읽어 이어서 더한다.
+     * Sums the posting transfers credited to the merchant per order (the transfer's user_data_64) and counts the orders
+     * that received more than the order amount. It does not count "the same id twice", which TB's transfer id
+     * uniqueness keeps at 0. It counts two posts for the same order under different ids. Reads only new transfers and
+     * keeps adding.
      */
     private long countDoubleTransfers() {
         while (true) {

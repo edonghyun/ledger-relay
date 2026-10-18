@@ -10,15 +10,17 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * 라이브러리 스키마와 샘플 앱 스키마를 적용한다. 라이브러리는 스키마를 자동 적용하지 않는다. 이것은 샘플 앱만의 편의다.
+ * Applies the library schema and the sample app schema. The library never applies its schema automatically; this is a
+ * convenience of the sample app only.
  *
- * <p>compose는 앱 둘을 같은 DB에 동시에 띄운다. 둘이 함께 {@code CREATE TABLE}을 하면 한쪽이 실패해 기동하지 못한다
- * (docs/failure-modes.md F37). 그래서 한 트랜잭션에서 advisory lock을 잡고, 표가 없을 때만 적용한다. 늦은 쪽은 앞쪽이 커밋할
- * 때까지 lock에서 기다렸다가 표가 있는 것을 보고 그냥 지나간다.
+ * <p>compose starts two apps against the same DB at the same time. If both run {@code CREATE TABLE} together, one of
+ * them fails and does not start (docs/failure-modes.md F37). So the schema is applied in one transaction that holds an
+ * advisory lock, and only when the tables are missing. The later app waits on the lock until the first one commits,
+ * then sees the tables and moves on.
  */
 public final class ShopSchema {
 
-    /** 이 앱의 advisory lock 번호. 바트의 ISO 숫자 코드다. */
+    /** Advisory lock number of this app: the ISO numeric code of the baht. */
     static final long LOCK = 764;
     private static final String LIBRARY_SCHEMA = "/io/github/ledgerrelay/jdbc/schema.sql";
     private static final String SHOP_SCHEMA = "/shop-schema.sql";
@@ -41,7 +43,7 @@ public final class ShopSchema {
     private static String read(String resource) {
         try (InputStream in = ShopSchema.class.getResourceAsStream(resource)) {
             if (in == null) {
-                throw new IllegalStateException(resource + "가 클래스패스에 없습니다");
+                throw new IllegalStateException(resource + " is not on the classpath");
             }
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {

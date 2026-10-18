@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 화면의 Scenarios 탭. demo 프로필에서만 있다. 운영 앱에 이런 경로를 두지 않는다. */
+/** The Scenarios tab of the UI. Exists only in the demo profile. A production app does not expose paths like these. */
 @RestController
 @RequestMapping("/api/demo")
 @Profile("demo")

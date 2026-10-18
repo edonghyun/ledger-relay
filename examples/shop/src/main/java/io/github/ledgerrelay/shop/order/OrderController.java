@@ -27,7 +27,7 @@ class OrderController {
         this.orders = orders;
     }
 
-    /** 새 주문이면 201, 같은 멱등 키로 다시 온 요청이면 200과 처음 주문. */
+    /** 201 for a new order; 200 and the original order for a repeated request with the same idempotency key. */
     @PostMapping
     ResponseEntity<OrderView> checkout(@RequestHeader("Idempotency-Key") String idempotencyKey,
             @RequestBody CheckoutRequest request) {

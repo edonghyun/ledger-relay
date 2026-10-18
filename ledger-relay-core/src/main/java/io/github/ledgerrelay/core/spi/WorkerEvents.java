@@ -1,62 +1,72 @@
 package io.github.ledgerrelay.core.spi;
 
 /**
- * 워커 한 바퀴에서 일어난 일을 바깥에 알리는 나가는 포트. 로그(spring-boot 모듈의 {@code LoggingWorkerEvents})와 지표를 이것으로 붙인다.
- * 모든 메서드는 아무것도 하지 않는 기본 구현을 갖는다. 구현은 빨리 돌아와야 하고 던지지 않아야 한다.
+ * The outgoing port that reports what happened in a worker cycle. Logging ({@code LoggingWorkerEvents} in the
+ * spring-boot module) and metrics attach through it. Every method has a default implementation that does nothing.
+ * Implementations must return quickly and must not throw.
  */
 public interface WorkerEvents {
 
-    /** 아무것도 하지 않는다. */
+    /** Does nothing. */
     WorkerEvents NONE = new WorkerEvents() {
     };
 
-    /** 게이트가 멈춘 명령. 다시 후보가 되지 않으므로 명령마다 한 번만 온다. */
+    /** A command the gate halted. It is never a candidate again, so this arrives only once per command. */
     default void halted(String commandId) {
     }
 
     /**
-     * claim 후보 하나의 판단이 예외를 던졌다(F29). 그 행은 멈췄거나, 멈추게도 못 해 건너뛰었다. 다른 후보는 계속 처리됐다.
-     * {@code cause}에 무엇이 어긋났는지가 있다.
+     * The decision for one claim candidate threw (F29). The row was halted, or even halting failed and it was passed
+     * over. The other candidates were still processed. {@code cause} says what was wrong.
      */
     default void malformedCandidate(String commandId, RuntimeException cause) {
     }
 
-    /** 쓰기가 0행이었다. 다른 워커가 가져갔거나 이미 끝났다(G5, stale_write_rejected). */
+    /** The write hit zero rows. Another worker took the command or it already ended (G5, stale_write_rejected). */
     default void fenced(String commandId) {
     }
 
     /**
-     * 이 명령의 쓰기가 예외로 끝났다(저장소 오류 등). 그 명령만 lease가 끝날 때까지 처리 중으로 남고, 같은 바퀴의 다른 명령은
-     * 계속 쓴다. TB 결과를 받은 뒤였다면 그 결과는 이 바퀴에서 남지 못한다.
+     * The write for this command ended with an exception (a store error, for example). Only that command stays in
+     * flight until its lease expires; the other commands in the same cycle keep being written. If a TB result had
+     * already been received, that result is not recorded in this cycle.
      */
     default void writeFailed(String commandId, RuntimeException cause) {
     }
 
-    /** 결과 반영 핸들러가 던졌다. 받은 결과를 남기고 backoff 뒤 다시 잡힌다. */
+    /** The outcome handler threw. The received result is kept and the command is claimed again after the backoff. */
     default void handlerFailed(String commandId, RuntimeException cause) {
     }
 
-    /** 이체 batchSize개를 한 요청으로 TB에 보냈다. */
+    /** Sent batchSize transfers to TB in one request. */
     default void submitted(int batchSize) {
     }
 
-    /** submit-timeout 안에 응답이 없어 batchSize개를 되돌렸다. */
+    /** No response within submit-timeout, so batchSize commands were put back. */
     default void submitTimedOut(int batchSize) {
     }
 
-    /** 요청이 예외로 끝나 batchSize개를 되돌렸다. */
+    /** The request ended with an exception, so batchSize commands were put back. */
     default void submitFailed(int batchSize, Throwable cause) {
     }
 
-    /** TB 클라이언트를 더 쓸 수 없어({@link LedgerUnavailableException}) 이번 요청의 명령을 되돌렸다. 일시적 실패와 따로 센다. */
+    /**
+     * The TB client can no longer be used ({@link LedgerUnavailableException}), so this request's commands were put
+     * back. Counted separately from transient failures.
+     */
     default void ledgerUnavailable(Throwable cause) {
     }
 
-    /** 결과 개수가 요청과 달라 아무것도 쓰지 않고 되돌렸다. 버그 신호다. */
+    /**
+     * The result count differed from the request, so nothing was written and the commands were put back. A sign of a
+     * bug.
+     */
     default void malformedReply(int expected, int actual) {
     }
 
-    /** in-flight 슬롯을 잡지 못해 이번 바퀴에는 claim하지 않았다. TB가 멈췄거나 느리다는 배압 신호다. */
+    /**
+     * No in-flight slots could be taken, so this cycle did not claim. A backpressure signal that TB is stalled or slow.
+     */
     default void noSlots() {
     }
 }

@@ -5,7 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-/** ledger-relay 샘플 쇼핑몰. 결제는 예약(승인), 출고 때 확정(매입), 취소는 해제다. */
+/** ledger-relay sample shop. Payment is a reservation (authorize), shipping posts it (capture), cancelling voids it. */
 @SpringBootApplication
 @EnableConfigurationProperties(ShopProperties.class)
 @EnableScheduling

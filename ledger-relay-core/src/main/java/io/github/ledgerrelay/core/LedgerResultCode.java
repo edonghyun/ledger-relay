@@ -5,13 +5,13 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * TB {@code create_transfers} 결과 코드(TB 0.17.9 기준 68종). 상수 이름은 TB Java 클라이언트의
- * {@code CreateTransferStatus}와 같다. 두 enum이 정확히 같은지는 tigerbeetle 모듈의
- * {@code ResultCodeGuardTest}가 확인한다.
+ * TB {@code create_transfers} result codes (68 codes as of TB 0.17.9). The constant names match
+ * {@code CreateTransferStatus} in the TB Java client. {@code ResultCodeGuardTest} in the tigerbeetle module checks
+ * that the two enums are exactly the same.
  *
- * <p>DB에는 {@link #wireName()}을 저장한다. 상수 이름은 TB 클라이언트를 따라 바뀔 수 있다.
+ * <p>The DB stores {@link #wireName()}. Constant names can change along with the TB client.
  *
- * <p>{@link #category()}는 default 없는 switch다. 상수를 추가하고 분류를 빠뜨리면 컴파일이 실패한다.
+ * <p>{@link #category()} is a switch without default. Adding a constant without a category fails compilation.
  */
 public enum LedgerResultCode {
     Created("created"),
@@ -92,16 +92,19 @@ public enum LedgerResultCode {
         this.wireName = wireName;
     }
 
-    /** DB({@code result_code}, {@code known_result})에 저장하는 이름. TB 소스의 snake_case 이름이며 바꾸지 않는다. */
+    /**
+     * The name stored in the DB ({@code result_code}, {@code known_result}). The snake_case name from the TB source; it
+     * never changes.
+     */
     public String wireName() {
         return wireName;
     }
 
-    /** 저장 이름으로 코드를 찾는다. Java 상수 이름({@code ExceedsCredits})은 받지 않는다. */
+    /** Finds the code by its stored name. It does not accept the Java constant name ({@code ExceedsCredits}). */
     public static LedgerResultCode fromWireName(String wireName) {
         LedgerResultCode code = wireName == null ? null : BY_WIRE_NAME.get(wireName);
         if (code == null) {
-            throw new IllegalArgumentException("알 수 없는 결과 코드 저장 이름: " + wireName);
+            throw new IllegalArgumentException("Unknown stored result code name: " + wireName);
         }
         return code;
     }
@@ -132,7 +135,8 @@ public enum LedgerResultCode {
                  PendingTransferHasDifferentCode, PendingTransferHasDifferentAmount,
                  TimeoutReservedForPendingTransfer, ClosingTransferMustBePending, ReservedFlag,
                  FlagsAreMutuallyExclusive, TimestampMustBeZero,
-                 // 예약 금액은 바뀌지 않아 앱이 미리 안다. 2126년 전의 timeout 넘침은 버그나 시계 이상이다
+                 // The reserved amount never changes, so the app knows it in advance. A timeout overflow before 2126 is
+                 // a bug or a clock fault
                  ExceedsPendingTransferAmount, OverflowsTimeout -> ResultCategory.INVALID;
 
             case LinkedEventFailed, LinkedEventChainOpen, ImportedEventExpected, ImportedEventNotExpected,

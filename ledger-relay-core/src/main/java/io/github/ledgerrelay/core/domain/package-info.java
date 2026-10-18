@@ -1,6 +1,6 @@
 /**
- * ledger-relay의 도메인 규칙이다. 저장 상태, 전이표, 상태 기계, 순서 게이트, 내용 해시가 여기 있다.
- * 저장 방식과 상관없이 참인 규칙만 두며, 포트(spi)와 서비스(application)를 모른다.
- * 앱 코드는 이 패키지를 import하지 않는다. 이 패키지의 타입은 예고 없이 바뀔 수 있다.
+ * The domain rules of ledger-relay: stored states, the transition table, the state machine, the ordering gate and the
+ * content hash. Only rules that hold regardless of storage live here, and it knows neither the ports (spi) nor the
+ * services (application). App code does not import this package. Its types can change without notice.
  */
 package io.github.ledgerrelay.core.domain;

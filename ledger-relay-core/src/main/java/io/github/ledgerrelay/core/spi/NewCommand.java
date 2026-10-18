@@ -4,7 +4,10 @@ import java.math.BigInteger;
 import java.util.Objects;
 import java.util.Optional;
 
-/** 넣을 명령 행. 순번, 이체 ID, 내용 해시는 서비스가 정해서 넘긴다. 행 ID와 접수 시각은 저장소가 정한다. */
+/**
+ * A command row to insert. The service sets the seq, transfer id and content hash. The store sets the row id and
+ * acceptance time.
+ */
 public record NewCommand(
         String commandId,
         String orderingKey,

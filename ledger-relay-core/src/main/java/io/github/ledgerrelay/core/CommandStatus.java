@@ -6,8 +6,9 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 명령 하나의 조회 결과이자, 결과 반영 핸들러가 받는 값.
- * {@link #state()}는 조회 상태다. 거절·충돌로 끝났을 때만 {@link #rejection()}이 있다.
+ * The query result for one command, and the value the outcome handler receives.
+ * {@link #state()} is the query state. {@link #rejection()} is present only when the command ended as rejected or
+ * conflict.
  */
 public record CommandStatus(
         String commandId,
@@ -19,17 +20,20 @@ public record CommandStatus(
         Instant acceptedAt,
         Optional<Instant> completedAt) {
 
-    /** 조회 상태. */
+    /** The query state. */
     public enum State {
-        /** 접수됐고 아직 TB에 보낸 적이 없다. */
+        /** Accepted and not yet sent to TB. */
         ACCEPTED,
-        /** TB에 보낸 적이 있고 결과를 기다린다. 응답이 유실된 미확정도 여기에 든다. */
+        /** Sent to TB and waiting for the result. An unresolved send whose response was lost also counts here. */
         IN_PROGRESS,
         APPLIED,
         REJECTED,
         CONFLICT,
         SKIPPED,
-        /** 정상 경로에서 나올 수 없는 입력이라 멈췄다. 그 키는 운영자가 풀 때까지 막힌다. */
+        /**
+         * Halted because the input cannot occur on the normal path. The key stays blocked until an operator resolves
+         * it.
+         */
         HALTED;
 
         public boolean isFinal() {
@@ -48,26 +52,26 @@ public record CommandStatus(
         boolean needsReason = state == State.REJECTED || state == State.CONFLICT;
         if (rejection.isPresent() != needsReason) {
             throw new IllegalArgumentException(
-                    "rejection은 REJECTED·CONFLICT일 때만, 그리고 그때는 반드시 있어야 합니다: state=" + state + ", rejection=" + rejection);
+                    "rejection must be present exactly when state is REJECTED or CONFLICT: state=" + state + ", rejection=" + rejection);
         }
         rejection.ifPresent(reason -> {
-            // 분류가 보내는 최종 상태. 공개 API는 domain을 모르므로 여기서 다시 판정하고,
-            // domain의 StoredState.finalStateFor와 같은지는 StoredStateTest가 확인한다.
+            // The final state the category leads to. The public API does not know domain, so it decides again here;
+            // StoredStateTest checks that this matches StoredState.finalStateFor in domain.
             State expected = switch (reason.category()) {
                 case CONFLICT, UNSUPPORTED -> State.CONFLICT;
                 case BUSINESS, PRIOR_FAILURE, INVALID -> State.REJECTED;
                 case APPLIED -> State.APPLIED;
             };
             if (expected != state) {
-                throw new IllegalArgumentException(reason.tbCode() + "(" + reason.category() + ")는 " + state + " 상태의 사유가 아닙니다");
+                throw new IllegalArgumentException(reason.tbCode() + " (" + reason.category() + ") is not a reason for state " + state);
             }
         });
         if (skipReason.isPresent() != (state == State.SKIPPED)) {
             throw new IllegalArgumentException(
-                    "skipReason은 SKIPPED일 때만, 그리고 그때는 반드시 있어야 합니다: state=" + state + ", skipReason=" + skipReason);
+                    "skipReason must be present exactly when state is SKIPPED: state=" + state + ", skipReason=" + skipReason);
         }
         if (completedAt.isPresent() != state.isFinal()) {
-            throw new IllegalArgumentException("completedAt은 끝난 명령에만, 그리고 반드시 있어야 합니다: state=" + state);
+            throw new IllegalArgumentException("completedAt must be present exactly when the command has ended: state=" + state);
         }
     }
 }

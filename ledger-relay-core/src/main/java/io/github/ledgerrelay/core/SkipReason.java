@@ -1,9 +1,9 @@
 package io.github.ledgerrelay.core;
 
-/** 명령이 TB에 가지 않고 건너뜀(SKIPPED)으로 끝난 이유(docs/failure-modes.md F9). */
+/** Why a command ended as skipped (SKIPPED) without going to TB (docs/failure-modes.md F9). */
 public enum SkipReason {
-    /** 확정·해제가 참조한 예약이 적용되지 않고 끝났다. */
+    /** The reservation that the post or void refers to ended without being applied. */
     RESERVATION_NOT_APPLIED,
-    /** 멈춘(HALTED) 명령을 운영자가 포기했다. TB에는 한 번도 가지 않았다. */
+    /** An operator abandoned the halted (HALTED) command. It never went to TB. */
     ABANDONED_BY_OPERATOR
 }

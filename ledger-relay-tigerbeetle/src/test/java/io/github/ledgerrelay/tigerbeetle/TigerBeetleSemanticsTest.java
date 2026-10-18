@@ -38,8 +38,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
-/** 근거: docs.tigerbeetle.com/reference/requests/create_transfers (exists, exists_with_different_*, id_already_failed). */
-@DisplayName("TigerBeetle 0.17.9 결과 규칙 — 분류표의 근거")
+/** Source: docs.tigerbeetle.com/reference/requests/create_transfers (exists, exists_with_different_*, id_already_failed). */
+@DisplayName("TigerBeetle 0.17.9 result rules — the basis of the classification table")
 class TigerBeetleSemanticsTest {
 
     static final TigerBeetleContainer TB = new TigerBeetleContainer();
@@ -66,7 +66,7 @@ class TigerBeetleSemanticsTest {
 
     @Nested
     @Order(1)
-    @DisplayName("500원 결제가 이미 기록된 상태에서")
+    @DisplayName("After a payment of 500 is recorded")
     class AfterAPaymentIsRecorded {
 
         Account payer;
@@ -75,13 +75,13 @@ class TigerBeetleSemanticsTest {
 
         @BeforeEach
         void givenARecordedPayment() {
-            payer = ledger.openAccount("구매자");
-            payee = ledger.openAccount("가맹점");
+            payer = ledger.openAccount("buyer");
+            payee = ledger.openAccount("merchant");
             payment = ledger.recorded(transfer(500).from(payer).to(payee));
         }
 
         @Test
-        @DisplayName("같은 결제를 다시 보내면 이미 기록된 것으로 인정되고, 돈은 한 번만 움직인다")
+        @DisplayName("Resending the same payment is accepted as already recorded and moves money only once")
         void resendingTheSamePayment() {
             // when
             CreateTransferStatus result = ledger.submit(payment);
@@ -92,7 +92,7 @@ class TigerBeetleSemanticsTest {
         }
 
         @Test
-        @DisplayName("같은 ID에 금액만 바꿔 보내면 내용 충돌로 거부되고, 처음 금액만 남는다 (G7)")
+        @DisplayName("Resending the same id with only the amount changed is rejected as a content conflict, and only the first amount remains (G7)")
         void resendingWithADifferentAmount() {
             // when
             CreateTransferStatus result = ledger.submit(payment.withAmount(501));
@@ -104,7 +104,7 @@ class TigerBeetleSemanticsTest {
 
         @ParameterizedTest(name = "{argumentSetName}")
         @MethodSource("contentChanges")
-        @DisplayName("같은 ID에 금액이 아닌 내용을 바꿔 보내면 바뀐 필드의 내용 충돌로 거부되고, 처음 이체만 남는다 (G7)")
+        @DisplayName("Resending the same id with content other than the amount changed is rejected as a conflict on the changed field, and only the first transfer remains (G7)")
         void resendingWithOtherContentChanged(UnaryOperator<Transfer> change, CreateTransferStatus conflict) {
             // when
             CreateTransferStatus result = ledger.submit(change.apply(payment));
@@ -116,21 +116,21 @@ class TigerBeetleSemanticsTest {
 
         static Stream<Arguments> contentChanges() {
             return Stream.of(
-                    argumentSet("보내는 계좌를 바꾸면 → ExistsWithDifferentDebitAccountId",
-                            change(t -> t.withDebitAccount(ledger.openAccount("다른 구매자"))),
+                    argumentSet("changing the debit account → ExistsWithDifferentDebitAccountId",
+                            change(t -> t.withDebitAccount(ledger.openAccount("another buyer"))),
                             ExistsWithDifferentDebitAccountId),
-                    argumentSet("받는 계좌를 바꾸면 → ExistsWithDifferentCreditAccountId",
-                            change(t -> t.withCreditAccount(ledger.openAccount("다른 가맹점"))),
+                    argumentSet("changing the credit account → ExistsWithDifferentCreditAccountId",
+                            change(t -> t.withCreditAccount(ledger.openAccount("another merchant"))),
                             ExistsWithDifferentCreditAccountId),
-                    argumentSet("ledger를 바꾸면 → ExistsWithDifferentLedger",
+                    argumentSet("changing ledger → ExistsWithDifferentLedger",
                             change(t -> t.withLedger(2)), ExistsWithDifferentLedger),
-                    argumentSet("code를 바꾸면 → ExistsWithDifferentCode",
+                    argumentSet("changing code → ExistsWithDifferentCode",
                             change(t -> t.withCode(2)), ExistsWithDifferentCode),
-                    argumentSet("user_data_128(모듈의 명령 역참조)을 바꾸면 → ExistsWithDifferentUserData128",
+                    argumentSet("changing user_data_128 (the module's back-reference to the command) → ExistsWithDifferentUserData128",
                             change(t -> t.withUserData128(42)), ExistsWithDifferentUserData128),
-                    argumentSet("user_data_64를 바꾸면 → ExistsWithDifferentUserData64",
+                    argumentSet("changing user_data_64 → ExistsWithDifferentUserData64",
                             change(t -> t.withUserData64(42)), ExistsWithDifferentUserData64),
-                    argumentSet("user_data_32를 바꾸면 → ExistsWithDifferentUserData32",
+                    argumentSet("changing user_data_32 → ExistsWithDifferentUserData32",
                             change(t -> t.withUserData32(42)), ExistsWithDifferentUserData32));
         }
 
@@ -141,7 +141,7 @@ class TigerBeetleSemanticsTest {
 
     @Nested
     @Order(2)
-    @DisplayName("잔액이 부족한 지갑에서 결제하면")
+    @DisplayName("When paying from a wallet with insufficient balance")
     class PayingFromAnEmptyWallet {
 
         Account wallet;
@@ -150,13 +150,13 @@ class TigerBeetleSemanticsTest {
 
         @BeforeEach
         void givenAnEmptyWallet() {
-            wallet = ledger.openAccountThatCannotOverdraw("지갑");
-            merchant = ledger.openAccount("가맹점");
+            wallet = ledger.openAccountThatCannotOverdraw("wallet");
+            merchant = ledger.openAccount("merchant");
             payment = transfer(100).from(wallet).to(merchant);
         }
 
         @Test
-        @DisplayName("잔액 부족으로 거부되고, 돈은 움직이지 않는다")
+        @DisplayName("The payment is rejected for insufficient funds, and no money moves")
         void isRejectedForInsufficientFunds() {
             // when
             CreateTransferStatus result = ledger.submit(payment);
@@ -167,7 +167,7 @@ class TigerBeetleSemanticsTest {
         }
 
         @Test
-        @DisplayName("같은 결제를 다시 보내면 이 ID는 이미 실패한 것으로 거부된다")
+        @DisplayName("Resending the same payment is rejected because this id already failed")
         void resendingTheFailedPayment() {
             // given
             ledger.rejected(payment, ExceedsCredits);
@@ -180,9 +180,9 @@ class TigerBeetleSemanticsTest {
         }
 
         @Test
-        @DisplayName("충전한 뒤에도 같은 ID는 실패로 남고, 새 ID로 보내야 결제된다 (재시도는 새 명령)")
+        @DisplayName("After a top-up the same id stays failed, and only a new id pays (a retry is a new command)")
         void onlyANewIdSucceedsAfterTopUp() {
-            // given: 결제가 한 번 실패했고, 그 뒤 100원을 충전했다
+            // given: the payment failed once, and then 100 was deposited
             ledger.rejected(payment, ExceedsCredits);
             ledger.deposit(wallet, 100);
 
@@ -199,7 +199,7 @@ class TigerBeetleSemanticsTest {
 
     @Nested
     @Order(3)
-    @DisplayName("존재하지 않는 계좌에서 출금하면")
+    @DisplayName("When debiting an account that does not exist")
     class PayingFromAnUnknownAccount {
 
         Account unknown;
@@ -208,13 +208,13 @@ class TigerBeetleSemanticsTest {
 
         @BeforeEach
         void givenAnAccountNotYetOpened() {
-            unknown = Account.notOpened("원장에 없는 계좌");
-            merchant = ledger.openAccount("가맹점");
+            unknown = Account.notOpened("account not in the ledger");
+            merchant = ledger.openAccount("merchant");
             payment = transfer(1).from(unknown).to(merchant);
         }
 
         @Test
-        @DisplayName("잘못된 요청으로 거부된다")
+        @DisplayName("The payment is rejected as an invalid request")
         void isRejectedAsUnknownAccount() {
             // when
             CreateTransferStatus result = ledger.submit(payment);
@@ -224,9 +224,9 @@ class TigerBeetleSemanticsTest {
         }
 
         @Test
-        @DisplayName("그 계좌를 연 뒤에도 같은 ID는 실패로 남고, 새 ID로 보내야 결제된다")
+        @DisplayName("After that account is opened the same id stays failed, and only a new id pays")
         void onlyANewIdSucceedsAfterOpeningTheAccount() {
-            // given: 없는 계좌에서 보낸 결제가 실패했고, 그 뒤 그 계좌를 열었다
+            // given: a payment from the missing account failed, and then that account was opened
             ledger.rejected(payment, DebitAccountNotFound);
             ledger.open(unknown);
 

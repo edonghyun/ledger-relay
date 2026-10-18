@@ -4,7 +4,7 @@ import io.github.ledgerrelay.core.HaltReason;
 import java.time.Instant;
 import java.util.Objects;
 
-/** 멈춘 행의 기록: 왜, 언제 멈췄는가. 멈춘(HALTED) 행에만 있다. */
+/** The record of a halted row: why and when it halted. Present only on halted (HALTED) rows. */
 public record HaltMark(HaltReason reason, Instant haltedAt) {
 
     public HaltMark {

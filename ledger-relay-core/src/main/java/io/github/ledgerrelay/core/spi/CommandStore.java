@@ -4,35 +4,46 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 명령 저장소. 저장과 조회만 한다. 무엇을 쓸지는 서비스(core.application)가 도메인 규칙으로
- * 정한다. 모든 메서드는 {@link Transactions}가 연 트랜잭션 안에서 불린다. 계약은 testFixtures의
- * {@code CommandStoreContract}가 정한다. 명령 행만 다루며 순서 키 행을 잠그지 않는다. 키 행은 {@link OrderingKeys}가
- * 잡는다.
+ * The command store. It only stores and reads. The services (core.application) decide what to write using the domain
+ * rules. Every method is called inside a transaction opened by {@link Transactions}. {@code CommandStoreContract} in
+ * testFixtures defines the contract. It touches only command rows and never locks ordering key rows; key rows are
+ * locked by {@link OrderingKeys}.
  */
 public interface CommandStore {
 
-    /** 넣는다. 같은 commandId의 행이 이미 있으면 넣지 않고 있던 행을 돌려준다. 넣었으면 비어 있다. */
+    /**
+     * Inserts. If a row with the same commandId exists, it does not insert and returns that row. Empty if it inserted.
+     */
     Optional<CommandRecord> insertIfAbsent(NewCommand command);
 
     Optional<CommandRecord> find(String commandId);
 
     /**
-     * claim 후보를 보낼 수 있게 된 시각 순서로 limit개까지 잠그고 돌려준다. 후보는 순서 키마다 맨 앞의 미완료
-     * 명령이며(끝난 명령이 쥔 맨 앞은 {@link OrderingKeys#passOnFinishedHeads}가 먼저 넘긴다), 접수 상태면 다음 시도 시각이 지났고, 처리 중이면 lease가 끝난 것이다. 그 시각(접수 상태는 다음 시도 시각,
-     * 처리 중은 lease 만료 시각)이 이른 것부터 내고, 같으면 접수한 순서대로 낸다. 다른 트랜잭션이 잠근 행은
-     * 건너뛴다. 맨 앞 명령만 내는 것은 막힌 키의 뒤 명령들이 limit을 차지하지 않게 하기 위해서다.
+     * Locks and returns up to limit claim candidates, in the order they became sendable. A candidate is the unfinished
+     * head command of an ordering key (a head held by a finished command is advanced first by
+     * {@link OrderingKeys#passOnFinishedHeads}): an accepted one whose next attempt time has passed, or an in-progress
+     * one whose lease has expired. The earliest of those times (next attempt time when accepted, lease expiry when in
+     * progress) goes first; ties go in acceptance order. Rows locked by another transaction are passed over. Returning
+     * only head commands keeps the later commands of a blocked key from taking up the limit.
      */
     List<DueCommand> lockDue(int limit);
 
-    /** 지금 쌓인 일을 센다(health). */
+    /** Counts the work queued right now (health). */
     Backlog backlog();
 
-    /** 최종 상태로 끝난 명령을 행 순서로 {@code afterRowId} 다음부터 limit개까지 낸다(대사). */
+    /**
+     * Returns up to limit commands in a final state, in row order, starting after {@code afterRowId} (reconciliation).
+     */
     List<CommandRecord> findFinished(long afterRowId, int limit);
 
-    /** 멈춘(HALTED) 명령을 행 순서로 {@code afterRowId} 다음부터 limit개까지 낸다(운영자 포트). */
+    /**
+     * Returns up to limit halted (HALTED) commands, in row order, starting after {@code afterRowId} (operator port).
+     */
     List<CommandRecord> findHalted(long afterRowId, int limit);
 
-    /** 행이 있고 상태와 토큰이 기대와 같으면 바꾸고 true. 아니면 아무것도 바꾸지 않고 false. */
+    /**
+     * If the row exists and its state and token match the expected ones, changes it and returns true. Otherwise changes
+     * nothing and returns false.
+     */
     boolean compareAndSet(RowChange change);
 }

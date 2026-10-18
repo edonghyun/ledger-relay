@@ -2,7 +2,10 @@ package io.github.ledgerrelay.core.spi;
 
 import java.math.BigInteger;
 
-/** 접수할 때 TB 이체 ID를 하나 낸다. 0과 2^128-1이 아닌 u128이어야 하며, 같은 값을 두 번 내지 않는다. */
+/**
+ * Issues one TB transfer id at acceptance. It must be a u128 other than 0 and 2^128-1, and never issues the same value
+ * twice.
+ */
 @FunctionalInterface
 public interface TransferIdGenerator {
     BigInteger next();

@@ -7,11 +7,11 @@ import java.time.Duration;
 import java.util.Objects;
 
 /**
- * 조건부 쓰기 하나(G5). 행이 {@code expectedState}이고 토큰이 {@code expectedToken}일 때만 {@code next}로 바꾼다.
- * jdbc: {@code UPDATE … WHERE id = ? AND state = ? AND lease_token = ?}.
+ * One conditional write (G5). Changes the row to {@code next} only if it is in {@code expectedState} and its token is
+ * {@code expectedToken}. jdbc: {@code UPDATE … WHERE id = ? AND state = ? AND lease_token = ?}.
  *
- * @param next  상태 기계가 계산한 다음 행. 저장소는 그대로 쓴다
- * @param stamp 함께 바꿀 시각 컬럼. 시각은 저장소의 시계(PG now())로 정한다
+ * @param next  the next row the state machine computed. The store writes it as is
+ * @param stamp the timestamp column to update along with it. The time comes from the store's clock (PG now())
  */
 public record RowChange(long rowId, StoredState expectedState, long expectedToken, CommandRow next, Stamp stamp) {
 
@@ -21,29 +21,29 @@ public record RowChange(long rowId, StoredState expectedState, long expectedToke
         Objects.requireNonNull(stamp, "stamp");
     }
 
-    /** 쓰기와 함께 찍는 시각. */
+    /** The timestamp set together with the write. */
     public sealed interface Stamp {
 
         /** claim: lease_expires_at = now + lease. */
         record LeaseFor(Duration lease) implements Stamp {
         }
 
-        /** 제출 기록: first_submitted_at이 비어 있으면 now. */
+        /** Recording the submission: first_submitted_at = now if it is empty. */
         record FirstSubmission() implements Stamp {
         }
 
-        /** 되돌림·핸들러 실패: next_attempt_at = now + backoff. */
+        /** Release or handler failure: next_attempt_at = now + backoff. */
         record RetryAfter(Duration backoff) implements Stamp {
         }
 
-        /** 멈춤: 이유와 halted_at = now를 남긴다. */
+        /** Halt: records the reason and halted_at = now. */
         record Halt(HaltReason reason) implements Stamp {
             public Halt {
                 Objects.requireNonNull(reason, "reason");
             }
         }
 
-        /** 최종 상태: completed_at = now. 멈춘 기록은 지운다. */
+        /** Final state: completed_at = now. Clears the halt record. */
         record Completion() implements Stamp {
         }
     }

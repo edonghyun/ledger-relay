@@ -17,123 +17,126 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
-@DisplayName("상태 전이 — 전이표, G5·G6")
+@DisplayName("State transitions — the transition table, G5 and G6")
 class TransitionTableTest {
 
     /**
-     * 전이표를 칸 하나에 한 줄로 옮긴 것. 기대값 표기는 이렇다.
-     * 상태 이름(+토큰 +핸들러 +backoff +결과보존 +제출기록 +실패집계) = 그 상태로 이동하며 해당 효과를 낸다.
-     * 그대로 = 게이트가 닫혀 아무 일도 없다. 0행 = fenced UPDATE가 0행을 갱신한다.
-     * 불가(모듈 버그) = 모듈이 이 사건을 만들면 버그다. 해당없음(생길 수 없는 사건) = 이 상태에서는 개념상 생길 수 없다.
-     * 두 표기는 왜 일어날 수 없는지의 설명이다. 불가 칸에 닿으면 상태 기계가 버그로 거부하고, 해당없음 칸은 상태 기계의
-     * 입력으로는 닿을 수 없다(CommandStateMachineTest › 전이표와 견주면).
+     * The transition table with one line per cell. The expected values are written like this.
+     * state name (+token +handler +backoff +keepResult +recordSubmission +countFailure) = moves to that state
+     * with those effects.
+     * unchanged = the gate is closed and nothing happens. 0 rows = the fenced UPDATE updates 0 rows.
+     * impossible (module bug) = the module creating this event is a bug.
+     * n/a (event cannot occur) = in this state the event cannot occur by definition.
+     * Both notations explain why something cannot happen. Reaching an impossible cell makes the state machine refuse it
+     * as a bug, and a n/a cell cannot be reached by the state machine's inputs (CommandStateMachineTest › Compared with
+     * the transition table).
      */
     static final String TRANSITION_TABLE = """
             # PENDING
-            PENDING, CLAIM_WITH_GATE_OPEN,               CLAIMED+토큰
-            PENDING, CLAIM_WITH_GATE_CLOSED,             그대로
-            PENDING, CLAIM_WITH_GATE_HALTED,             HALTED+토큰
-            PENDING, SUBMITTING,                         불가(모듈 버그)
-            PENDING, RESERVATION_NOT_APPLIED,            불가(모듈 버그)
-            PENDING, TB_APPLIED,                         불가(모듈 버그)
-            PENDING, TB_REJECTED,                        불가(모듈 버그)
-            PENDING, TB_CONFLICT,                        불가(모듈 버그)
-            PENDING, NO_REPLY_OR_ERROR,                  불가(모듈 버그)
-            PENDING, HANDLER_FAILED,                     불가(모듈 버그)
-            PENDING, LEASE_EXPIRED,                      해당없음(생길 수 없는 사건)
-            PENDING, STALE_TOKEN_WRITE,                  0행
-            PENDING, ABANDONED_BY_OPERATOR,              불가(모듈 버그)
-            # CLAIMED: claim은 lease가 만료되기 전이면 불가. 건너뜀은 claim한 뒤에 일어난다
-            CLAIMED, CLAIM_WITH_GATE_OPEN,               불가(모듈 버그)
-            CLAIMED, CLAIM_WITH_GATE_CLOSED,             불가(모듈 버그)
-            CLAIMED, CLAIM_WITH_GATE_HALTED,             불가(모듈 버그)
-            CLAIMED, SUBMITTING,                         CLAIMED+제출기록
-            CLAIMED, RESERVATION_NOT_APPLIED,            SKIPPED+핸들러
-            CLAIMED, TB_APPLIED,                         APPLIED+핸들러
-            CLAIMED, TB_REJECTED,                        REJECTED+핸들러
-            CLAIMED, TB_CONFLICT,                        CONFLICT+핸들러
+            PENDING, CLAIM_WITH_GATE_OPEN,               CLAIMED+token
+            PENDING, CLAIM_WITH_GATE_CLOSED,             unchanged
+            PENDING, CLAIM_WITH_GATE_HALTED,             HALTED+token
+            PENDING, SUBMITTING,                         impossible (module bug)
+            PENDING, RESERVATION_NOT_APPLIED,            impossible (module bug)
+            PENDING, TB_APPLIED,                         impossible (module bug)
+            PENDING, TB_REJECTED,                        impossible (module bug)
+            PENDING, TB_CONFLICT,                        impossible (module bug)
+            PENDING, NO_REPLY_OR_ERROR,                  impossible (module bug)
+            PENDING, HANDLER_FAILED,                     impossible (module bug)
+            PENDING, LEASE_EXPIRED,                      n/a (event cannot occur)
+            PENDING, STALE_TOKEN_WRITE,                  0 rows
+            PENDING, ABANDONED_BY_OPERATOR,              impossible (module bug)
+            # CLAIMED: claim is impossible before the lease expires. Skipping happens after the claim
+            CLAIMED, CLAIM_WITH_GATE_OPEN,               impossible (module bug)
+            CLAIMED, CLAIM_WITH_GATE_CLOSED,             impossible (module bug)
+            CLAIMED, CLAIM_WITH_GATE_HALTED,             impossible (module bug)
+            CLAIMED, SUBMITTING,                         CLAIMED+recordSubmission
+            CLAIMED, RESERVATION_NOT_APPLIED,            SKIPPED+handler
+            CLAIMED, TB_APPLIED,                         APPLIED+handler
+            CLAIMED, TB_REJECTED,                        REJECTED+handler
+            CLAIMED, TB_CONFLICT,                        CONFLICT+handler
             CLAIMED, NO_REPLY_OR_ERROR,                  PENDING+backoff
-            CLAIMED, HANDLER_FAILED,                     PENDING+backoff+결과보존+실패집계
-            CLAIMED, LEASE_EXPIRED,                      CLAIMED+토큰
-            CLAIMED, STALE_TOKEN_WRITE,                  0행
-            CLAIMED, ABANDONED_BY_OPERATOR,              불가(모듈 버그)
-            # 최종 상태 4개는 같은 줄을 갖는다
-            APPLIED, CLAIM_WITH_GATE_OPEN,               불가(모듈 버그)
-            APPLIED, CLAIM_WITH_GATE_CLOSED,             불가(모듈 버그)
-            APPLIED, CLAIM_WITH_GATE_HALTED,             불가(모듈 버그)
-            APPLIED, SUBMITTING,                         0행
-            APPLIED, RESERVATION_NOT_APPLIED,            0행
-            APPLIED, TB_APPLIED,                         0행
-            APPLIED, TB_REJECTED,                        0행
-            APPLIED, TB_CONFLICT,                        0행
-            APPLIED, NO_REPLY_OR_ERROR,                  0행
-            APPLIED, HANDLER_FAILED,                     해당없음(생길 수 없는 사건)
-            APPLIED, LEASE_EXPIRED,                      해당없음(생길 수 없는 사건)
-            APPLIED, STALE_TOKEN_WRITE,                  0행
-            APPLIED, ABANDONED_BY_OPERATOR,              불가(모듈 버그)
-            REJECTED, CLAIM_WITH_GATE_OPEN,               불가(모듈 버그)
-            REJECTED, CLAIM_WITH_GATE_CLOSED,             불가(모듈 버그)
-            REJECTED, CLAIM_WITH_GATE_HALTED,            불가(모듈 버그)
-            REJECTED, SUBMITTING,                         0행
-            REJECTED, RESERVATION_NOT_APPLIED,            0행
-            REJECTED, TB_APPLIED,                         0행
-            REJECTED, TB_REJECTED,                        0행
-            REJECTED, TB_CONFLICT,                        0행
-            REJECTED, NO_REPLY_OR_ERROR,                  0행
-            REJECTED, HANDLER_FAILED,                     해당없음(생길 수 없는 사건)
-            REJECTED, LEASE_EXPIRED,                      해당없음(생길 수 없는 사건)
-            REJECTED, STALE_TOKEN_WRITE,                  0행
-            REJECTED, ABANDONED_BY_OPERATOR,             불가(모듈 버그)
-            CONFLICT, CLAIM_WITH_GATE_OPEN,               불가(모듈 버그)
-            CONFLICT, CLAIM_WITH_GATE_CLOSED,             불가(모듈 버그)
-            CONFLICT, CLAIM_WITH_GATE_HALTED,            불가(모듈 버그)
-            CONFLICT, SUBMITTING,                         0행
-            CONFLICT, RESERVATION_NOT_APPLIED,            0행
-            CONFLICT, TB_APPLIED,                         0행
-            CONFLICT, TB_REJECTED,                        0행
-            CONFLICT, TB_CONFLICT,                        0행
-            CONFLICT, NO_REPLY_OR_ERROR,                  0행
-            CONFLICT, HANDLER_FAILED,                     해당없음(생길 수 없는 사건)
-            CONFLICT, LEASE_EXPIRED,                      해당없음(생길 수 없는 사건)
-            CONFLICT, STALE_TOKEN_WRITE,                  0행
-            CONFLICT, ABANDONED_BY_OPERATOR,             불가(모듈 버그)
-            SKIPPED, CLAIM_WITH_GATE_OPEN,               불가(모듈 버그)
-            SKIPPED, CLAIM_WITH_GATE_CLOSED,             불가(모듈 버그)
-            SKIPPED, CLAIM_WITH_GATE_HALTED,             불가(모듈 버그)
-            SKIPPED, SUBMITTING,                         0행
-            SKIPPED, RESERVATION_NOT_APPLIED,            0행
-            SKIPPED, TB_APPLIED,                         0행
-            SKIPPED, TB_REJECTED,                        0행
-            SKIPPED, TB_CONFLICT,                        0행
-            SKIPPED, NO_REPLY_OR_ERROR,                  0행
-            SKIPPED, HANDLER_FAILED,                     해당없음(생길 수 없는 사건)
-            SKIPPED, LEASE_EXPIRED,                      해당없음(생길 수 없는 사건)
-            SKIPPED, STALE_TOKEN_WRITE,                  0행
-            SKIPPED, ABANDONED_BY_OPERATOR,              불가(모듈 버그)
-            # HALTED: claim 후보가 아니다. 운영자의 포기만 받는다(docs/failure-modes.md F9)
-            HALTED, CLAIM_WITH_GATE_OPEN,                불가(모듈 버그)
-            HALTED, CLAIM_WITH_GATE_CLOSED,              불가(모듈 버그)
-            HALTED, CLAIM_WITH_GATE_HALTED,              불가(모듈 버그)
-            HALTED, SUBMITTING,                          불가(모듈 버그)
-            HALTED, RESERVATION_NOT_APPLIED,             불가(모듈 버그)
-            HALTED, TB_APPLIED,                          불가(모듈 버그)
-            HALTED, TB_REJECTED,                         불가(모듈 버그)
-            HALTED, TB_CONFLICT,                         불가(모듈 버그)
-            HALTED, NO_REPLY_OR_ERROR,                   불가(모듈 버그)
-            HALTED, HANDLER_FAILED,                      해당없음(생길 수 없는 사건)
-            HALTED, LEASE_EXPIRED,                       해당없음(생길 수 없는 사건)
-            HALTED, STALE_TOKEN_WRITE,                   0행
-            HALTED, ABANDONED_BY_OPERATOR,               SKIPPED+핸들러
+            CLAIMED, HANDLER_FAILED,                     PENDING+backoff+keepResult+countFailure
+            CLAIMED, LEASE_EXPIRED,                      CLAIMED+token
+            CLAIMED, STALE_TOKEN_WRITE,                  0 rows
+            CLAIMED, ABANDONED_BY_OPERATOR,              impossible (module bug)
+            # The 4 final states have the same lines
+            APPLIED, CLAIM_WITH_GATE_OPEN,               impossible (module bug)
+            APPLIED, CLAIM_WITH_GATE_CLOSED,             impossible (module bug)
+            APPLIED, CLAIM_WITH_GATE_HALTED,             impossible (module bug)
+            APPLIED, SUBMITTING,                         0 rows
+            APPLIED, RESERVATION_NOT_APPLIED,            0 rows
+            APPLIED, TB_APPLIED,                         0 rows
+            APPLIED, TB_REJECTED,                        0 rows
+            APPLIED, TB_CONFLICT,                        0 rows
+            APPLIED, NO_REPLY_OR_ERROR,                  0 rows
+            APPLIED, HANDLER_FAILED,                     n/a (event cannot occur)
+            APPLIED, LEASE_EXPIRED,                      n/a (event cannot occur)
+            APPLIED, STALE_TOKEN_WRITE,                  0 rows
+            APPLIED, ABANDONED_BY_OPERATOR,              impossible (module bug)
+            REJECTED, CLAIM_WITH_GATE_OPEN,               impossible (module bug)
+            REJECTED, CLAIM_WITH_GATE_CLOSED,             impossible (module bug)
+            REJECTED, CLAIM_WITH_GATE_HALTED,            impossible (module bug)
+            REJECTED, SUBMITTING,                         0 rows
+            REJECTED, RESERVATION_NOT_APPLIED,            0 rows
+            REJECTED, TB_APPLIED,                         0 rows
+            REJECTED, TB_REJECTED,                        0 rows
+            REJECTED, TB_CONFLICT,                        0 rows
+            REJECTED, NO_REPLY_OR_ERROR,                  0 rows
+            REJECTED, HANDLER_FAILED,                     n/a (event cannot occur)
+            REJECTED, LEASE_EXPIRED,                      n/a (event cannot occur)
+            REJECTED, STALE_TOKEN_WRITE,                  0 rows
+            REJECTED, ABANDONED_BY_OPERATOR,             impossible (module bug)
+            CONFLICT, CLAIM_WITH_GATE_OPEN,               impossible (module bug)
+            CONFLICT, CLAIM_WITH_GATE_CLOSED,             impossible (module bug)
+            CONFLICT, CLAIM_WITH_GATE_HALTED,            impossible (module bug)
+            CONFLICT, SUBMITTING,                         0 rows
+            CONFLICT, RESERVATION_NOT_APPLIED,            0 rows
+            CONFLICT, TB_APPLIED,                         0 rows
+            CONFLICT, TB_REJECTED,                        0 rows
+            CONFLICT, TB_CONFLICT,                        0 rows
+            CONFLICT, NO_REPLY_OR_ERROR,                  0 rows
+            CONFLICT, HANDLER_FAILED,                     n/a (event cannot occur)
+            CONFLICT, LEASE_EXPIRED,                      n/a (event cannot occur)
+            CONFLICT, STALE_TOKEN_WRITE,                  0 rows
+            CONFLICT, ABANDONED_BY_OPERATOR,             impossible (module bug)
+            SKIPPED, CLAIM_WITH_GATE_OPEN,               impossible (module bug)
+            SKIPPED, CLAIM_WITH_GATE_CLOSED,             impossible (module bug)
+            SKIPPED, CLAIM_WITH_GATE_HALTED,             impossible (module bug)
+            SKIPPED, SUBMITTING,                         0 rows
+            SKIPPED, RESERVATION_NOT_APPLIED,            0 rows
+            SKIPPED, TB_APPLIED,                         0 rows
+            SKIPPED, TB_REJECTED,                        0 rows
+            SKIPPED, TB_CONFLICT,                        0 rows
+            SKIPPED, NO_REPLY_OR_ERROR,                  0 rows
+            SKIPPED, HANDLER_FAILED,                     n/a (event cannot occur)
+            SKIPPED, LEASE_EXPIRED,                      n/a (event cannot occur)
+            SKIPPED, STALE_TOKEN_WRITE,                  0 rows
+            SKIPPED, ABANDONED_BY_OPERATOR,              impossible (module bug)
+            # HALTED: not a claim candidate. It accepts only an operator abandon (docs/failure-modes.md F9)
+            HALTED, CLAIM_WITH_GATE_OPEN,                impossible (module bug)
+            HALTED, CLAIM_WITH_GATE_CLOSED,              impossible (module bug)
+            HALTED, CLAIM_WITH_GATE_HALTED,              impossible (module bug)
+            HALTED, SUBMITTING,                          impossible (module bug)
+            HALTED, RESERVATION_NOT_APPLIED,             impossible (module bug)
+            HALTED, TB_APPLIED,                          impossible (module bug)
+            HALTED, TB_REJECTED,                         impossible (module bug)
+            HALTED, TB_CONFLICT,                         impossible (module bug)
+            HALTED, NO_REPLY_OR_ERROR,                   impossible (module bug)
+            HALTED, HANDLER_FAILED,                      n/a (event cannot occur)
+            HALTED, LEASE_EXPIRED,                       n/a (event cannot occur)
+            HALTED, STALE_TOKEN_WRITE,                   0 rows
+            HALTED, ABANDONED_BY_OPERATOR,               SKIPPED+handler
             """;
 
     @Nested
     @Order(1)
-    @DisplayName("전이표의 칸마다")
+    @DisplayName("For every cell of the transition table")
     class EveryCell {
 
         @ParameterizedTest(name = "{0} + {1} → {2}", quoteTextArguments = false)
         @CsvSource(textBlock = TRANSITION_TABLE)
-        @DisplayName("표에 적힌 결과가 나온다")
+        @DisplayName("The result written in the table comes out")
         void producesTheTabledTransition(StoredState current, CommandEvent event, String expected) {
             // when
             Transition next = TransitionTable.next(current, event);
@@ -143,7 +146,7 @@ class TransitionTableTest {
         }
 
         @Test
-        @DisplayName("전이표는 모든 상태와 사건의 조합을 정확히 한 번씩 담는다 — 빈 칸이 없게")
+        @DisplayName("The transition table holds every combination of state and event exactly once — so no cell is empty")
         void tableCoversEveryPairOnce() {
             // given
             List<String> pairsInTheTable = rows().stream().map(row -> row[0] + "," + row[1]).toList();
@@ -161,24 +164,24 @@ class TransitionTableTest {
 
     @Nested
     @Order(2)
-    @DisplayName("표 전체를 놓고 보면")
+    @DisplayName("Looking at the whole table")
     class TableWideRules {
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(value = StoredState.class, names = {"APPLIED", "REJECTED", "CONFLICT", "SKIPPED"})
-        @DisplayName("최종 상태는 어떤 사건에도 다른 상태로 바뀌지 않는다 — G5")
+        @DisplayName("A final state never changes to another state on any event — G5")
         void finalStatesNeverMove(StoredState finalState) {
             for (CommandEvent event : CommandEvent.values()) {
                 // when
                 Transition next = TransitionTable.next(finalState, event);
 
                 // then
-                assertThat(next.outcome()).as("%s 상태에서 %s 사건", finalState, event).isNotEqualTo(Transition.Outcome.MOVE);
+                assertThat(next.outcome()).as("state %s, event %s", finalState, event).isNotEqualTo(Transition.Outcome.MOVE);
             }
         }
 
         @Test
-        @DisplayName("접수된 명령은 claim으로만 움직이고, claim은 늘 lease 토큰을 올린다 — 건너뛰거나 멈추는 명령도 fencing 아래에서 끝나게")
+        @DisplayName("An accepted command moves only by a claim, and a claim always raises the lease token — so commands that are skipped or halted also end under fencing")
         void pendingCommandsMoveOnlyByAClaimThatIncrementsTheToken() {
             for (CommandEvent event : CommandEvent.values()) {
                 // when
@@ -187,18 +190,19 @@ class TransitionTableTest {
                     continue;
                 }
 
-                // then: 멈출 명령만 멈춤(HALTED)으로 가고, 나머지는 처리 중(CLAIMED)으로 간다. 어느 쪽이든 토큰을 올린다
+                // then: only a command to be halted goes to halted (HALTED), the rest go to in progress (CLAIMED).
+                // Either way the token goes up
                 StoredState expectedTo = event == CommandEvent.CLAIM_WITH_GATE_HALTED ? StoredState.HALTED : StoredState.CLAIMED;
-                assertThat(event).as("PENDING을 움직인 사건")
+                assertThat(event).as("event that moved PENDING")
                         .isIn(CommandEvent.CLAIM_WITH_GATE_OPEN, CommandEvent.CLAIM_WITH_GATE_HALTED);
                 assertThat(next)
-                        .as("PENDING + %s: %s로 가며 토큰을 올리기를 기대했다", event, expectedTo)
+                        .as("PENDING + %s: expected a move to %s that raises the token", event, expectedTo)
                         .isEqualTo(new Transition(Transition.Outcome.MOVE, expectedTo, Set.of(Effect.INCREMENT_LEASE_TOKEN)));
             }
         }
 
         @Test
-        @DisplayName("핸들러는 최종 상태로 들어가는 전이에서만, 그리고 그때마다 실행된다 — G6")
+        @DisplayName("The handler runs only on transitions into a final state, and on every one of them — G6")
         void handlerRunsExactlyOnEnteringAFinalState() {
             for (StoredState state : StoredState.values()) {
                 for (CommandEvent event : CommandEvent.values()) {
@@ -211,11 +215,11 @@ class TransitionTableTest {
                     // then
                     if (next.to().isFinal()) {
                         assertThat(next.effects())
-                                .as("%s + %s: 최종 상태 %s로 들어가는데 핸들러 실행이 빠졌다", state, event, next.to())
+                                .as("%s + %s: enters final state %s but the handler run is missing", state, event, next.to())
                                 .contains(Effect.RUN_HANDLER);
                     } else {
                         assertThat(next.effects())
-                                .as("%s + %s: 최종이 아닌 %s로 가는데 핸들러 실행이 붙었다", state, event, next.to())
+                                .as("%s + %s: goes to non-final %s but has a handler run", state, event, next.to())
                                 .doesNotContain(Effect.RUN_HANDLER);
                     }
                 }
@@ -224,20 +228,20 @@ class TransitionTableTest {
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(ResultCategory.class)
-        @DisplayName("분류표가 정한 최종 상태와 전이표가 보내는 상태가 같다 — 두 표가 따로 고쳐져 어긋나지 않게")
+        @DisplayName("The final state set by the classification table equals the state the transition table moves to — so the two tables do not drift apart when edited separately")
         void classificationAndTransitionAgreeOnTheFinalState(ResultCategory category) {
             // when
             Transition next = TransitionTable.next(StoredState.CLAIMED, CommandEvent.of(category));
 
             // then
-            assertThat(next.to()).as("%s 결과를 받은 처리 중 명령이 끝나는 상태", category)
+            assertThat(next.to()).as("state in which an in-progress command ends after a %s result", category)
                     .isEqualTo(StoredState.finalStateFor(category));
         }
     }
 
     @Nested
     @Order(3)
-    @DisplayName("TB 결과 분류는")
+    @DisplayName("A TB result category")
     class ResultEvents {
 
         @ParameterizedTest(name = "{0} → {1}", quoteTextArguments = false)
@@ -249,21 +253,21 @@ class TransitionTableTest {
                 PRIOR_FAILURE, TB_REJECTED
                 INVALID,       TB_REJECTED
                 """)
-        @DisplayName("전이표의 TB 사건 셋 중 하나가 된다 (→)")
+        @DisplayName("Becomes one of the three TB events of the transition table (→)")
         void becomesATigerBeetleEvent(ResultCategory category, CommandEvent expected) {
             // when
             CommandEvent event = CommandEvent.of(category);
 
             // then
-            assertThat(event).as("%s 분류의 TB 사건", category).isEqualTo(expected);
+            assertThat(event).as("TB event of category %s", category).isEqualTo(expected);
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ──────────────────────────────────────────
 
-    /** 표의 표기(손으로 쓴 기대값)대로 전이했다. */
+    /** The transition follows the table's notation (the hand-written expected value). */
     private static void assertTransition(StoredState current, CommandEvent event, Transition actual, String notation) {
-        assertThat(actual).as("%s 상태에서 %s 사건은 표에 '%s'로 적혀 있다", current, event, notation)
+        assertThat(actual).as("in state %s, event %s is written in the table as '%s'", current, event, notation)
                 .isEqualTo(parse(notation));
     }
 
@@ -276,27 +280,28 @@ class TransitionTableTest {
     }
 
     /**
-     * 표의 기대값 표기를 {@link Transition}으로 읽는다. 프로덕션 팩토리({@code Transition.zeroRows()} 등)를 쓰지 않고
-     * 값을 직접 만든다. 팩토리를 쓰면 팩토리가 틀렸을 때 기대값도 같이 틀려서 표가 아무것도 검사하지 못한다.
+     * Reads the table's expected-value notation into a {@link Transition}. It builds the values directly instead of
+     * using the production factories ({@code Transition.zeroRows()} and so on). With the factories, a wrong factory
+     * would make the expected value wrong too, and the table would check nothing.
      */
     private static Transition parse(String notation) {
         return switch (notation) {
-            case "그대로" -> new Transition(Transition.Outcome.UNCHANGED, null, Set.of());
-            case "0행" -> new Transition(Transition.Outcome.ZERO_ROWS, null, Set.of());
-            case "불가(모듈 버그)" -> new Transition(Transition.Outcome.IMPOSSIBLE, null, Set.of());
-            case "해당없음(생길 수 없는 사건)" -> new Transition(Transition.Outcome.NOT_APPLICABLE, null, Set.of());
+            case "unchanged" -> new Transition(Transition.Outcome.UNCHANGED, null, Set.of());
+            case "0 rows" -> new Transition(Transition.Outcome.ZERO_ROWS, null, Set.of());
+            case "impossible (module bug)" -> new Transition(Transition.Outcome.IMPOSSIBLE, null, Set.of());
+            case "n/a (event cannot occur)" -> new Transition(Transition.Outcome.NOT_APPLICABLE, null, Set.of());
             default -> {
                 String[] parts = notation.split("\\+");
                 Set<Effect> effects = EnumSet.noneOf(Effect.class);
                 for (int i = 1; i < parts.length; i++) {
                     effects.add(switch (parts[i]) {
-                        case "토큰" -> Effect.INCREMENT_LEASE_TOKEN;
-                        case "핸들러" -> Effect.RUN_HANDLER;
+                        case "token" -> Effect.INCREMENT_LEASE_TOKEN;
+                        case "handler" -> Effect.RUN_HANDLER;
                         case "backoff" -> Effect.BACKOFF;
-                        case "결과보존" -> Effect.KEEP_KNOWN_RESULT;
-                        case "제출기록" -> Effect.RECORD_SUBMISSION;
-                        case "실패집계" -> Effect.COUNT_HANDLER_FAILURE;
-                        default -> throw new IllegalArgumentException("표기 오류: " + parts[i]);
+                        case "keepResult" -> Effect.KEEP_KNOWN_RESULT;
+                        case "recordSubmission" -> Effect.RECORD_SUBMISSION;
+                        case "countFailure" -> Effect.COUNT_HANDLER_FAILURE;
+                        default -> throw new IllegalArgumentException("notation error: " + parts[i]);
                     });
                 }
                 yield new Transition(Transition.Outcome.MOVE, StoredState.valueOf(parts[0]), effects);

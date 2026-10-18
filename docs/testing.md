@@ -1,37 +1,37 @@
-# 테스트 작성 규칙
+# Rules for writing tests
 
-ledger-relay의 테스트는 **읽으면 스펙이 되는 문서**다. 테스트 트리를 위에서 아래로 읽으면 이 코드가 무엇을 지키는지 알 수 있어야 한다.
+The tests of ledger-relay are **a document that reads as the spec**. Reading the test tree from top to bottom should tell you what this code guarantees.
 
-## 1. 테스트 트리 = 스펙 목차
+## 1. Test tree = table of contents of the spec
 
-- 테스트 클래스는 대상 하나를 맡는다. `@DisplayName`에는 무엇의 규칙인지와, 있으면 보장 번호를 적는다.
-- `@Nested` 클래스에는 `@Order(n)`으로 목차 번호를 붙인다. JUnit에는 선언 순서 정렬기가 없어서, 번호가 없으면 결과 트리의 장 순서가 뒤섞인다(core는 `src/test/resources/junit-platform.properties`로 `OrderAnnotation`을 기본값으로 둔다).
-- `@Nested` 클래스는 **상황**이다. 이름은 "…한 상태에서", "…하면"으로 끝난다. 그 상황의 공통 전제는 해당 `@Nested`의 `@BeforeEach`에 둔다.
-- `@Test`는 **행동과 효과**다. 이름은 "~하면 ~이고, ~한다" 형태의 문장으로 쓴다.
-- 보장 번호(G1~G7, [design.md](design.md))와 장애 번호(F1~, [failure-modes.md](failure-modes.md))는 그 규칙의 근거가 되는 가장 바깥 단계에 한 번만 붙인다.
+- A test class covers one subject. Its `@DisplayName` says what the rules are about and, if there is one, the guarantee number.
+- `@Nested` classes get a table-of-contents number with `@Order(n)`. JUnit has no orderer for declaration order, so without the numbers the chapters of the result tree come out in mixed order (core sets `OrderAnnotation` as the default in `src/test/resources/junit-platform.properties`).
+- A `@Nested` class is a **situation**. Its name starts with "When …", "After …" or "Given …". The shared precondition of that situation goes in the `@BeforeEach` of that `@Nested` class.
+- A `@Test` is **an action and its effect**. Its name is one sentence of the form "Doing X does Y" or "Doing X does Y and Z".
+- Guarantee numbers (G1–G7, [design.md](design.md)) and failure numbers (F1 onward, [failure-modes.md](failure-modes.md)) are attached once, at the outermost level that the rule is based on.
 
-테스트 결과 화면에서는 이렇게 읽혀야 한다.
+In the test results it should read like this.
 
 ```
-TigerBeetle 0.17.9 결과 규칙 — 분류표의 근거
-├─ 500원 결제가 이미 기록된 상태에서
-│   ├─ 같은 결제를 다시 보내면 이미 기록된 것으로 인정되고, 돈은 한 번만 움직인다
-│   └─ 같은 ID에 금액만 바꿔 보내면 내용 충돌로 거부되고, 처음 금액만 남는다
-├─ 잔액이 부족한 지갑에서 결제하면
-│   ├─ 잔액 부족으로 거부되고, 돈은 움직이지 않는다
-│   ├─ 같은 결제를 다시 보내면 이 ID는 이미 실패한 것으로 거부된다
-│   └─ 충전한 뒤에도 같은 ID는 실패로 남고, 새 ID로 보내야 결제된다
-└─ 존재하지 않는 계좌에서 출금하면
-    └─ 잘못된 요청으로 거부된다
+TigerBeetle 0.17.9 result rules — the basis of the classification table
+├─ After a payment of 500 is recorded
+│   ├─ Resending the same payment is accepted as already recorded and moves money only once
+│   └─ Sending the same id with only the amount changed is refused as a content conflict and only the first amount remains
+├─ When paying from a wallet with too little balance
+│   ├─ The payment is refused for insufficient balance and no money moves
+│   ├─ Resending the same payment is refused because this id has already failed
+│   └─ After a deposit the same id still stays failed, and only a new id makes the payment
+└─ When withdrawing from an account that does not exist
+    └─ The request is refused as invalid
 ```
 
-**빈 가지 찾기**: 트리를 목차로 읽다가 "그럼 이 경우는?"이 떠오르면, 그게 아직 방어하지 않은 경우다. 리팩터링할 때마다 빈 가지 목록을 따로 적어 두고, 채울지는 사람이 결정한다.
+**Finding empty branches**: when reading the tree as a table of contents makes you ask "what about this case?", that is a case that is not defended yet. Each time you refactor, write down the list of empty branches separately; a person decides whether to fill them.
 
-## 2. 테스트 본문 = given / when / then
+## 2. Test body = given / when / then
 
 ```java
 @Nested
-@DisplayName("500원 결제가 이미 기록된 상태에서")
+@DisplayName("After a payment of 500 is recorded")
 class AfterAPaymentIsRecorded {
 
     Account payer;
@@ -40,13 +40,13 @@ class AfterAPaymentIsRecorded {
 
     @BeforeEach
     void givenARecordedPayment() {
-        payer = ledger.openAccount("구매자");
-        payee = ledger.openAccount("가맹점");
+        payer = ledger.openAccount("buyer");
+        payee = ledger.openAccount("merchant");
         payment = ledger.recorded(transfer(500).from(payer).to(payee));
     }
 
     @Test
-    @DisplayName("같은 결제를 다시 보내면 이미 기록된 것으로 인정되고, 돈은 한 번만 움직인다")
+    @DisplayName("Resending the same payment is accepted as already recorded and moves money only once")
     void resendingTheSamePayment() {
         // when
         CreateTransferStatus result = ledger.submit(payment);
@@ -58,150 +58,150 @@ class AfterAPaymentIsRecorded {
 }
 ```
 
-- 세 구역을 빈 줄과 `// given`, `// when`, `// then` 주석으로 나눈다. 전제가 `@BeforeEach`에 있으면 본문에는 `// given`을 쓰지 않는다.
-- 전제를 설명하는 말이 필요하면 주석 뒤에 붙인다. 예: `// given: 잔액 0인 지갑에서 100원 결제가 한 번 실패했다`
-- **when은 한 줄**을 목표로 한다. 행동이 둘이면(끊기 → 복구) `// when: 연결을 복구하면`처럼 구역을 하나 더 둔다.
-- 테스트 하나는 행동 하나를 확인한다. 이름에 "그리고"가 둘 이상 들어가면 쪼갤 신호다.
+- Separate the three sections with blank lines and `// given`, `// when`, `// then` comments. If the precondition is in `@BeforeEach`, the body has no `// given`.
+- If the precondition needs explaining, add it after the comment. Example: `// given: a payment of 100 from a wallet with balance 0 has failed once`
+- Aim for **a one-line when**. If there are two actions (cut → restore), add one more section, such as `// when: the connection is restored`.
+- One test checks one action. If the name contains "and" more than once, that is a sign to split it.
 
-## 3. given — 전제를 문장으로 만든다
+## 3. given — turn the precondition into a sentence
 
-| 쓰는 말 | 뜻 |
+| Word | Meaning |
 |---|---|
-| `ledger.openAccount("구매자")` | 계좌를 연다. 이름은 실패 메시지에 그대로 나온다 |
-| `ledger.openAccountThatCannotOverdraw("지갑")` | 잔액보다 많이 출금할 수 없는 계좌. 잔액은 0에서 시작한다 |
-| `ledger.deposit(wallet, 100)` | 입금 |
-| `transfer(500).from(payer).to(payee)` | 이체 한 건(새 ID). 이 단계에서는 아직 보내지 않는다 |
-| `payment.withAmount(501)` / `payment.withNewId()` | 같은 ID에 금액만 바꾼 것 / 같은 내용에 새 ID를 붙인 것 |
-| `payment.withCreditAccount(other)` 등 `with…` | 같은 ID에 그 필드만 바꾼 것 (`withDebitAccount`, `withLedger`, `withCode`, `withUserData128/64/32`) |
-| `Account.notOpened("계좌")` / `ledger.open(account)` | 아직 원장에 없는 계좌 / 그 계좌를 같은 ID 그대로 연다(이미 있으면 "given 준비 실패") |
-| `ledger.recorded(t)` | **전제**: 이 이체가 이미 기록되어 있다 |
-| `ledger.rejected(t, ExceedsCredits)` | **전제**: 이 이체가 이 사유로 거부된 적이 있다 |
-| `reservation(500).from(payer).to(payee)` | 예약 한 건(금액을 보류만 한다). `.withTimeout(1)`로 만료를 준다 |
-| `postOf(hold)` / `postOf(hold).withAmount(300)` | 예약을 금액 없이(전액) 확정 / 일부만 확정. 계좌·ledger·code는 비워 보내 예약의 값을 물려받는다 |
-| `voidOf(hold)` | 예약 해제 |
-| `ledger.closeAccount(account)` | **전제**: 이 계좌를 닫았다(0원 닫기 예약). 이미 닫혀 있으면 "given 준비 실패" |
-| `ledger.waitUntilExpired(hold)` | **전제**: 예약이 만료되어 보류 금액이 풀릴 때까지 기다린다(상한 2초) |
-| `ledger.stored(t)` | TB가 실제로 저장한 이체(`StoredTransfer`): 물려받은 계좌·user_data, 전액 확정의 실제 금액, timeout |
+| `ledger.openAccount("buyer")` | Opens an account. The name appears as is in failure messages |
+| `ledger.openAccountThatCannotOverdraw("wallet")` | An account that cannot withdraw more than its balance. The balance starts at 0 |
+| `ledger.deposit(wallet, 100)` | Deposit |
+| `transfer(500).from(payer).to(payee)` | One transfer (new id). It is not sent yet at this step |
+| `payment.withAmount(501)` / `payment.withNewId()` | The same id with only the amount changed / the same content with a new id |
+| `payment.withCreditAccount(other)` and other `with…` | The same id with only that field changed (`withDebitAccount`, `withLedger`, `withCode`, `withUserData128/64/32`) |
+| `Account.notOpened("account")` / `ledger.open(account)` | An account not yet in the ledger / opens that account with the same id (if it already exists, "given setup failed") |
+| `ledger.recorded(t)` | **Precondition**: this transfer is already recorded |
+| `ledger.rejected(t, ExceedsCredits)` | **Precondition**: this transfer has been refused for this reason |
+| `reservation(500).from(payer).to(payee)` | One reservation (only holds the amount). `.withTimeout(1)` gives it an expiry |
+| `postOf(hold)` / `postOf(hold).withAmount(300)` | Posts the reservation without an amount (the full amount) / posts only part of it. Accounts, ledger and code are sent empty so they are inherited from the reservation |
+| `voidOf(hold)` | Voids the reservation |
+| `ledger.closeAccount(account)` | **Precondition**: this account is closed (a closing reservation of 0). If it is already closed, "given setup failed" |
+| `ledger.waitUntilExpired(hold)` | **Precondition**: waits until the reservation expires and the held amount is released (at most 2 seconds) |
+| `ledger.stored(t)` | The transfer TB actually stored (`StoredTransfer`): inherited accounts and user_data, the real amount of a full post, timeout |
 
-- **전제 메서드는 전제가 깨지면 그 자리에서 멈춘다.** 메시지는 `"given 준비 실패: …"`로 시작한다. then까지 가서 엉뚱한 이유로 실패하지 않게 하기 위해서다.
-- 핵심 값(금액, 방향, 사유)은 숨기지 않는다. `recordedPaymentOf500()`처럼 값을 메서드 이름 속에 감추지 않는다.
+- **A precondition method stops right there if the precondition breaks.** Its message starts with `"given setup failed: …"`. This keeps the test from reaching then and failing for an unrelated reason.
+- Do not hide the key values (amount, direction, reason). Do not bury a value inside a method name, as in `recordedPaymentOf500()`.
 
-## 4. when — 확인하려는 행동
+## 4. when — the action under test
 
-| 쓰는 말 | 뜻 |
+| Word | Meaning |
 |---|---|
-| `ledger.submit(t)` | 보내고, 결과 코드를 돌려받는다 |
-| `ledger.submitInBackground(t)` | 보내되 응답을 기다리지 않는다(`PendingTransfer`) |
+| `ledger.submit(t)` | Sends and returns the result code |
+| `ledger.submitInBackground(t)` | Sends without waiting for the reply (`PendingTransfer`) |
 
-## 5. then — 일어난 효과를 메서드 하나로 확인한다
+## 5. then — check the effect that happened with one method
 
-| 쓰는 말 | 확인하는 효과 (TB 코드) |
+| Word | Effect it checks (TB code) |
 |---|---|
-| `assertCreated(result)` | 새로 기록됨 (`Created`) |
-| `assertAlreadyRecorded(result)` | 같은 이체가 이미 있어서 그것으로 인정됨 (`Exists`) |
-| `assertConflictOnAmount(result)` | 같은 ID인데 금액이 달라서 거부됨 (`ExistsWithDifferentAmount`) |
-| `assertContentConflict(result, ExistsWithDifferentX)` | 같은 ID인데 그 필드가 달라서 거부됨. 기대값이 `ExistsWithDifferent…`가 아니면 잘못 쓴 것으로 멈춘다 |
-| `assertRejectedBecauseIdAlreadyFailed(result)` | 이 ID는 이미 실패했으므로 다시 판정하지 않음 (`IdAlreadyFailed`) |
-| `assertRejectedFor(result, reason)` | 이 사유로 거부됨 |
-| `assertMovedExactly(ledger, from, to, amount)` | from에서 정확히 amount가 나가고, to에 정확히 amount가 들어옴 |
-| `assertNothingMoved(ledger, account)` | 그 계좌에는 출금·입금·보류가 하나도 없음 |
-| `assertReserved(ledger, from, to, amount)` | from에서 to로 정확히 amount가 보류되어 있고, 확정된 것은 없음 |
-| `assertPostedAndReleased(ledger, from, to, posted)` | 정확히 posted가 확정되었고, 두 계좌에 보류 금액이 남지 않음 |
-| `assertStillWaitingAfter(pending, 3s)` | 그 시간 동안 응답도 오류도 오지 않음 |
+| `assertCreated(result)` | Newly recorded (`Created`) |
+| `assertAlreadyRecorded(result)` | The same transfer already exists and is accepted as that one (`Exists`) |
+| `assertConflictOnAmount(result)` | Refused because the id is the same but the amount differs (`ExistsWithDifferentAmount`) |
+| `assertContentConflict(result, ExistsWithDifferentX)` | Refused because the id is the same but that field differs. If the expected value is not an `ExistsWithDifferent…`, it stops as a misuse |
+| `assertRejectedBecauseIdAlreadyFailed(result)` | This id has already failed, so it is not judged again (`IdAlreadyFailed`) |
+| `assertRejectedFor(result, reason)` | Refused for this reason |
+| `assertMovedExactly(ledger, from, to, amount)` | Exactly amount left from, and exactly amount arrived in to |
+| `assertNothingMoved(ledger, account)` | That account has no debits, credits or holds at all |
+| `assertReserved(ledger, from, to, amount)` | Exactly amount is held from from to to, and nothing is posted |
+| `assertPostedAndReleased(ledger, from, to, posted)` | Exactly posted was posted, and no held amount remains in either account |
+| `assertStillWaitingAfter(pending, 3s)` | Neither a reply nor an error arrived during that time |
 
-- 이름은 `assert` + **일어난 효과**로 짓는다. `assertPayerPaidPayee`처럼 역할을 이름에 넣지 않는다. 역할은 인자로 넘기고, 인자 순서는 문장 순서(어디서 → 어디로 → 얼마)를 따른다.
-- 메서드 하나는 효과 하나만 확인한다. `assertCreatedAndMoved500`처럼 묶지 않는다.
-- 실패 메시지는 메서드 이름과 같은 말로 쓰고, TB 원래 코드는 괄호 안에 남긴다.
-  예: `같은 ID·같은 본문의 이체가 이미 기록된 것으로 인정되기(Exists)를 기대했지만 실제 결과는 Created — 처음 보내는 이체로 기록됨`
-- **기대값은 손으로 쓴다.** 500, `ExceedsCredits`를 헬퍼나 프로덕션 코드로 계산하지 않는다.
-- 동시성 테스트도 같은 규칙을 따른다. 필요해지는 단계에서 만든다.
-  예: `assertExactlyOneApplied(outcomes)`, `assertOthersRejectedAsStaleWrite(outcomes)`, `assertHandlerRanOnceFor(command)`
+- Name it `assert` + **the effect that happened**. Do not put roles in the name, as in `assertPayerPaidPayee`. Pass roles as arguments, in the order of the sentence (from where → to where → how much).
+- One method checks only one effect. Do not bundle them, as in `assertCreatedAndMoved500`.
+- Write the failure message with the same words as the method name, and keep the original TB code in parentheses.
+  Example: `expected the transfer with the same id and body to be accepted as already recorded (Exists), but the result was Created — recorded as a new transfer`
+- **Write expected values by hand.** Do not compute 500 or `ExceedsCredits` with helpers or production code.
+- Concurrency tests follow the same rules. Add them at the stage where they are needed.
+  Examples: `assertExactlyOneApplied(outcomes)`, `assertOthersRejectedAsStaleWrite(outcomes)`, `assertHandlerRanOnceFor(command)`
 
-## 6. 어휘를 어디에 두는가
+## 6. Where the vocabulary lives
 
-- **여러 테스트 파일이 함께 쓰는 말**: `src/testFixtures` (`TigerBeetleTestLedger`, `LedgerAssertions`, 값 객체). 이것이 나중에 공개 테스트 키트가 된다.
-- **한 파일에서만 쓰는 말**: 그 테스트 파일 위쪽의 private 메서드.
-- **어휘 자체도 테스트한다.** assert 메서드와 전제 메서드가 틀린 입력에서 제대로 실패하는지 확인하는 테스트를 둔다(`LedgerAssertionsTest`, `TigerBeetleTestLedgerTest`). 검증 도구가 틀리면 모든 테스트가 거짓말을 하기 때문이다.
+- **Words shared by several test files**: `src/testFixtures` (`TigerBeetleTestLedger`, `LedgerAssertions`, value objects). This becomes the public test kit later.
+- **Words used in one file only**: private methods at the top of that test file.
+- **The vocabulary itself is tested.** There are tests that check that assert methods and precondition methods fail properly on wrong input (`LedgerAssertionsTest`, `TigerBeetleTestLedgerTest`). If the checking tools are wrong, every test lies.
 
-## 6-1. 표를 그대로 옮긴 테스트 (core)
+## 6-1. Tests that copy a table as is (core)
 
-스펙의 표(전이표, 분류표)는 테스트 안에 **표 모양 그대로** 둔다.
+Tables of the spec (transition table, classification table) stay in the test **in the shape of a table**.
 
-- 표는 `static final String` text block 상수로 두고 `@CsvSource(textBlock = 상수)`로 읽는다. `#` 줄은 표 안의 소제목이다.
-- `@ParameterizedTest`에는 `quoteTextArguments = false`를 붙인다. JUnit 6은 글자 인자를 따옴표로 감싸서 `"PENDING" + "TB_APPLIED"`처럼 보이게 하기 때문이다.
-- 기대값은 사람이 읽는 표기로 쓴다. 예: `CLAIMED+토큰`, `0행`, `불가`. 표기를 객체로 바꾸는 `parse`는 그 테스트 파일 안에 둔다.
-- 표마다 **가드 테스트**를 하나 둔다. 같은 상수를 읽어서 enum의 모든 값(또는 모든 조합)을 정확히 한 번씩 담는지 확인한다. 가드는 처음부터 통과하므로, 표의 한 줄을 지워서 실패하는지 확인한 뒤 되돌린다.
-- 표의 칸을 하나씩 보는 테스트와 별도로, 표 전체에 걸친 규칙(G5: 최종 상태는 움직이지 않는다, G6: 핸들러는 최종 상태로 들어갈 때만)을 한 번 더 확인한다. 표를 고치다 실수하면 칸 테스트는 표와 함께 틀리지만, 이 규칙 테스트는 남는다.
+- A table is a `static final String` text block constant, read with `@CsvSource(textBlock = CONSTANT)`. Lines starting with `#` are subheadings inside the table.
+- `@ParameterizedTest` gets `quoteTextArguments = false`. JUnit 6 wraps text arguments in quotes, so they look like `"PENDING" + "TB_APPLIED"`.
+- Write expected values in a human-readable notation. Examples: `CLAIMED+token`, `0 rows`, `impossible (module bug)`. The `parse` that turns the notation into objects lives in that test file.
+- Each table has one **guard test**. It reads the same constant and checks that it contains every value of the enum (or every combination) exactly once. A guard passes from the start, so delete one line of the table, confirm that it fails, and restore the line.
+- Separately from the tests that check the table cell by cell, rules that span the whole table (G5: a final state does not move, G6: the handler runs only on entering a final state) are checked once more. If you make a mistake while editing the table, the cell tests go wrong together with the table, but these rule tests remain.
 
-core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다. 예: `assertSubmits`, `assertWaits`, `assertSkips`, `assertRejectedAsInvalid`, `assertSameHash`.
+Effect names in core tests are private methods in that file. Examples: `assertSubmits`, `assertWaits`, `assertSkips`, `assertRejectedAsInvalid`, `assertSameHash`.
 
-## 6-2. 계약 테스트 (core testFixtures)
+## 6-2. Contract tests (core testFixtures)
 
-헥사고날 구조라서 계약이 두 벌이다. 저장소 구현마다 `StorageUnderTest` 하나를 만들고, 두 계약을 각각 상속한 테스트를 둔다. 메모리 저장소와 PostgreSQL 저장소가 같은 장을 읽는다.
+Because of the hexagonal structure, there are two sets of contracts. Each store implementation provides one `StorageUnderTest`, and there is one test that inherits each of the two contracts. The in-memory store and the PostgreSQL store read the same chapters.
 
-- `CommandStoreContract`: 저장소 포트의 의미. 넣기, 찾기, 순번, 잠그고 읽기, 조건부 쓰기, 트랜잭션. 행은 손으로 만든다. 상태 기계를 거치지 않으며, 저장소가 판단하지 않는다는 것을 보여 준다.
-- `LedgerRelayContract`: 서비스 `CommandLifecycle`의 행동. 접수, 참조 검사, G1, claim과 게이트, 결과, 늦은 워커, 핸들러 실패, 순서.
+- `CommandStoreContract`: the meaning of the store port. Insert, find, sequence numbers, lock and read, conditional writes, transactions. Rows are built by hand. They do not go through the state machine, which shows that the store makes no decisions.
+- `LedgerRelayContract`: the behavior of the service `CommandLifecycle`. Acceptance, reference checks, G1, claim and the gate, results, late workers, handler failure, order.
 
-정상 경로에서 나올 수 없는 행(순서가 뒤집힌 확정, 예약 행이 없는 확정)은 `acceptedPastTheChecks(postRow(…))`로 접수 검사를 거치지 않고 저장소에 바로 넣어 만든다. 그래서 멈춤(HALTED)과 포기 조치도 저장소마다 같은 장으로 확인한다.
+Rows that cannot occur on the normal path (a post in reversed order, a post without a reservation row) are created with `acceptedPastTheChecks(postRow(…))`, which inserts them directly into the store without the acceptance checks. This way halting (HALTED) and the abandon action are also checked with the same chapters for every store.
 
-### 동시성 장 — 다른 트랜잭션을 결정적으로 만든다
+### Concurrency chapters — making the other transaction deterministic
 
-`CommandStoreContract` 7장은 두 트랜잭션이 겹치는 순간을 다룬다. 스레드를 아무렇게나 띄우고 운에 맡기지 않는다. 다른 트랜잭션은 `OtherTransaction`으로 열고, 그 트랜잭션이 언제 일을 하고 언제 끝나는지를 테스트가 정한다.
+Chapter 7 of `CommandStoreContract` covers the moments when two transactions overlap. It does not start threads at random and rely on luck. The other transaction is opened with `OtherTransaction`, and the test decides when that transaction does its work and when it ends.
 
-| 말 | 뜻 |
+| Word | Meaning |
 |---|---|
-| `OtherTransaction.start(transactions, () -> …)` | 다른 스레드에서 트랜잭션을 열어 일을 한다. 일을 마쳐도 커밋하지 않고 기다린다. 그래서 잡은 행 잠금이 살아 있다 |
-| `awaitWork()` | 일이 끝나기를 기다려 결과를 받는다(최대 10초). 일이 던졌으면 그 예외가 나온다 |
-| `assertStillWorkingAfter(BLOCKED)` | 300ms 동안 일이 끝나지 않았다 = 무언가에 막혀 있다. "아무 일도 없어야 한다"를 볼 때만 고정 관찰 시간을 쓴다 |
-| `commit()` / `rollback()` | 그 트랜잭션을 끝내고, 끝날 때까지 기다린다 |
-| `try (…)` | 닫을 때 아직 열려 있으면 롤백한다. 실패한 테스트가 잠금을 남기지 않게 |
+| `OtherTransaction.start(transactions, () -> …)` | Opens a transaction on another thread and does the work. After the work it waits without committing, so the row locks it took stay alive |
+| `awaitWork()` | Waits for the work to finish and takes the result (at most 10 seconds). If the work threw, that exception comes out |
+| `assertStillWorkingAfter(BLOCKED)` | The work did not finish within 300 ms = something is blocking it. A fixed observation time is used only to check that "nothing happens" |
+| `commit()` / `rollback()` | Ends that transaction and waits until it has ended |
+| `try (…)` | Rolls back on close if still open, so a failed test does not leave locks behind |
 
-행 잠금이 없는 저장소(메모리)는 `StorageUnderTest.supportsRowLocks()`가 false라 이 장을 건너뛴다. 메모리 저장소는 모든 트랜잭션을 잠금 하나로 줄 세우므로 이 장이 실패할 수가 없기 때문이다. 같은 이유로 시계가 흐르는 저장소(PostgreSQL의 `now()`)는 `clockStandsStill()`이 false라 "바로 그 시각" 경계 테스트를 건너뛴다. 어휘 자체는 `OtherTransactionTest`가 확인한다(막혀 있지 않은데 막혀 있다고 보면 실패하는지 포함).
+A store without row locks (in-memory) skips this chapter, because `StorageUnderTest.supportsRowLocks()` is false. The in-memory store serializes all transactions with one lock, so this chapter could not fail there. For the same reason, a store whose clock moves (PostgreSQL's `now()`) has `clockStandsStill()` false and skips the "at exactly that instant" boundary tests. `OtherTransactionTest` checks the vocabulary itself (including that it fails when it reports blocked while nothing blocks it).
 
-| 쓰는 말 | 뜻 |
+| Word | Meaning |
 |---|---|
-| `newTransfer("pay-1", "order-1", 1)`, `newReserve(…)`, `newPost("capture-1", "order-1", 2, "hold-1")` | (저장소 계약) 넣을 행. 이체 ID는 100+순번, 해시는 `hash-of-<id>` |
-| `inserted(row)` / `claimed(id, token)` / `finished(id, row)` / `released(id)` / `halted(id)` | (저장소 계약) **전제**: 행이 들어감 / 처리 중이 됨 / 끝남 / 되돌아감 / 멈춤 |
-| `assertDue(ids…)` / `assertDueWithLimit(n, ids…)` / `assertNothingDue()` | (저장소 계약) claim 후보가 정확히 이것(보낼 수 있게 된 순서, 같으면 접수 순서) / 없음 |
-| `transfer("pay-1", "order-1", 500)`, `reserve(…)`, `post("capture-1", "order-1", "hold-1")`, `voidOf(…)` | (서비스 계약) 명령. 키와 금액을 숨기지 않는다 |
-| `submit(command)` | (서비스 계약) 앱처럼 트랜잭션 안에서 접수한다 |
-| `acceptedPastTheChecks(postRow("capture-1", "order-1", 1, "hold-1", 102))`, `reserveRow(…)` | (서비스 계약) **전제**: 접수 검사를 거치지 않은 행이 들어감 |
-| `assertHalted(batch, ids…)` / `assertNothingHalted(batch)` / `assertRow(id, haltedRow(1))` | 멈춘 명령으로 알림 / 알림 없음 / 저장된 행이 정확히 이것 |
-| `claimOnly("pay-1")` | **전제**: 이 명령 하나만 잡힌다. 아니면 "given 준비 실패" |
-| `finished("hold-1", ExceedsCredits)` | (서비스 계약) **전제**: 이 명령이 이 TB 결과로 끝났다 |
-| `storage.elapse(LEASE.plusSeconds(1))` | 저장소 시계를 돌린다(lease 만료, backoff 경과). sleep하지 않는다 |
-| `handler.failNextCalls(1)` | 다음 핸들러 호출이 기록 전에 던진다 |
-| `handler.crashNextCall()` | 다음 핸들러 호출이 기록 전에 `Error`를 던진다(JVM 수준 실패 흉내) |
-| `assertQueryState(id, State.X)` | 조회 상태 |
-| `assertClaimed(batch, ids…)` / `assertNothingClaimed(batch)` | 정확히 이 명령들이 보낼 수 있게 된 순서로 잡힘 / 아무것도 안 잡힘 |
-| `assertWritten(r)` / `assertFenced(r)` / `assertHandlerFailed(r)` | 쓰기가 반영됨 / 0행으로 막힘 / 핸들러가 던져 취소됨 |
-| `assertHandlerRanOnceFor(id, State.X)` / `assertHandlerNeverRanFor(id)` | 핸들러가 끝까지 한 번 실행됨 / 한 번도 끝까지 실행되지 않음 |
-| `assertRejection(id, category, code)` | 거절·충돌 사유 |
-| `assertRejectedAsConflict(…)` / `assertRejectedAsMissingReservation(…)` | 접수가 내용 충돌 / 참조 예약 없음으로 거부됨 |
+| `newTransfer("pay-1", "order-1", 1)`, `newReserve(…)`, `newPost("capture-1", "order-1", 2, "hold-1")` | (store contract) A row to insert. The transfer id is 100 + sequence number, the hash is `hash-of-<id>` |
+| `inserted(row)` / `claimed(id, token)` / `finished(id, row)` / `released(id)` / `halted(id)` | (store contract) **Precondition**: the row was inserted / is being processed / finished / was released / halted |
+| `assertDue(ids…)` / `assertDueWithLimit(n, ids…)` / `assertNothingDue()` | (store contract) The claim candidates are exactly these (in the order they became sendable, ties in acceptance order) / none |
+| `transfer("pay-1", "order-1", 500)`, `reserve(…)`, `post("capture-1", "order-1", "hold-1")`, `voidOf(…)` | (service contract) A command. The key and the amount are not hidden |
+| `submit(command)` | (service contract) Submits inside a transaction, as an app does |
+| `acceptedPastTheChecks(postRow("capture-1", "order-1", 1, "hold-1", 102))`, `reserveRow(…)` | (service contract) **Precondition**: a row that skipped the acceptance checks was inserted |
+| `assertHalted(batch, ids…)` / `assertNothingHalted(batch)` / `assertRow(id, haltedRow(1))` | Reported as halted commands / nothing reported / the stored row is exactly this |
+| `claimOnly("pay-1")` | **Precondition**: only this one command is claimed. Otherwise "given setup failed" |
+| `finished("hold-1", ExceedsCredits)` | (service contract) **Precondition**: this command finished with this TB result |
+| `storage.elapse(LEASE.plusSeconds(1))` | Advances the store clock (lease expiry, backoff elapsed). Does not sleep |
+| `handler.failNextCalls(1)` | The next handler call throws before recording |
+| `handler.crashNextCall()` | The next handler call throws an `Error` before recording (simulates a JVM-level failure) |
+| `assertQueryState(id, State.X)` | Status lookup result |
+| `assertClaimed(batch, ids…)` / `assertNothingClaimed(batch)` | Exactly these commands were claimed, in the order they became sendable / nothing was claimed |
+| `assertWritten(r)` / `assertFenced(r)` / `assertHandlerFailed(r)` | The write was applied / blocked with 0 rows / cancelled because the handler threw |
+| `assertHandlerRanOnceFor(id, State.X)` / `assertHandlerNeverRanFor(id)` | The handler ran to the end once / never ran to the end |
+| `assertRejection(id, category, code)` | Reason for rejection or conflict |
+| `assertRejectedAsConflict(…)` / `assertRejectedAsMissingReservation(…)` | Acceptance was refused as a content conflict / because the referenced reservation does not exist |
 
-## 6-3. 워커 테스트 (core)
+## 6-3. Worker tests (core)
 
-워커 한 바퀴(`RelayWorker.runOnce`)는 메모리 저장소와 가짜 TB 위에서 결정적으로 확인한다. TB에 실제로 보내는 끝까지 테스트는 tigerbeetle 모듈에 둔다.
+One worker cycle (`RelayWorker.runOnce`) is checked deterministically on top of the in-memory store and a fake TB. End-to-end tests that really send to TB live in the tigerbeetle module.
 
-| 쓰는 말 | 뜻 |
+| Word | Meaning |
 |---|---|
-| `FakeLedger` | 가짜 TB. 정하지 않은 이체는 `Created`로 끝난다 |
-| `fake.answer(transferId, ExceedsCredits)` | 그 이체에 이 결과를 낸다 |
-| `fake.holdReplies()` / `fake.releaseHeldReplies()` | 응답을 붙잡는다(TB가 답하지 않는 상황) / 붙잡은 응답을 모두 끝낸다 |
-| `fake.failNext(e)` / `fake.replyWithCount(n)` | 다음 요청을 예외로 끝낸다 / 다음 요청에 결과를 n개만 낸다 |
-| `fake.requests()` | 받은 요청(이체 묶음)을 순서대로 본다 |
-| `RecordingWorkerEvents.events()` | 워커가 알린 일을 `"halted:capture-1"`, `"submitted:3"`처럼 받은 순서대로 본다 |
+| `FakeLedger` | Fake TB. Transfers without a set answer end as `Created` |
+| `fake.answer(transferId, ExceedsCredits)` | Gives that transfer this result |
+| `fake.holdReplies()` / `fake.releaseHeldReplies()` | Holds replies back (TB does not answer) / completes all held replies |
+| `fake.failNext(e)` / `fake.replyWithCount(n)` | Ends the next request with an exception / gives only n results for the next request |
+| `fake.requests()` | The received requests (batches of transfers) in order |
+| `RecordingWorkerEvents.events()` | What the worker reported, in the order received, such as `"halted:capture-1"`, `"submitted:3"` |
 
-- 응답을 기다리는 일은 `holdReplies`와 future로 결정적으로 만든다. submit-timeout은 짧게(200ms) 주고, "아무 일도 없다"를 볼 때만 그 시간을 관찰 시간으로 쓴다.
+- Waiting for replies is made deterministic with `holdReplies` and futures. Give a short submit-timeout (200 ms), and use that time as the observation time only to check that "nothing happens".
 
-## 7. 리팩터링 규칙
+## 7. Refactoring rules
 
-- 같은 준비나 확인이 **두세 번 반복되고 같은 의미**일 때 이름을 붙여 뽑는다. 생김새만 비슷하다고 묶지 않는다.
-- 뽑은 이름은 도메인의 말이어야 한다(`recorded`, `assertMovedExactly`). 기술의 말(`createAndCheckBatch`)은 쓰지 않는다.
-- 테스트 리팩터링은 동작을 바꾸지 않는다. 바꾸기 전후 전체 스위트가 같은 결과인지 확인한다. 새 경우를 추가하는 작업은 별도로 한다.
+- Extract and name a setup or check when it **repeats two or three times with the same meaning**. Do not bundle things only because they look alike.
+- The extracted name must be a word of the domain (`recorded`, `assertMovedExactly`). Do not use technical words (`createAndCheckBatch`).
+- Test refactoring does not change behavior. Check that the whole suite gives the same results before and after. Adding new cases is a separate task.
 
-## 8. TDD 규율
+## 8. TDD discipline
 
-- 실패 테스트를 먼저 쓰고, **의도한 이유로** 실패하는지 확인한다. 컴파일 오류는 Red로 인정하지 않는다.
-- 외부 시스템(TB)의 동작을 고정하는 특성화 테스트는 처음부터 통과할 수 있다. 그 대신 기대값 하나를 일부러 틀리게 바꿔 실패하는지 확인한다.
-- 동시성은 sleep이 아니라 체크포인트와 latch로 실행 순서를 강제한다. "아무 일도 없어야 한다"를 관찰할 때만 고정된 관찰 시간을 쓴다.
+- Write the failing test first and check that it fails **for the intended reason**. A compile error does not count as Red.
+- Characterization tests that pin the behavior of an external system (TB) may pass from the start. Instead, deliberately change one expected value to a wrong one and check that the test fails.
+- For concurrency, force the execution order with checkpoints and latches, not sleep. Use a fixed observation time only to observe that "nothing happens".

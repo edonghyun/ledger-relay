@@ -9,8 +9,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * 테스트용 PostgreSQL 컨테이너와 ledger-relay 스키마. 이미지 버전은 Gradle이 버전 목록(gradle/libs.versions.toml)에서 시스템
- * 프로퍼티로 넘긴다. jdbc, spring-boot 모듈과 샘플 앱의 테스트가 같이 쓴다.
+ * PostgreSQL container and ledger-relay schema for tests. Gradle passes the image version from the version catalog
+ * (gradle/libs.versions.toml) as a system property. The jdbc and spring-boot modules and the sample app tests share it.
  */
 public final class PostgresTestDatabase {
 
@@ -19,21 +19,22 @@ public final class PostgresTestDatabase {
     private PostgresTestDatabase() {
     }
 
-    /** 띄우지 않은 컨테이너. 부른 쪽이 start/stop한다. */
+    /** A container that is not started yet. The caller starts and stops it. */
     public static PostgreSQLContainer container() {
         String version = System.getProperty(VERSION_PROPERTY);
         if (version == null || version.isBlank()) {
-            throw new IllegalStateException(VERSION_PROPERTY + " 시스템 프로퍼티가 없습니다. Gradle test 태스크가 버전 목록의 값을 "
-                    + "넘겨야 합니다(buildSrc의 ledger-relay.java-conventions).");
+            throw new IllegalStateException("The " + VERSION_PROPERTY + " system property is missing. The Gradle test task "
+                    + "must pass the value from the version catalog (ledger-relay.java-conventions in buildSrc).");
         }
         return new PostgreSQLContainer("postgres:" + version);
     }
 
-    /** 라이브러리 스키마(jdbc jar의 {@code io/github/ledgerrelay/jdbc/schema.sql}). 앱은 이것을 마이그레이션 도구로 적용한다. */
+    /** The library schema ({@code io/github/ledgerrelay/jdbc/schema.sql} in the jdbc jar). Apps apply it with their
+     * migration tool. */
     public static String schema() {
         try (InputStream in = PostgresTestDatabase.class.getResourceAsStream("/io/github/ledgerrelay/jdbc/schema.sql")) {
             if (in == null) {
-                throw new IllegalStateException("schema.sql이 클래스패스에 없습니다");
+                throw new IllegalStateException("schema.sql is not on the classpath");
             }
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {

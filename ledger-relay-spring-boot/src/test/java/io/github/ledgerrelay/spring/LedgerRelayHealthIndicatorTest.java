@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.Status;
 
-@DisplayName("health — TB 연결과 대기를 알리되, TB가 끊겨도 앱은 UP이다")
+@DisplayName("Health — reports the TB connection and the backlog, but the app stays UP when TB is unreachable")
 class LedgerRelayHealthIndicatorTest {
 
     static final Duration LEDGER_STALE_AFTER = Duration.ofSeconds(5);
@@ -41,19 +41,19 @@ class LedgerRelayHealthIndicatorTest {
     }
 
     @Test
-    @DisplayName("TB가 답하면 TB UP과 대기 수를 알린다")
+    @DisplayName("When TB answers, health reports TB UP and the backlog counts")
     void aReachableLedgerIsUp() {
         // when
         Health health = indicator(storage.transactions()).health();
 
         // then
-        assertThat(health.getStatus()).as("상태").isEqualTo(Status.UP);
-        assertThat(health.getDetails()).as("세부").containsEntry("ledger", "UP").containsEntry("unfinished", 2L)
+        assertThat(health.getStatus()).as("status").isEqualTo(Status.UP);
+        assertThat(health.getDetails()).as("details").containsEntry("ledger", "UP").containsEntry("unfinished", 2L)
                 .containsEntry("halted", 0L);
     }
 
     @Test
-    @DisplayName("TB가 답하지 않으면 TB DOWN으로 알리지만 앱은 UP이다 — 접수는 TB 없이도 된다")
+    @DisplayName("When TB does not answer, health reports TB DOWN but the app stays UP — acceptance works without TB")
     void aSilentLedgerIsReportedButTheAppStaysUp() {
         // given
         fake.holdLookups();
@@ -62,12 +62,12 @@ class LedgerRelayHealthIndicatorTest {
         Health health = indicator(storage.transactions()).health();
 
         // then
-        assertThat(health.getStatus()).as("상태").isEqualTo(Status.UP);
-        assertThat(health.getDetails()).as("세부").containsEntry("ledger", "DOWN");
+        assertThat(health.getStatus()).as("status").isEqualTo(Status.UP);
+        assertThat(health.getDetails()).as("details").containsEntry("ledger", "DOWN");
     }
 
     @Test
-    @DisplayName("TB가 답하지 않아도 health는 기다리지 않는다 — probe timeout(보통 1초)에 걸려 앱이 서비스에서 빠지지 않게")
+    @DisplayName("Health does not wait when TB does not answer — so the probe timeout (usually 1 second) does not take the app out of service")
     void healthDoesNotWaitForASilentLedger() {
         // given
         fake.holdLookups();
@@ -79,11 +79,11 @@ class LedgerRelayHealthIndicatorTest {
         Duration took = Duration.ofNanos(System.nanoTime() - started);
 
         // then
-        assertThat(took).as("health 한 번에 걸린 시간").isLessThan(Duration.ofMillis(100));
+        assertThat(took).as("time taken by one health call").isLessThan(Duration.ofMillis(100));
     }
 
     @Test
-    @DisplayName("TB가 답하지 않는 동안 조회는 한 번에 하나만 보낸다 — health 요청마다 TB 클라이언트에 조회가 쌓이지 않게")
+    @DisplayName("While TB does not answer, only one lookup is outstanding at a time — so lookups do not pile up in the TB client with each health request")
     void aSilentLedgerIsProbedOnceAtATime() {
         // given
         fake.holdLookups();
@@ -95,30 +95,30 @@ class LedgerRelayHealthIndicatorTest {
         }
 
         // then
-        assertThat(fake.lookups()).as("TB에 보낸 조회 수").isEqualTo(1);
+        assertThat(fake.lookups()).as("lookups sent to TB").isEqualTo(1);
     }
 
     @Test
-    @DisplayName("health를 5초보다 드물게 불러도 TB가 답하는 동안은 UP이다 — Kubernetes probe 간격(기본 10초)에서도 (F40)")
+    @DisplayName("Health stays UP while TB answers even when called less often than every 5 seconds — also at the Kubernetes probe interval (default 10 seconds) (F40)")
     void aLedgerThatAnswersIsUpEvenWhenHealthIsCalledRarely() {
-        // given: TB가 조금 늦게 답한다. 첫 확인은 답을 받았다
+        // given: TB answers a little late. The first check got its answer
         fake.holdLookups();
         LedgerRelayHealthIndicator indicator = indicator(storage.transactions(), clock);
         indicator.health();
         fake.answerHeldLookups();
 
-        // when: 10초 뒤 다시 부른다. 새 확인은 막 보냈고 아직 답 전이다
+        // when: called again 10 seconds later. The new check was just sent and has no answer yet
         clock.advance(Duration.ofSeconds(10));
         Health health = indicator.health();
 
         // then
-        assertThat(health.getDetails()).as("세부").containsEntry("ledger", "UP");
+        assertThat(health.getDetails()).as("details").containsEntry("ledger", "UP");
     }
 
     @Test
-    @DisplayName("보낸 확인이 5초 넘게 답이 없으면 DOWN이다 — 전에 답했더라도")
+    @DisplayName("A check unanswered for more than 5 seconds is DOWN — even if TB answered before")
     void aProbeUnansweredForTooLongIsDown() {
-        // given: 첫 확인은 답을 받았고, 다음 확인부터 TB가 답하지 않는다
+        // given: the first check got its answer; from the next check on, TB does not answer
         fake.holdLookups();
         LedgerRelayHealthIndicator indicator = indicator(storage.transactions(), clock);
         indicator.health();
@@ -131,17 +131,17 @@ class LedgerRelayHealthIndicatorTest {
         Health health = indicator.health();
 
         // then
-        assertThat(health.getDetails()).as("세부").containsEntry("ledger", "DOWN");
+        assertThat(health.getDetails()).as("details").containsEntry("ledger", "DOWN");
     }
 
     @Test
-    @DisplayName("저장소를 읽을 수 없으면 DOWN이다 — PG 없이는 접수도 못 한다")
+    @DisplayName("When the store cannot be read, health is DOWN — without PG, nothing can be accepted")
     void aFailingStoreIsDown() {
         // given
         Transactions broken = new Transactions() {
             @Override
             public <T> T inTransaction(Supplier<T> work) {
-                throw new IllegalStateException("DB 연결이 끊겼다");
+                throw new IllegalStateException("DB connection lost");
             }
 
             @Override
@@ -158,7 +158,7 @@ class LedgerRelayHealthIndicatorTest {
         Health health = indicator(broken).health();
 
         // then
-        assertThat(health.getStatus()).as("상태").isEqualTo(Status.DOWN);
+        assertThat(health.getStatus()).as("status").isEqualTo(Status.DOWN);
     }
 
     private LedgerRelayHealthIndicator indicator(Transactions transactions) {
@@ -169,7 +169,7 @@ class LedgerRelayHealthIndicatorTest {
         return new LedgerRelayHealthIndicator(storage.store(), transactions, fake, LEDGER_STALE_AFTER, clock);
     }
 
-    /** 테스트가 돌리는 시계. */
+    /** A clock the test advances. */
     static final class TestClock implements Supplier<Instant> {
         private Instant now = Instant.parse("2026-10-18T00:00:00Z");
 

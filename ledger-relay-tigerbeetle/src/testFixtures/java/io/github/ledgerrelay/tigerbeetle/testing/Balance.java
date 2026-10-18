@@ -1,6 +1,6 @@
 package io.github.ledgerrelay.tigerbeetle.testing;
 
-/** 계좌의 확정·보류 금액. */
+/** Posted and pending amounts of an account. */
 public record Balance(long debitsPosted, long creditsPosted, long debitsPending, long creditsPending) {
 
     public boolean isUntouched() {
@@ -9,7 +9,7 @@ public record Balance(long debitsPosted, long creditsPosted, long debitsPending,
 
     @Override
     public String toString() {
-        return "출금 " + debitsPosted + " · 입금 " + creditsPosted
-                + " · 보류 출금 " + debitsPending + " · 보류 입금 " + creditsPending;
+        return "debits " + debitsPosted + " · credits " + creditsPosted
+                + " · pending debits " + debitsPending + " · pending credits " + creditsPending;
     }
 }

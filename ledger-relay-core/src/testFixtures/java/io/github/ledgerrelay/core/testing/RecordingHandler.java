@@ -5,7 +5,7 @@ import io.github.ledgerrelay.core.LedgerOutcomeHandler;
 import java.util.ArrayList;
 import java.util.List;
 
-/** 결과 반영 핸들러 대역. 끝까지 실행된 호출만 기록한다. */
+/** A stand-in outcome handler. It records only calls that ran to completion. */
 public final class RecordingHandler implements LedgerOutcomeHandler {
 
     private final List<CommandStatus> completed = new ArrayList<>();
@@ -13,12 +13,15 @@ public final class RecordingHandler implements LedgerOutcomeHandler {
     private int failuresLeft;
     private boolean crashNext;
 
-    /** 다음 times번의 호출은 기록하기 전에 {@link HandlerFailure}를 던진다. */
+    /** The next times calls throw {@link HandlerFailure} before recording. */
     public synchronized void failNextCalls(int times) {
         failuresLeft = times;
     }
 
-    /** 다음 호출은 기록하기 전에 {@link HandlerCrash}(Error)를 던진다. 메모리 부족 같은 JVM 수준 문제를 흉내 낸다. */
+    /**
+     * The next call throws {@link HandlerCrash} (an Error) before recording. Models a JVM-level problem such as out of
+     * memory.
+     */
     public synchronized void crashNextCall() {
         crashNext = true;
     }
@@ -36,21 +39,21 @@ public final class RecordingHandler implements LedgerOutcomeHandler {
         completed.add(outcome);
     }
 
-    /** 일부러 낸 핸들러 실패. */
+    /** A deliberate handler failure. */
     public static final class HandlerFailure extends RuntimeException {
         HandlerFailure(String commandId) {
-            super("결과 반영 핸들러가 일부러 실패했다: " + commandId);
+            super("The outcome handler failed on purpose: " + commandId);
         }
     }
 
-    /** 일부러 낸 JVM 수준 실패. */
+    /** A deliberate JVM-level failure. */
     public static final class HandlerCrash extends Error {
         HandlerCrash(String commandId) {
-            super("결과 반영 핸들러가 일부러 Error를 던졌다: " + commandId);
+            super("The outcome handler threw an Error on purpose: " + commandId);
         }
     }
 
-    /** 이 명령에 대해 끝까지 실행된 호출들. */
+    /** The calls for this command that ran to completion. */
     public synchronized List<CommandStatus> completedFor(String commandId) {
         return completed.stream().filter(outcome -> outcome.commandId().equals(commandId)).toList();
     }

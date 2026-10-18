@@ -6,8 +6,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.stereotype.Component;
 
 /**
- * 라이브러리의 로그 이벤트에 더해 이 인스턴스가 TB에 보낸 명령 수를 센다. 화면의 Workers 칸이 인스턴스마다 보낸 수를 보여 워커
- * 둘이 나눠 일하는 것을 드러낸다. 앱이 이 빈을 주면 라이브러리는 자기 것을 만들지 않는다.
+ * Logs the library's events and also counts the commands this instance sent to TB. The Workers box in the UI shows the
+ * count per instance, which makes it visible that the two workers split the work. When the app provides this bean, the
+ * library does not create its own.
  */
 @Component
 class CountingWorkerEvents implements WorkerEvents {

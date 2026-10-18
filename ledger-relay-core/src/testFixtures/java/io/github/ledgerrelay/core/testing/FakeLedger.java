@@ -14,10 +14,11 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * 워커 테스트용 가짜 TB. 정하지 않은 이체는 {@code Created}로 끝난다. 이체마다 결과를 정하거나({@link #answer}), 응답을
- * 붙잡거나({@link #holdReplies}), 다음 요청을 실패시키거나({@link #failNext}), 결과 개수를 틀리게 할 수 있다
- * ({@link #replyWithCount}). 받은 요청은 {@link #requests()}로 본다. 워커가 future 콜백에서 슬롯을 돌려주므로 스레드
- * 안전하다.
+ * A fake TB for worker tests. A transfer with no set answer ends as {@code Created}. You can set a result per transfer
+ * ({@link #answer}), hold the replies ({@link #holdReplies}), fail the next request ({@link #failNext}), or return the
+ * wrong number of results ({@link #replyWithCount}). {@link #requests()} shows the requests received. The worker
+ * returns
+ * slots from a future callback, so this class is thread-safe.
  */
 public final class FakeLedger implements LedgerClient {
 
@@ -32,20 +33,20 @@ public final class FakeLedger implements LedgerClient {
     private boolean holdingLookups;
     private final List<Runnable> heldLookups = new java.util.ArrayList<>();
     private int lookups;
-    /** TB가 기록한 이체(Created·Exists로 답한 것). 대사가 조회한다. */
+    /** Transfers TB recorded (those answered with Created or Exists). Reconciliation looks them up. */
     private final Map<BigInteger, LedgerTransfer> stored = new HashMap<>();
 
-    /** 이 이체 ID에는 이 결과를 낸다. */
+    /** Answer this result for this transfer id. */
     public synchronized void answer(BigInteger transferId, LedgerResultCode code) {
         answers.put(transferId, code);
     }
 
-    /** 이후 요청의 응답을 붙잡는다. TB 클라이언트에 timeout이 없어 응답이 영영 안 오는 상황이다. */
+    /** Holds the replies of later requests. Models the TB client having no timeout, so a reply never arrives. */
     public synchronized void holdReplies() {
         holding = true;
     }
 
-    /** 붙잡은 응답을 모두 끝내고, 이후 요청은 바로 답한다. */
+    /** Completes every held reply, and answers later requests right away. */
     public void releaseHeldReplies() {
         List<Held> releasing;
         synchronized (this) {
@@ -56,49 +57,52 @@ public final class FakeLedger implements LedgerClient {
         releasing.forEach(h -> h.reply().complete(h.results()));
     }
 
-    /** 다음 요청 하나를 이 예외로 끝낸다. */
+    /** Ends the next request with this exception. */
     public synchronized void failNext(RuntimeException cause) {
         nextFailure = cause;
     }
 
-    /** 다음 요청 하나는 future를 돌려주지 않고 보내는 자리에서 이 예외를 던진다(닫힌 클라이언트, 배치 채우기 실패). */
+    /**
+     * The next request returns no future and throws this exception at the send call (closed client, failure to fill the
+     * batch).
+     */
     public synchronized void throwOnNextSubmit(RuntimeException failure) {
         nextThrow = failure;
     }
 
-    /** 다음 요청 하나는 future 대신 null을 돌려준다(계약을 어긴 클라이언트). */
+    /** The next request returns null instead of a future (a client that breaks the contract). */
     public synchronized void replyWithNull() {
         nextNull = true;
     }
 
-    /** 이 이체를 TB가 잃은 것처럼 지운다(대사가 어긋남을 찾는지 볼 때). */
+    /** Deletes this transfer as if TB lost it (to see whether reconciliation finds the mismatch). */
     public synchronized void forget(BigInteger transferId) {
         stored.remove(transferId);
     }
 
-    /** TB에 이 이체가 있는 것처럼 심는다. */
+    /** Plants this transfer as if it existed in TB. */
     public synchronized void plant(LedgerTransfer transfer) {
         stored.put(transfer.transferId(), transfer);
     }
 
-    /** 기록된 이체의 금액을 바꾼다. */
+    /** Changes the amount of a recorded transfer. */
     public synchronized void alterAmount(BigInteger transferId, BigInteger amount) {
         LedgerTransfer t = stored.get(transferId);
         stored.put(transferId, new LedgerTransfer(t.transferId(), t.debitAccountId(), t.creditAccountId(), amount,
                 t.ledger(), t.code(), t.kind()));
     }
 
-    /** 받은 조회 요청 수. */
+    /** The number of lookup requests received. */
     public synchronized int lookups() {
         return lookups;
     }
 
-    /** 이후 조회에 답하지 않는다. */
+    /** Stops answering later lookups. */
     public synchronized void holdLookups() {
         holdingLookups = true;
     }
 
-    /** 붙잡아 둔 조회에 지금 답한다. 이후 조회는 계속 붙잡는다. 답이 늦게 오는 TB를 흉내 낸다. */
+    /** Answers the held lookups now. Later lookups stay held. Models a TB that answers late. */
     public void answerHeldLookups() {
         List<Runnable> answers;
         synchronized (this) {
@@ -120,7 +124,7 @@ public final class FakeLedger implements LedgerClient {
         return CompletableFuture.completedFuture(transferIds.stream().map(stored::get).filter(Objects::nonNull).toList());
     }
 
-    /** 다음 요청 하나에 결과를 n개만 낸다. 요청보다 많으면 남는 몫은 Created다. */
+    /** Returns only n results for the next request. If n exceeds the request, the extra ones are Created. */
     public synchronized void replyWithCount(int n) {
         nextCount = n;
     }

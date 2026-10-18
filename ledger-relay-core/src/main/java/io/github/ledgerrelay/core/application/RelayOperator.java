@@ -27,8 +27,9 @@ import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
- * 운영자 포트의 구현. 순서 키 행을 잡지 않으므로 {@link io.github.ledgerrelay.core.spi.OrderingKeys}를 받지 않는다.
- * 포기는 핸들러를 부르는 {@link CommandLifecycle#abandonHalted}에 맡긴다(F33).
+ * The implementation of the operator port. It never locks ordering key rows, so it does not take
+ * {@link io.github.ledgerrelay.core.spi.OrderingKeys}. Abandoning is delegated to
+ * {@link CommandLifecycle#abandonHalted}, which calls the handler (F33).
  */
 public final class RelayOperator implements LedgerRelayOperator {
 
@@ -50,9 +51,10 @@ public final class RelayOperator implements LedgerRelayOperator {
     }
 
     /**
-     * 페이지를 읽는 트랜잭션을 닫은 뒤 TB를 조회한다. TB가 늦어도 DB 커넥션을 쥐고 기다리지 않게 하려는 것이다.
-     * 판정: 적용(APPLIED)은 TB에 있고 같아야 한다. 거절·건너뜀은 TB에 없어야 한다. 충돌은 그 ID의 TB 이체가 남의 것이라
-     * 보지 않는다.
+     * Queries TB after closing the transaction that read the page, so a slow TB never makes it wait while holding a DB
+     * connection. Verdict: an applied command (APPLIED) must exist in TB and be the same. A rejected or skipped command
+     * must not exist in TB. A conflict is not checked, because the TB transfer with that id belongs to another
+     * command.
      */
     @Override
     public ReconciliationReport reconcile(long afterPosition, int limit) {
@@ -85,12 +87,12 @@ public final class RelayOperator implements LedgerRelayOperator {
             return ledger.lookup(transferIds).get(lookupTimeout.toNanos(), TimeUnit.NANOSECONDS).stream()
                     .collect(Collectors.toMap(LedgerTransfer::transferId, t -> t, (a, b) -> a));
         } catch (TimeoutException e) {
-            throw new LedgerUnavailableException("TB가 " + lookupTimeout + " 안에 조회에 답하지 않았습니다", e);
+            throw new LedgerUnavailableException("TB did not answer the lookup within " + lookupTimeout, e);
         } catch (ExecutionException e) {
             throw e.getCause() instanceof RuntimeException runtime ? runtime : new IllegalStateException(e.getCause());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("대사 중 인터럽트되었다", e);
+            throw new IllegalStateException("Interrupted during reconciliation", e);
         }
     }
 
@@ -105,7 +107,10 @@ public final class RelayOperator implements LedgerRelayOperator {
                 : Optional.of(ReconciliationReport.Mismatch.Kind.DIFFERENT);
     }
 
-    /** 확정·해제는 계좌·ledger·code를 예약에서 물려받으므로 종류만 본다. 금액을 정한 확정은 금액도 본다. */
+    /**
+     * post and void inherit the accounts, ledger and code from the reservation, so only the kind is compared. A post
+     * with a set amount also compares the amount.
+     */
     private static boolean sameTransfer(TransferBody body, LedgerTransfer found) {
         if (body.kind() != found.kind()) {
             return false;
@@ -131,21 +136,21 @@ public final class RelayOperator implements LedgerRelayOperator {
         return switch (lifecycle.abandonHalted(commandId)) {
             case WriteResult.Written written -> AbandonOutcome.ABANDONED;
             case WriteResult.HandlerFailed failed -> AbandonOutcome.HANDLER_FAILED;
-            // 읽은 뒤 다른 쪽(다른 운영자의 포기)이 먼저 바꿨다. 이제 멈춘 명령이 아니다
+            // After the read, another party (another operator's abandon) changed it first. It is no longer halted
             case WriteResult.Fenced fenced -> throw new CannotAbandonException(commandId,
-                    CannotAbandonException.Reason.NOT_HALTED, "다른 쪽이 먼저 바꿔 더는 멈춘 명령이 아닙니다: " + commandId);
+                    CannotAbandonException.Reason.NOT_HALTED, "Another party changed the command first; it is no longer halted: " + commandId);
         };
     }
 
     static void requirePage(int limit) {
         if (limit < 1 || limit > MAX_PAGE) {
-            throw new IllegalArgumentException("limit은 1 이상 " + MAX_PAGE + " 이하여야 합니다: " + limit);
+            throw new IllegalArgumentException("limit must be between 1 and " + MAX_PAGE + ": " + limit);
         }
     }
 
     private static HaltedCommand haltedOf(CommandRecord record) {
         HaltMark halt = record.halt().orElseThrow(() -> new IllegalStateException(
-                "버그: 멈춘 명령 " + record.commandId() + "에 멈춘 기록이 없다"));
+                "Bug: halted command " + record.commandId() + " has no halt record"));
         return new HaltedCommand(record.rowId(), record.commandId(), record.orderingKey(), record.seq(), record.kind(),
                 halt.reason(), halt.haltedAt());
     }

@@ -12,18 +12,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-@DisplayName("다시 시도할 때까지의 대기 — worker.backoff")
+@DisplayName("Wait before the next attempt — worker.backoff")
 class BackoffTest {
 
-    /** 기본값. */
+    /** The defaults. */
     static final Backoff DEFAULT = new Backoff(Duration.ofMillis(200), Duration.ofSeconds(30));
 
     @Nested
     @Order(1)
-    @DisplayName("실패가 거듭되면")
+    @DisplayName("As failures add up")
     class AsFailuresAddUp {
 
-        @ParameterizedTest(name = "{0}회 실패 → {1}ms", quoteTextArguments = false)
+        @ParameterizedTest(name = "{0} failures → {1}ms", quoteTextArguments = false)
         @CsvSource(textBlock = """
                 0,    200
                 1,    200
@@ -33,23 +33,23 @@ class BackoffTest {
                 9,    30000
                 1000, 30000
                 """)
-        @DisplayName("두 배씩 늘고 상한에서 멈춘다 — 실패가 아무리 많아도 넘치지 않는다")
+        @DisplayName("It doubles and stops at the cap — it does not overflow however many failures there are")
         void doublesUpToTheCap(long failures, long expectedMillis) {
             // when
             Duration wait = DEFAULT.after(failures);
 
             // then
-            assertThat(wait).as("%d회 실패 뒤의 대기", failures).isEqualTo(Duration.ofMillis(expectedMillis));
+            assertThat(wait).as("wait after %d failures", failures).isEqualTo(Duration.ofMillis(expectedMillis));
         }
     }
 
     @Nested
     @Order(2)
-    @DisplayName("설정이 잘못되면")
+    @DisplayName("When it is misconfigured")
     class WhenMisconfigured {
 
         @Test
-        @DisplayName("처음 대기가 0이면 거부한다 — 바로 다시 잡으면 막힌 키가 워커를 붙잡는다")
+        @DisplayName("An initial wait of 0 is refused — a blocked key that is claimed again at once ties up the worker")
         void refusesAZeroInitialWait() {
             // when
             ThrowingCallable configuring = () -> new Backoff(Duration.ZERO, Duration.ofSeconds(30));
@@ -59,7 +59,7 @@ class BackoffTest {
         }
 
         @Test
-        @DisplayName("상한이 처음 대기보다 짧으면 거부한다")
+        @DisplayName("A cap shorter than the initial wait is refused")
         void refusesACapBelowTheInitialWait() {
             // when
             ThrowingCallable configuring = () -> new Backoff(Duration.ofSeconds(5), Duration.ofSeconds(1));
@@ -69,11 +69,11 @@ class BackoffTest {
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ──────────────────────────────────────────
 
     private static void assertRefusedAsMisconfigured(ThrowingCallable configuring, String setting) {
         assertThatThrownBy(configuring)
-                .as("%s 설정이 잘못되어 거부되기를 기대했다", setting)
+                .as("expected refusal because the %s setting is wrong", setting)
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(setting);
     }

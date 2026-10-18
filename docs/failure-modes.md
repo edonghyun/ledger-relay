@@ -1,422 +1,421 @@
-# 장애 대응 기록
+# Failure modes
 
-ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **무엇이 깨지는지 → 어떻게 재현했는지 → 구조로 어떻게 막았는지 → 무엇으로 확인하는지**를 한 줄로 잇는다.
+This document lists, one by one, the failures ledger-relay has to prevent. For each failure it links in one line **what breaks → how it was reproduced → how the structure prevents it → what verifies it**.
 
-- 재현은 테스트로 한다. 테스트 이름을 적어 두면 그 장애가 다시 생겼을 때 어느 테스트가 실패할지 알 수 있다.
-- 처음부터 통과하는 테스트는 코드를 일부러 망가뜨려(대조군) 정말 실패하는지 확인한다. 대조군 결과도 적는다.
-- 수치는 실제로 잰 것만 적는다. 운영 지표와 실험은 해당 단계에서 채운다.
+- Reproduction is done with tests. Naming the test tells you which test will fail if the failure comes back.
+- A test that passes from the start is checked by deliberately breaking the code (a control experiment) to see that it really fails. The control experiment results are recorded too.
+- Only numbers that were actually measured are recorded. Operational metrics and experiments are filled in at the stage that covers them.
 
-## 1. 막은 장애
+## 1. Prevented failures
 
-F1~F10은 core의 규칙, F11~F19는 PostgreSQL 저장소, F21~F25는 워커, F26은 테스트 환경, F27~F36은 리뷰에서 찾은 core·저장소·Spring 모듈의 결함, F37~F44는 샘플 쇼핑몰을 만들며 찾은 것이다(F40은 그때 찾은 라이브러리 결함).
+F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F26 the test environment, F27–F36 defects in core, the store and the Spring module found in reviews, and F37–F44 were found while building the sample shop (F40 is a library defect found at that time).
 
-### F1. 막힌 키의 대기 명령이 claim 한도를 다 차지해 다른 키가 굶는다
+### F1. Waiting commands of a blocked key use up the claim limit and starve other keys
 
-- **깨지는 것**: 한 키의 앞 명령이 처리 중이면 뒤 명령들은 기다린다. 저장소가 이 대기 명령들까지 후보로 내면, 한 번에 잡는 한도(limit)가 대기 명령으로 차서 다른 키가 영영 잡히지 않는다.
-- **재현**: `CommandStoreContract` › claim 후보를 잠그면 › `aBlockedKeyDoesNotUseUpTheLimit`. 키 a에 명령 셋이 있고 맨 앞이 처리 중일 때, limit 1로 잠그면 키 b의 명령이 나와야 한다.
-- **구조**: 저장소는 순서 키마다 맨 앞의 미완료 명령만 후보로 낸다. 키마다 맨 앞 판정(G4)은 저장소 계약(`CommandStoreContract`)이 메모리와 PG 양쪽에서 고정하며, core는 이것을 다시 확인하지 않는다. core의 게이트는 참조한 예약만 본다.
-- **확인**: 맨 앞 거르기를 지운 대조군에서 3건이 실패한다. jdbc에서 행 잠금과 함께 다시 확인했다(F12).
+- **What breaks**: while the earlier command of a key is in flight, the later commands wait. If the store also returns these waiting commands as candidates, the limit of one claim fills up with waiting commands and other keys are never claimed.
+- **Reproduction**: `CommandStoreContract` › `aBlockedKeyDoesNotUseUpTheLimit`. Key a has three commands and its head is in flight; locking with limit 1 must return the command of key b.
+- **Structure**: the store returns only the unfinished head command of each ordering key as a candidate. The store contract (`CommandStoreContract`) pins the per-key head rule (G4) for both the in-memory store and PG, and core does not check it again. The core gate only looks at the referenced reservation.
+- **Verification**: a control experiment that removes the head filter fails 3 tests. Checked again in jdbc together with row locks (F12).
 
-### F2. lease가 끝나 다른 워커가 가져간 명령에 앞 워커가 결과를 쓴다
+### F2. The previous worker writes a result to a command that another worker took after the lease ended
 
-- **깨지는 것**: 느린 워커가 늦게 쓴 결과가 반영되면, 결과가 두 번 쓰이거나 핸들러가 두 번 실행된다(G5).
-- **재현**: `LedgerRelayContract` › lease가 끝나 다른 워커가 잡은 뒤 앞 워커가 쓰면 › `theLateResultIsFenced`, `theCurrentWorkerWins`.
-- **구조**: claim할 때마다 lease 토큰이 오른다. 모든 쓰기는 "상태가 처리 중이고 토큰이 같을 때만"이다. 상태 기계에서 한 번, 저장소의 조건부 쓰기에서 한 번 막는다.
-- **확인**: 서비스가 토큰을 보지 않게 바꾼 대조군에서 2건이 실패한다.
+- **What breaks**: if a late result from a slow worker is applied, the result is written twice or the handler runs twice (G5).
+- **Reproduction**: `LedgerRelayContract` › `theLateResultIsFenced`, `theCurrentWorkerWins`.
+- **Structure**: every claim increments the lease token. Every write applies only "when the state is in flight and the token is the same". It is blocked once in the state machine and once in the store's conditional write.
+- **Verification**: a control experiment where the service ignores the token fails 2 tests.
 
-### F3. 결과는 기록됐는데 결과 반영 핸들러의 효과는 없다
+### F3. The result is recorded but the outcome handler's effect is missing
 
-- **깨지는 것**: 핸들러가 던진 뒤에도 최종 상태가 커밋되면, 앱의 업무 상태(주문, 지갑)가 원장 결과를 영영 따라가지 못한다(G6).
-- **재현**: `LedgerRelayContract` › 결과 반영 핸들러가 실패하면 › `theResultIsRolledBackWithTheHandler`. 저장소 쪽은 `CommandStoreContract` › `aThrowingTransactionUndoesTheWrite`.
-- **구조**: 최종 쓰기와 핸들러를 한 트랜잭션에서 실행한다. 핸들러가 던지면 롤백하고, 새 트랜잭션에서 실패를 기록한다.
-- **확인**: 핸들러 예외에도 커밋하는 대조군에서 4건이 실패한다. PostgreSQL에서 DB에 쓰는 핸들러로 다시 확인했다(`HandlerAtomicityTest`). 핸들러가 트랜잭션 밖 별도 커넥션(auto-commit)으로 쓰는 대조군에서 2건이 실패한다. 쓴 뒤 던지면 앱 테이블에 기록이 남고(`neitherTheResultNorTheAppRowRemains`), 재시도는 기본 키 위반으로 다시 실패해 적용으로 끝나지 못한다(`retryingLeavesExactlyOneAppRow`). 처음 쓴 재시도 테스트는 기록 수만 봐서 이 대조군을 놓쳤고, 최종 상태 확인을 더해 고쳤다.
+- **What breaks**: if the final state commits even after the handler threw, the app's business state (orders, wallets) never catches up with the ledger result (G6).
+- **Reproduction**: `LedgerRelayContract` › `theResultIsRolledBackWithTheHandler`. On the store side, `CommandStoreContract` › `aThrowingTransactionUndoesTheWrite`.
+- **Structure**: the final write and the handler run in one transaction. If the handler throws, the transaction rolls back and the failure is recorded in a new transaction.
+- **Verification**: a control experiment that commits despite the handler exception fails 4 tests. Checked again on PostgreSQL with a handler that writes to the DB (`HandlerAtomicityTest`). A control experiment where the handler writes through a separate connection outside the transaction (auto-commit) fails 2 tests. If it throws after writing, a record remains in the app table (`neitherTheResultNorTheAppRowRemains`), and the retry fails again on a primary key violation and cannot end as applied (`retryingLeavesExactlyOneAppRow`). The first version of the retry test only counted records and missed this control experiment; it was fixed by also checking the final state.
 
-### F4. 핸들러 실패 뒤 다시 보내면 원래 거절 사유가 사라진다
+### F4. Resending after a handler failure loses the original rejection reason
 
-- **깨지는 것**: 잔액 부족으로 거절된 명령의 핸들러가 실패한 뒤 TB에 다시 보내면, TB는 `IdAlreadyFailed`만 돌려준다. 원래 사유(`ExceedsCredits`)를 잃는다.
-- **재현**: `LedgerRelayContract` › `theKnownResultComesBackWithTheNextClaim`. 상태 기계는 `CommandStateMachineTest` › 이미 아는 TB 결과가 있으면 › `submittingAgainIsABug`.
-- **구조**: 받은 TB 결과를 `known_result`로 남기고, 다음 claim은 TB에 보내지 않고 그 결과로 끝낸다. 상태 기계가 재제출을 버그로 거부한다.
-- **확인**: 실패 기록을 지운 대조군에서 3건이 실패한다.
+- **What breaks**: if a command rejected for insufficient balance is resent to TB after its handler failed, TB only returns `IdAlreadyFailed`. The original reason (`ExceedsCredits`) is lost.
+- **Reproduction**: `LedgerRelayContract` › `theKnownResultComesBackWithTheNextClaim`. For the state machine, `CommandStateMachineTest` › `submittingAgainIsABug`.
+- **Structure**: the received TB result is kept as `known_result`, and the next claim finishes with that result without sending to TB. The state machine refuses a resubmission as a bug.
+- **Verification**: a control experiment that removes the failure record fails 3 tests.
 
-### F5. 핸들러가 `Error`를 던지면 결과가 남지 않는다
+### F5. When the handler throws an `Error`, no result is kept
 
-- **깨지는 것**: `Error`(메모리 부족 등)는 핸들러 실패 처리를 타지 않아, F4와 같은 이유로 원래 사유를 잃는다.
-- **재현**: `LedgerRelayContract` › 결과 반영 핸들러가 Error를 던지면 › `theKnownResultIsKept`.
-- **구조**: `Error`도 같은 경로로 롤백하고 결과를 새 트랜잭션에 남긴 뒤, `Error`는 삼키지 않고 그대로 던진다.
-- **확인**: 고치기 전에는 실패했다(Red). `Error`를 삼키는 대조군에서 `theErrorIsRethrown`이 실패한다.
+- **What breaks**: an `Error` (out of memory and so on) bypasses the handler failure handling, so the original reason is lost for the same reason as F4.
+- **Reproduction**: `LedgerRelayContract` › `theKnownResultIsKept`.
+- **Structure**: an `Error` also rolls back through the same path and the result is kept in a new transaction; then the `Error` is rethrown, not swallowed.
+- **Verification**: failed before the fix (Red). A control experiment that swallows the `Error` fails `theErrorIsRethrown`.
 
-### F6. 워커 단계를 바깥 트랜잭션 안에서 부르면 F3이 다시 생긴다
+### F6. Calling a worker step inside an outer transaction brings F3 back
 
-- **깨지는 것**: 워커 단계가 호출자의 트랜잭션에 합류하면, 핸들러 실패의 롤백이 바깥에 묻혀 최종 상태만 커밋된다. 최종 리뷰에서 실제로 재현됐다.
-- **재현**: `LedgerRelayContract` › 워커 단계를 앱 트랜잭션 안에서 부르면 › `completingInsideATransactionIsRefused`.
-- **구조**: `Transactions.isActive()`를 두고, 서비스는 활성 트랜잭션 안에서 부른 claim과 쓰기를 거부한다.
-- **확인**: 고치기 전에는 실패했다(Red).
+- **What breaks**: if a worker step joins the caller's transaction, the rollback of a handler failure is buried in the outer transaction and only the final state commits. This was actually reproduced in the final review.
+- **Reproduction**: `LedgerRelayContract` › `completingInsideATransactionIsRefused`.
+- **Structure**: there is `Transactions.isActive()`, and the service refuses claims and writes called inside an active transaction.
+- **Verification**: failed before the fix (Red).
 
-### F7. 저장소가 핸들러 실패 횟수를 버려 backoff가 늘지 않는다
+### F7. The store drops the handler failure count, so backoff does not grow
 
-- **깨지는 것**: 계속 실패하는 핸들러가 늘 첫 대기만큼만 쉬고 다시 잡힌다. 막힌 키를 드러내는 핸들러 실패 횟수(`handler_failures` 열)도 0으로 보인다.
-- **재현**: `CommandStoreContract` › `everyColumnOfTheRowIsKept`, `LedgerRelayContract` › `aSecondFailureWaitsTwiceAsLong`.
-- **구조**: 두 계약이 행 전체의 왕복과 대기 증가를 고정한다. jdbc 저장소도 같은 계약을 통과해야 한다.
-- **확인**: 핸들러 실패 횟수만 버리는 대조군에서 정확히 이 2건이 실패한다.
+- **What breaks**: a handler that keeps failing always rests only for the first delay and is claimed again. The handler failure count that reveals a blocked key (the `handler_failures` column) also shows 0.
+- **Reproduction**: `CommandStoreContract` › `everyColumnOfTheRowIsKept`, `LedgerRelayContract` › `aSecondFailureWaitsTwiceAsLong`.
+- **Structure**: the two contracts pin the round trip of the whole row and the growing delay. The jdbc store has to pass the same contracts.
+- **Verification**: a control experiment that drops only the handler failure count fails exactly these 2 tests.
 
-### F8. TB를 올리면서 결과 코드 이름이 바뀌어 저장된 결과를 읽지 못한다
+### F8. Upgrading TB renames result codes and stored results can no longer be read
 
-- **깨지는 것**: Java 상수 이름(`name()`)으로 저장하면, TB 클라이언트가 이름을 바꿀 때 `known_result`를 읽지 못해 그 키가 영원히 막힌다.
-- **재현**: `ResultCodeWireNameTest`.
-- **구조**: 68개 코드마다 TB 소스의 snake_case 저장 이름을 손으로 고정한다. Java 상수 이름은 저장 이름으로 받지 않는다.
-- **확인**: 표에서 한 줄을 지운 대조군에서 가드가 실패한다.
+- **What breaks**: if results are stored by Java constant name (`name()`), a rename in the TB client makes `known_result` unreadable and the key is blocked forever.
+- **Reproduction**: `ResultCodeWireNameTest`.
+- **Structure**: for each of the 68 codes, the snake_case stored name from the TB source is pinned by hand. Java constant names are not accepted as stored names.
+- **Verification**: a control experiment that deletes one line of the table fails the guard.
 
-### F9. 같은 키 안에서 확정이 예약보다 앞 순번이 된다 (HALT)
+### F9. Within one key, a post gets an earlier sequence number than its reservation (HALT)
 
-- **깨지는 것**: 확정을 예약보다 먼저 TB에 보내면 `PendingTransferNotFound`로 잘못 거절되고, 뒤에 만들어진 예약 금액은 timeout까지 묶인다.
-- **원인**: 접수 검사가 이 순서를 막으므로 버그나 DB 직접 수정이 아니면 생기지 않는다.
-- **1차 대응의 한계**: 처음에는 멈추기만 했다. 행은 접수 상태로 남아 claim할 때마다 다시 알리고 limit 한 칸을 차지했으며, 조회하면 '접수됨'으로 보여 원인을 찾기 어려웠다.
-- **재현**: `LedgerRelayContract` › 같은 키에서 확정이 자기가 참조한 예약보다 앞 순번인 상태에서. 순서를 뒤집은 행을 접수 검사 없이 저장소에 바로 넣는다. 계약이므로 jdbc 저장소도 같은 장을 통과해야 한다.
-- **구조**: 게이트가 멈추면 그 명령을 토큰을 올려 HALTED로 주차한다. HALTED는 최종 상태가 아니라 그 키의 맨 앞으로 남아 뒤 명령을 막고(G4), claim 후보가 아니므로 limit을 차지하지 않으며 알림은 한 번이다. 다른 키는 그대로 처리된다. 데드레터큐처럼 빼내지 않는 이유는 3절에 있다.
-- **사후 처리**: 운영자가 원인을 고친 뒤 `abandonHalted(commandId)`로 포기한다. 확정은 `SKIPPED`(이유 `ABANDONED_BY_OPERATOR`)로 끝나고, 같은 트랜잭션에서 핸들러가 그 이유를 받는다. 키가 풀려 뒤의 예약이 처리되고, 앱은 새 commandId로 다시 확정한다. TB에는 한 번도 가지 않았으므로 원장에 잘못된 이동이 없다. 핸들러가 실패하거나 `Error`를 던지면 멈춘 그대로 남아 다시 포기할 수 있다. 앱은 공개 포트 `LedgerRelayOperator`(멈춘 명령 목록·포기)로 이것을 부른다. 이미 TB에 보낸 적이 있는 명령은 포기를 거부한다(F27).
-- **확인**: HALT를 OPEN으로 처리한 대조군에서 10건, HALTED를 후보로 내는 저장소 대조군에서 4건이 실패한다. 저장소 계약은 멈춘 행의 완료 시각이 비어 있음을 고정한다(완료 시각을 찍는 대조군에서 실패). 멈춘 명령 수는 health(`halted`)와 운영자 포트(`haltedCommands`)로 본다.
+- **What breaks**: if the post is sent to TB before the reservation, it is wrongly rejected with `PendingTransferNotFound`, and the amount of the reservation created later stays held until its timeout.
+- **Cause**: the acceptance checks prevent this order, so it happens only through a bug or a direct DB edit.
+- **Limits of the first fix**: at first it only halted. The row stayed in the accepted state, was reported again on every claim and took one slot of the limit, and a status lookup showed it as "accepted", which made the cause hard to find.
+- **Reproduction**: `LedgerRelayContract` › `WhenThePostIsAheadOfItsReservation`. A row with the order reversed is inserted directly into the store without the acceptance checks. Because it is a contract, the jdbc store has to pass the same chapter.
+- **Structure**: when the gate halts, the command is parked as HALTED with an incremented token. HALTED is not a final state; it stays the head of the key and blocks the later commands (G4). It is not a claim candidate, so it takes no slot of the limit, and it is reported once. Other keys keep being processed. Section 3 explains why it is not moved out as in a dead letter queue.
+- **Follow-up**: after fixing the cause, the operator abandons it with `abandonHalted(commandId)`. The post ends as `SKIPPED` (reason `ABANDONED_BY_OPERATOR`), and the handler receives that reason in the same transaction. The key is released, the later reservation is processed, and the app posts again with a new commandId. It never went to TB, so the ledger has no wrong movement. If the handler fails or throws an `Error`, the command stays halted and can be abandoned again. The app calls this through the public port `LedgerRelayOperator` (list of halted commands, abandon). A command that has already been sent to TB cannot be abandoned (F27).
+- **Verification**: a control experiment that treats HALT as OPEN fails 10 tests, and a store control experiment that returns HALTED as a candidate fails 4. The store contract pins that a halted row has no completion time (a control experiment that sets the completion time fails). The number of halted commands is visible in health (`halted`) and the operator port (`haltedCommands`).
 
-### F10. 확정이 참조한 예약 행이 없다 (HALT 유지, 판단 번복)
+### F10. The reservation row referenced by a post is missing (HALT kept, decision reversed)
 
-- **깨지는 것**: 예약이 충돌(CONFLICT)로 끝났다면 TB에는 같은 이체 ID로 **다른 내용의 이체**가 있다. 그 상태에서 확정을 보내면 남의 pending 이체를 금액 전체로 확정할 수 있다. 저장소가 잠긴 예약 행을 읽지 못해 "없음"으로 보인 경우라면 확정이 예약보다 먼저 가서 F9와 같은 피해가 난다.
-- **판단의 변화**: 한때 "예약의 TB 이체 ID를 접수 때 고정하므로 엉뚱한 예약을 확정할 길이 없다. 보관 정책이 끝난 예약을 지운 것이니 TB에 맡기자"고 판단해 게이트를 OPEN으로 바꿨다. 리뷰에서 두 가지가 틀렸음이 드러났다. 첫째, ID가 고정돼도 그 ID에 TB가 가진 이체가 우리 것이라는 보장이 없다(CONFLICT). 둘째, 스펙의 보관 정책은 미완료 확정이 참조하는 예약을 지우지 않으므로 "행이 없음"은 정상 경로가 아니다. 그래서 되돌렸다.
-- **재현**: `LedgerRelayContract` › 확정이 참조한 예약 행이 없는 상태에서. 게이트는 `OrderingGateTest` › `haltsWhenTheReservationIsMissing`.
-- **구조**: F9와 같이 멈추고 HALTED로 주차한다. 멈춤이 이제 싸므로(한 번 알림, limit을 차지하지 않음, 포기 조치 있음) 보내는 쪽으로 바꿀 이유가 없다.
-- **확인**: OPEN으로 되돌린 대조군에서 3건이 실패한다. `lockDue`가 참조 예약을 잠금과 상관없이 읽는지는 PostgreSQL 동시성 테스트에서 확인했다(F13).
+- **What breaks**: if the reservation ended in a conflict (CONFLICT), TB holds **a transfer with different content** under the same transfer id. Sending the post in that state can post someone else's pending transfer for its full amount. If the reservation looked "missing" because the store could not read a locked reservation row, the post goes before the reservation and causes the same damage as F9.
+- **Change of decision**: at one point the gate was switched to OPEN, on the reasoning "the reservation's TB transfer id is fixed at acceptance, so there is no way to post the wrong reservation. The archiving policy deleted a finished reservation, so let TB decide". A review showed two errors. First, even with a fixed id, there is no guarantee that the transfer TB holds under that id is ours (CONFLICT). Second, the spec's archiving policy does not delete reservations referenced by unfinished posts, so "the row is missing" is not a normal path. So the change was reverted.
+- **Reproduction**: `LedgerRelayContract` › `WhenTheReservationRowIsMissing`. For the gate, `OrderingGateTest` › `haltsWhenTheReservationIsMissing`.
+- **Structure**: like F9, it halts and is parked as HALTED. A halt is now cheap (reported once, takes no slot of the limit, has an abandon action), so there is no reason to switch to sending.
+- **Verification**: a control experiment reverted to OPEN fails 3 tests. That `lockDue` reads the referenced reservation regardless of locks was checked in the PostgreSQL concurrency tests (F13).
 
-### F11. 같은 트랜잭션에서 접수한 예약을 확정이 참조한다
+### F11. A post references a reservation accepted in the same transaction
 
-- **깨지는 것**: 접수 규칙은 확정·해제가 참조하는 예약이 "이미 커밋되어" 있기를 요구한다. 같은 앱 트랜잭션 안에서 예약과 확정을 함께 접수하면 두 명령의 운명이 한 트랜잭션에 묶인다. 그 트랜잭션의 다른 쿼리가 실패해 롤백되면 둘 다 사라지는 것은 괜찮지만, 앱이 저장점(savepoint)으로 예약만 되돌리면 참조할 곳이 없는 확정이 남는다. 그러면 F10처럼 멈춘다. 메모리 저장소는 이 경우를 받아들이고 있었다.
-- **재현**: `LedgerRelayContract` › 같은 앱 트랜잭션에서 예약을 접수하고 이어서 그 예약을 참조하면 › `thePostIsRefused`. 저장소 표시는 `CommandStoreContract` › `aRowIsMarkedAsAcceptedInThisTransactionUntilCommit`.
-- **구조**: 저장소는 사실만 알려 준다. `CommandRecord.acceptedInThisTransaction()`은 그 행을 지금 트랜잭션이 넣었는지를 나타낸다. PostgreSQL에서는 `accepted_xact xid8`과 `pg_current_xact_id_if_assigned()`를 비교한다. 거부는 서비스(`CommandLifecycle`)가 `ReservationNotFoundException`으로 한다.
-- **확인**: 두 테스트 모두 구현 전에 실패했다(표시가 false였고, 거부 예외가 없었다).
+- **What breaks**: the acceptance rule requires the reservation referenced by a post or void to be "already committed". If an app accepts a reservation and a post together in the same app transaction, the fates of the two commands are tied to one transaction. If another query in that transaction fails and rolls it back, both disappear, which is fine; but if the app rolls back only the reservation with a savepoint, a post with nothing to reference remains. It then halts as in F10. The in-memory store accepted this case.
+- **Reproduction**: `LedgerRelayContract` › `thePostIsRefused`. For the store flag, `CommandStoreContract` › `aRowIsMarkedAsAcceptedInThisTransactionUntilCommit`.
+- **Structure**: the store only reports facts. `CommandRecord.acceptedInThisTransaction()` tells whether the current transaction inserted that row. On PostgreSQL it compares `accepted_xact xid8` with `pg_current_xact_id_if_assigned()`. The refusal is done by the service (`CommandLifecycle`) with `ReservationNotFoundException`.
+- **Verification**: both tests failed before the implementation (the flag was false, and there was no refusal exception).
 
-### F12. 잠긴 맨 앞 명령을 건너뛰고 그 키의 다음 명령을 낸다
+### F12. A locked head command is skipped and the next command of that key is returned
 
-- **깨지는 것**: 워커 A가 키 order-1의 1번을 잡고 TB에 보내는 중이다. 워커 B가 `lockDue`를 하면서 "맨 앞인가"를 판정할 때 잠긴 1번까지 건너뛰면, 2번이 맨 앞으로 보여 함께 나간다. 키 안의 순서(G4)가 깨진다. 확정이 예약보다 먼저 가는 F9가 동시성으로 다시 생긴다.
-- **재현**: `CommandStoreContract` › 다른 트랜잭션이 행을 잡고 있으면 › `aLockedHeadHidesItsWholeKey`. 다른 트랜잭션(`OtherTransaction`)이 1번을 잠근 채로 두고 `lockDue`를 부른다.
-- **구조**: 후보 행만 `FOR UPDATE OF c SKIP LOCKED`로 잠근다. 맨 앞 판정(`NOT EXISTS` 앞 순번 미완료)은 잠그지 않고 읽으므로, 잠긴 1번도 "미완료"로 보인다.
-- **확인**: 대조군으로 `NOT EXISTS` 하위 질의에 `FOR UPDATE SKIP LOCKED`를 붙이면 이 테스트만 실패한다.
+- **What breaks**: worker A has claimed command 1 of key order-1 and is sending it to TB. If worker B, while deciding "is this the head" in `lockDue`, also skips the locked command 1, command 2 looks like the head and goes out at the same time. The order within the key (G4) breaks. F9, a post going before its reservation, comes back through concurrency.
+- **Reproduction**: `CommandStoreContract` › `aLockedHeadHidesItsWholeKey`. Another transaction (`OtherTransaction`) keeps command 1 locked while `lockDue` is called.
+- **Structure**: only candidate rows are locked, with `FOR UPDATE OF c SKIP LOCKED`. The head check (`NOT EXISTS` an earlier unfinished sequence number) reads without locking, so the locked command 1 is also seen as "unfinished".
+- **Verification**: as a control experiment, adding `FOR UPDATE SKIP LOCKED` to the `NOT EXISTS` subquery fails only this test.
 
-### F13. 잠긴 예약 행 때문에 확정이 예약을 "없음"으로 본다
+### F13. Because the reservation row is locked, the post sees the reservation as "missing"
 
-- **깨지는 것**: 다른 트랜잭션이 예약 행을 쓰는 중이라 잠겨 있을 때, 확정 후보가 그 예약을 잠가서 읽으려 하면 예약이 건너뛰어져 "참조 예약 없음"이 된다. 게이트는 F10에 따라 멈춘다(HALTED). 돈은 안전하지만, 멀쩡한 확정이 운영자 조치가 필요한 상태로 빠진다.
-- **재현**: `CommandStoreContract` › `aLockedReservationIsStillReported`.
-- **구조**: 예약은 `LEFT JOIN`으로 잠그지 않고 읽는다. 잠금은 후보 행(`OF c`)에만 건다.
-- **확인**: 대조군으로 예약을 `LEFT JOIN LATERAL (… FOR UPDATE SKIP LOCKED)`로 읽게 바꾸면 이 테스트만 실패한다("잠긴 예약을 읽은 결과"가 비어 있다). 단순히 `FOR UPDATE SKIP LOCKED`로 넓히는 실수는 PostgreSQL이 문법 단계에서 거부한다(외부 조인의 nullable 쪽은 잠글 수 없다). 그래서 의미를 보여 주는 대조군으로 쓸 수 없었다.
+- **What breaks**: when the reservation row is locked because another transaction is writing it, a post candidate that tries to read the reservation with a lock skips it, and it becomes "referenced reservation missing". The gate halts according to F10 (HALTED). The money is safe, but a valid post falls into a state that needs operator action.
+- **Reproduction**: `CommandStoreContract` › `aLockedReservationIsStillReported`.
+- **Structure**: the reservation is read with a `LEFT JOIN` without locking. The lock is taken only on the candidate row (`OF c`).
+- **Verification**: as a control experiment, reading the reservation with `LEFT JOIN LATERAL (… FOR UPDATE SKIP LOCKED)` fails only this test (the "result of reading the locked reservation" is empty). The simple mistake of widening to `FOR UPDATE SKIP LOCKED` is refused by PostgreSQL at the syntax stage (the nullable side of an outer join cannot be locked), so it could not serve as a control experiment that shows the meaning.
 
-### F14. 접수 커밋 순서와 순번 순서가 어긋난다
+### F14. Acceptance commit order and sequence number order diverge
 
-- **깨지는 것**: 같은 키에 두 접수가 겹칠 때 순번을 `max(seq)+1`로 내면, 둘이 같은 번호를 보거나 늦게 커밋한 쪽이 작은 번호를 가진다. 워커가 작은 번호를 먼저 처리했다고 믿는 동안 그 번호의 행이 나중에 나타난다. 맨 앞 판정(F12)은 "나보다 앞선 명령이 나중에 생기지 않는다"는 전제에 기대므로 그 전제가 무너진다.
-- **재현**: `CommandStoreContract` › `theKeyLockHoldsUntilCommit`. 첫 접수가 순번 1을 받고 커밋하지 않은 동안 두 번째 접수는 막혀 있어야 하고, 첫 접수가 커밋한 뒤 2를 받아야 한다.
-- **구조**: 키 행(`ledger_ordering_key`)을 upsert해 잠그고 번호를 낸다. 잠금은 커밋까지 유지되므로 같은 키의 접수는 줄을 선다. 잠글 행이 없는 집합 판단을 잠글 행 하나로 바꾼 것이다(4절 "격리 수준과 무관한 이유").
-- **확인**: 대조군으로 `max(seq)+1`로 바꾸면 이 테스트와 `eachKeyCountsFromOne`이 실패한다(두 번째가 막히지 않는다).
+- **What breaks**: when two acceptances on the same key overlap and the sequence number is taken as `max(seq)+1`, both can see the same number, or the one that commits later can get the smaller number. While a worker believes it has processed the smaller number first, the row with that number appears later. The head check (F12) relies on the premise "no command ahead of me appears later", and that premise collapses.
+- **Reproduction**: `CommandStoreContract` › `theKeyLockHoldsUntilCommit`. While the first acceptance has taken sequence number 1 and not committed, the second acceptance must be blocked, and it must get 2 after the first commits.
+- **Structure**: the key row (`ledger_ordering_key`) is upserted to lock it and hand out the number. The lock is held until commit, so acceptances on the same key queue up. This turns a decision over a set with no row to lock into one row to lock (section 4, "Why the isolation level does not matter").
+- **Verification**: as a control experiment, switching to `max(seq)+1` fails this test and `eachKeyCountsFromOne` (the second one is not blocked).
 
-### F15. 같은 commandId의 동시 접수가 앱 트랜잭션을 깬다 (G7)
+### F15. Concurrent acceptances with the same commandId break the app transaction (G7)
 
-- **깨지는 것**: 유일성 위반 예외를 잡아 "이미 있다"로 처리하면, PostgreSQL은 그 트랜잭션 전체를 중단 상태로 만든다. 그 뒤의 모든 질의가 `current transaction is aborted`로 실패하고 앱 트랜잭션이 통째로 롤백된다. 재시도한 사용자의 주문 저장이 함께 날아간다.
-- **재현**: `CommandStoreContract` › `aConcurrentDuplicateLeavesTheAppTransactionUsable`. 늦은 쪽은 먼저 커밋된 행을 돌려받고, 이어서 다른 키의 순번을 받을 수 있어야 한다.
-- **구조**: `INSERT … ON CONFLICT (command_id) DO NOTHING RETURNING id`. 넣지 못했으면 같은 트랜잭션에서 기존 행을 읽는다. 에러를 내지 않으므로 트랜잭션이 산다.
-- **확인**: 대조군으로 `ON CONFLICT`를 지우고 `DuplicateKeyException`을 잡게 하면 이 테스트와 `aSecondInsertReturnsTheFirstRow`가 `current transaction is aborted`로 실패한다.
+- **What breaks**: if a unique violation exception is caught and treated as "already exists", PostgreSQL puts the whole transaction in an aborted state. Every following query fails with `current transaction is aborted`, and the whole app transaction rolls back. The order the retrying user saved is lost with it.
+- **Reproduction**: `CommandStoreContract` › `aConcurrentDuplicateLeavesTheAppTransactionUsable`. The late side must get back the row committed first, and must still be able to take a sequence number on another key afterwards.
+- **Structure**: `INSERT … ON CONFLICT (command_id) DO NOTHING RETURNING id`. If nothing was inserted, the existing row is read in the same transaction. No error is raised, so the transaction survives.
+- **Verification**: as a control experiment, removing `ON CONFLICT` and catching `DuplicateKeyException` fails this test and `aSecondInsertReturnsTheFirstRow` with `current transaction is aborted`.
 
-### F16. JPA 트랜잭션에서 접수가 따로 커밋된다 (G1)
+### F16. In a JPA transaction, acceptance commits separately (G1)
 
-- **깨지는 것**: 앱이 `JpaTransactionManager`를 쓰는데 그 트랜잭션이 JDBC 커넥션을 노출하지 않으면, `JdbcClient`는 DataSource에서 별도 커넥션을 받아 auto-commit으로 쓴다. 트랜잭션은 활성으로 보이므로(`requireActive` 통과) 아무 경고도 없다. 앱이 롤백해도 명령은 남는다. 주문은 없는데 원장 이체가 나간다.
-- **재현**: `JpaLedgerRelayTest` › 앱이 JPA로 주문을 저장하는 트랜잭션에서 접수하면 › `anAppEntityAndItsCommandRollBackTogether`. 상속한 서비스 계약 전체도 JPA 매니저 위에서 돈다.
-- **구조**: `JpaTransactionManager`에 같은 DataSource를 주고(`setDataSource`), `HibernateJpaDialect`가 JDBC 커넥션을 노출한다.
-- **확인**: 격리 수준은 받아들이지만 커넥션을 노출하지 않는 dialect로 바꾼 대조군에서 12건이 실패한다(이 대조군은 F18 이전 기록이다. 지금은 그 설정 자체가 접수에서 거부된다). 이 테스트("롤백된 명령"이 남아 있다)와 계약의 롤백 관련 장 11건(G1, G6)이다. 처음에 계획한 대조군 `DefaultJpaDialect`는 격리 수준 지정을 거부해서 69건 전부가 트랜잭션 시작에서 실패했다. 이 실패는 합류 문제를 보여 주지 않으므로 대조군으로 쓰지 않았다.
+- **What breaks**: if the app uses `JpaTransactionManager` and that transaction does not expose the JDBC connection, `JdbcClient` gets a separate connection from the DataSource and writes in auto-commit. The transaction looks active (`requireActive` passes), so there is no warning at all. Even if the app rolls back, the command remains. There is no order, but the ledger transfer goes out.
+- **Reproduction**: `JpaLedgerRelayTest` › `anAppEntityAndItsCommandRollBackTogether`. The whole inherited service contract also runs on the JPA manager.
+- **Structure**: `JpaTransactionManager` gets the same DataSource (`setDataSource`), and `HibernateJpaDialect` exposes the JDBC connection.
+- **Verification**: a control experiment with a dialect that accepts isolation levels but does not expose the connection fails 12 tests (this control experiment predates F18; today that setup itself is refused at acceptance). They are this test (the "rolled-back command" remains) and 11 rollback-related tests of the contract (G1, G6). The control experiment planned first, `DefaultJpaDialect`, refuses to set an isolation level, so all 69 tests failed at transaction start. That failure does not show the joining problem, so it was not used as a control experiment.
 
-### F17. 워커가 커넥션 풀의 기본 격리 수준을 따라가 직렬화 실패로 터진다
+### F17. The worker follows the connection pool's default isolation level and blows up on serialization failures
 
-- **깨지는 것**: 앱이 커넥션 풀 기본값을 REPEATABLE READ로 두면, 워커 단계(claim, 결과 쓰기)도 그 수준으로 열린다. 그러면 다른 워커와 같은 행을 건드릴 때 기다리지 않고 직렬화 실패(40001)로 끝난다. 워커는 이 실패를 예상하지 않으므로, 결과를 쓰지 못한 명령이 lease 만료까지 묶인다.
-- **재현**: `JdbcTransactionsTest` › 커넥션 풀의 기본 격리 수준이 REPEATABLE READ이면 › `aNewTransactionRunsAtReadCommitted`.
-- **구조**: `JdbcTransactions`가 새로 여는 트랜잭션은 READ COMMITTED로 명시한다. 앱 트랜잭션에 합류할 때는 앱의 수준을 바꾸지 않는다(`joiningKeepsTheAppsLevel`).
-- **확인**: 격리 수준을 명시하기 전에 이 테스트가 실패했다("repeatable read"를 읽었다).
+- **What breaks**: if the app sets the connection pool default to REPEATABLE READ, the worker steps (claim, writing the result) also open at that level. Then, when they touch the same row as another worker, they end with a serialization failure (40001) instead of waiting. The worker does not expect this failure, so a command whose result could not be written stays tied up until the lease expires.
+- **Reproduction**: `JdbcTransactionsTest` › `aNewTransactionRunsAtReadCommitted`.
+- **Structure**: transactions that `JdbcTransactions` opens itself set READ COMMITTED explicitly. When joining an app transaction, it does not change the app's level (`joiningKeepsTheAppsLevel`).
+- **Verification**: this test failed before the isolation level was set explicitly (it read "repeatable read").
 
-### F18. 저장소의 커넥션이 묶이지 않은 트랜잭션에서 접수가 따로 커밋된다 (G1, 리뷰에서 발견)
+### F18. Acceptance commits separately in a transaction that the store's connection is not bound to (G1, found in review)
 
-- **깨지는 것**: F16의 대조군 상황이 실제 설정에서도 생긴다. JDBC 커넥션을 노출하지 않는 JPA dialect를 쓰거나, 트랜잭션 매니저와 저장소가 서로 다른 DataSource 객체를 쥔 경우다(p6spy·datasource-proxy 같은 프록시). 그러면 트랜잭션은 열려 있어도 `JdbcClient`가 별도 커넥션으로 auto-commit한다. 주문은 롤백되는데 이체가 나가고, 키 잠금도 커밋까지 가지 않아 R12도 깨진다. 처음에는 열린 장애 O6으로 미뤘지만, 조용히 돈이 나가는 경로라 02b에서 막았다.
-- **재현**: `JdbcTransactionsTest` › 열린 트랜잭션에 저장소의 커넥션이 묶여 있지 않으면 › `aJpaTransactionHidingTheConnectionIsRefused`, `aTransactionOnAnotherDataSourceIsRefused`.
-- **구조**: `JdbcTransactions(transactionManager, dataSource)`가 저장소와 같은 DataSource를 받는다. `requireActive`는 트랜잭션이 열려 있는지와 함께 그 DataSource의 커넥션이 트랜잭션에 묶여 있는지(`TransactionSynchronizationManager.getResource`)를 확인하고, 아니면 `IllegalTransactionStateException`으로 거부한다.
-- **확인**: 확인을 넣기 전에 두 테스트 모두 "예외가 없다"로 실패했다.
+- **What breaks**: the situation of F16's control experiment also occurs in real setups: a JPA dialect that does not expose the JDBC connection, or a transaction manager and store holding different DataSource objects (proxies such as p6spy or datasource-proxy). Then, even though a transaction is open, `JdbcClient` auto-commits on a separate connection. The order rolls back but the transfer goes out, and the key lock does not last until commit either, so R12 breaks too. At first this was deferred as open failure O6, but because it is a path where money leaves silently, it was closed in 02b.
+- **Reproduction**: `JdbcTransactionsTest` › `aJpaTransactionHidingTheConnectionIsRefused`, `aTransactionOnAnotherDataSourceIsRefused`.
+- **Structure**: `JdbcTransactions(transactionManager, dataSource)` receives the same DataSource as the store. `requireActive` checks that a transaction is open and also that a connection of that DataSource is bound to the transaction (`TransactionSynchronizationManager.getResource`); otherwise it refuses with `IllegalTransactionStateException`.
+- **Verification**: before the check was added, both tests failed with "no exception".
 
-### F19. claim 폴링 비용이 끝난 이력 크기에 비례한다 (리뷰에서 발견)
+### F19. The cost of claim polling grows with the size of the finished history (found in review)
 
-- **깨지는 것**: `lockDue`는 접수 순서(`ORDER BY c.id LIMIT n`)로 후보를 고른다. 이 조건을 받치는 인덱스가 없으면 플래너가 기본 키 순서로 훑으면서 끝난 행을 하나씩 걸러 낸다. 워커가 짧은 간격으로 폴링하므로 DB 부하가 이력 크기에 비례해 커진다. 보관 정책은 기본값이 꺼져 있다.
-- **재현**: `LockDueScanTest` › 끝난 명령 20만 건 뒤에 접수된 명령 100건이 있으면 › `theDueQueryDoesNotFilterThroughFinishedRows`. 같은 질의의 `EXPLAIN ANALYZE`에서 "Rows Removed by Filter"를 더한 값이 100 이하여야 한다. 접수된 명령이 1건뿐이면 기존 부분 인덱스(`ledger_command_unfinished`)가 쓰여 재현되지 않았다. 100건으로 늘리자 기본 키 스캔이 골라졌다.
-- **구조**: 부분 인덱스 `ledger_command_due ON (id) WHERE state IN ('PENDING','CLAIMED')`(02e에서 `ledger_command_ready`로 바뀜. 맨 앞만 담으므로 끝난 이력도 읽지 않는다, F32). `theDueQueryDoesNotFilterThroughFinishedRows`는 새 질의에서도 그대로 지난다.
-- **확인**: 인덱스 전에는 걸러 낸 행이 200,000, 실행 21.8ms였다. 인덱스 뒤에는 테스트가 통과한다(리뷰어 측정: 100만 건에서 151ms → 0.047ms).
+- **What breaks**: `lockDue` picks candidates in acceptance order (`ORDER BY c.id LIMIT n`). Without an index that supports this condition, the planner scans in primary key order and filters out finished rows one by one. Workers poll at short intervals, so the DB load grows with the size of the history. The archiving policy is off by default.
+- **Reproduction**: `LockDueScanTest` › `theDueQueryDoesNotFilterThroughFinishedRows`, with 100 accepted commands behind 200,000 finished commands. The sum of "Rows Removed by Filter" in `EXPLAIN ANALYZE` of the same query must be 100 or less. With only 1 accepted command, the existing partial index (`ledger_command_unfinished`) was used and it did not reproduce. With 100, a primary key scan was chosen.
+- **Structure**: partial index `ledger_command_due ON (id) WHERE state IN ('PENDING','CLAIMED')` (replaced by `ledger_command_ready` in 02e, which holds only heads and so does not read the finished history either, F32). `theDueQueryDoesNotFilterThroughFinishedRows` still passes with the new query.
+- **Verification**: before the index, 200,000 rows were filtered out and execution took 21.8 ms. After the index, the test passes (reviewer's measurement: 151 ms → 0.047 ms at 1 million rows).
 
-### F20. U+0000이 든 문자열이 접수를 SQL 오류로 깨고, 짝 없는 서로게이트가 해시를 충돌시킨다
+### F20. A string containing U+0000 breaks acceptance with an SQL error, and a lone surrogate makes hashes collide
 
-- **깨지는 것**: PG `text`는 0x00 바이트를 받지 않는다. commandId·순서 키·reservation에 U+0000이 있으면 접수의 INSERT가 SQL 오류로 끝나고, PG에서는 그 앱 트랜잭션 전체가 중단된다. 짝 없는 서로게이트(예: `\uD800`)는 `getBytes(UTF_8)`에서 `?`로 바뀐다. 그래서 `"order-\uD800"`과 `"order-?"`의 내용 해시가 같아져, 다른 명령이 같은 내용으로 인정될 수 있다(G7).
-- **재현**: `LedgerCommandTest` › 규칙을 어긴 명령을 만들면 › "commandId에 U+0000이 있으면", "순서 키에 짝 없는 서로게이트가 있으면", "확정의 reservation에 U+0000이 있으면". 짝이 맞는 서로게이트(이모지)는 `aTransferWithAPairedSurrogateIsAccepted`가 허용함을 확인한다.
-- **조회·포기 경로 (리뷰에서 발견)**: 접수만 막으면 `status(commandId)`와 `abandonHalted(commandId)`가 같은 문자열을 그대로 PG에 보낸다. `status`는 앱 트랜잭션에 합류하므로, 외부 키(HTTP 경로의 멱등 키 등)로 조회한 앱 트랜잭션이 U+0000 하나로 통째로 깨진다. 짝 없는 서로게이트는 pgjdbc가 `?`로 바꿔 보내므로, `status("pay-\uD800")`가 `pay-?`라는 다른 명령의 상태를 돌려주고, `abandonHalted`는 다른 명령을 포기하려 든다. commandId는 해시에 들어가지 않으므로 이쪽 위험은 해시 충돌이 아니라 다른 명령과 맞는 것이다.
-- **재현**: `LedgerCommandTest` › 규칙을 어긴 명령을 만들면 › 위 세 행. `LedgerRelayContract` › 명령을 접수하면 › `aMalformedIdIsNotFoundAndTheAppTransactionStaysUsable`, `aLoneSurrogateDoesNotMatchAnotherCommand`, 멈추지 않은 명령을 포기하려 하면 › `aLoneSurrogateIdIsRefusedAsUnknown`. 메모리 저장소에서는 실패할 수 없고 PG 위(DataSource·JPA 두 계약)에서만 실패한다.
-- **구조**: `LedgerCommand` 생성자의 `requireWellFormed`가 세 문자열 필드를 검사하고 `InvalidCommandException`으로 거부한다. 같은 판정을 공개 정적 메서드 `LedgerCommand.isAcceptableId`로 내고, 서비스의 `status`는 접수될 수 없는 id면 DB에 묻지 않고 "없음"을, `abandonHalted`는 "접수한 적 없는 명령"을 돌려준다. 판단이 core에 있으므로 저장소는 이런 값을 받지 않는다.
-- **확인**: 검사를 넣기 전에 생성자 세 행이 "예외가 없다"로, 계약 세 테스트가 PG 위에서 6건(SQL 오류, `pay-?`의 상태, 다른 명령의 HALTED 검사) 실패했다.
-
-### F21. submit-timeout 뒤 슬롯을 바로 돌려주면 TB가 멈춘 동안 요청이 끝없이 쌓인다
-
-- **깨지는 것**: TB Java 클라이언트에는 timeout이 없다. 워커가 submit-timeout으로 기다림을 끊어도 요청은 클라이언트 안에 남아 TB가 돌아올 때까지 다시 보내진다. 그때 in-flight 슬롯을 돌려주면 워커는 다음 바퀴에 또 claim하고 또 보낸다. TB가 멈춘 동안 클라이언트 안에 요청이 끝없이 쌓이고, TB가 돌아오는 순간 한꺼번에 몰린다.
-- **재현**: `RelayWorkerTest` › TB가 submit-timeout 안에 답하지 않으면 › `aTimedOutRequestKeepsItsSlotsUntilItEnds`. 슬롯 4에 이체 둘을 보내 timeout이 나면 남은 슬롯이 2여야 하고, 붙잡힌 응답이 끝난 뒤에야 4가 된다. 슬롯을 claim 전에 잡는 것은 `noSlotsMeansNoClaim`이 고정한다. 슬롯이 없으면 claim하지 않으므로 명령은 lease 없이 접수됨으로 남는다.
-- **구조**: `RelayWorker`는 claim 전에 batch-size만큼 슬롯을 잡는다. 보내지 않는 몫은 바로 돌려주고, 보낸 몫은 요청 future의 `whenComplete`에서만 돌려준다.
-- **확인**: 대조군 두 개. 반납을 `whenComplete`에서 "보낸 직후"로 옮기자 `aTimedOutRequestKeepsItsSlotsUntilItEnds`와 `unusedSlotsAreGivenBackAtOnce`가 실패했다. claim 전 슬롯 확인을 끄자 `noSlotsMeansNoClaim`이 실패했다.
-
-### F22. 결과 개수가 요청과 다르면 남의 결과로 끝난다
-
-- **깨지는 것**: 워커는 TB 결과를 요청 순서로 명령과 짝짓는다. 결과가 하나 모자라거나 남으면 뒤의 명령들이 앞 명령의 결과를 받는다. 성공한 이체가 거절됨으로 끝나거나 그 반대가 된다. 핸들러는 틀린 결과로 업무를 처리한다.
-- **재현**: `RelayWorkerTest` › TB 요청이 예외로 끝나거나 결과 개수가 틀리면 › `aReplyWithTheWrongCountWritesNothing`. 이체 둘에 결과 하나가 오면 아무것도 쓰지 않고 둘 다 되돌리며, `malformedReply:2:1`을 알린다.
-- **구조**: `RelayWorker`가 결과 개수를 요청 개수와 비교한다. 다르면 모두 `release`한다. 다시 보낼 때는 같은 이체 ID이므로 TB가 이미 기록한 것은 `exists`로 돌아온다. 어댑터는 개수를 검사하지 않는다. 판단은 core에 있다.
-- **확인**: 처리를 넣기 전에는 `results.get(i)`가 범위를 벗어나 바퀴가 예외로 끝났다(테스트 실패).
-
-### F23. 응답이 유실된 명령을 새 이체 ID로 다시 보내 돈이 두 번 움직인다 (열린 장애 O3를 닫음)
-
-- **깨지는 것**: TB는 ID당 한 번만 실행한다. 그래서 같은 명령을 다시 보낼 때 이체 ID가 바뀌면 TB는 그것을 새 이체로 기록한다. 응답이 유실된 첫 요청이 이미 기록됐다면 돈이 두 번 나간다.
-- **재현**: `RelayOnTigerBeetleTest` › TB 응답이 유실되면 › `aLostReplyIsRetriedWithTheSameTransferIdAndMovesMoneyOnce`. 첫 요청은 실제 TB에 기록되지만 워커에게는 응답이 가지 않는다(테스트 대역 `ReplyLosingLedger`). 워커가 timeout으로 되돌리고 backoff 뒤 다시 보내면, 두 요청의 이체 ID가 같고, 두 번째 TB 결과는 `Exists`이며, 돈은 500만 움직인다. 연결이 끊긴 경우(`aCutConnectionIsRetriedAfterItIsRestored`, Toxiproxy)도 복구 뒤 적용됨으로 끝나고 돈은 한 번만 움직인다.
-- **구조**: 이체 ID는 접수 때 생성기가 내서 행(`transfer_id`)에 박는다. 워커는 claim한 행의 ID만 보내고 새 ID를 만들지 않는다. TB 쪽의 같은 ID 재전송은 `exists`(같은 본문, A1·A3)나 `id_already_failed`(일시적 실패, PRIOR_FAILURE 알림)로 돌아온다.
-- **확인**: 대조군으로 두 번째 요청의 이체 ID를 새로 바꾸자 돈이 1000 움직여 테스트가 실패했다.
-
-### F24. 결과를 쓰는 중 한 명령의 저장소 오류가 같은 배치의 나머지 결과를 버린다 (리뷰에서 발견)
-
-- **깨지는 것**: 워커는 TB 결과를 받은 뒤 명령마다 따로 쓴다. 그런데 한 명령의 쓰기가 저장소 예외(DB 연결 끊김 등)로 끝났을 때 바퀴 전체가 멈추면, 뒤 명령들은 받은 결과를 남기지 못한 채 lease가 끝날 때까지 처리 중으로 남는다. lease가 끝나면 같은 이체 ID로 다시 보내진다. TB가 기억하는 거절(`exceeds_credits` 등)은 그때 `id_already_failed`로 돌아와, 원래 사유를 잃고 PRIOR_FAILURE로 끝난다. F3·F4가 막으려던 결과가 다른 길로 생긴다.
-- **재현**: `RelayWorkerTest` › 결과를 쓰는 중에 저장소가 한 명령에서 실패하면 › `theOtherResultsOfTheBatchAreStillWritten`. 배치는 [pay-1 Created, pay-2 ExceedsCredits]이고, pay-1의 결과를 쓸 때 저장소가 한 번 던진다. pay-2는 `ExceedsCredits`로 거절됨이 되어야 하고, `writeFailed:pay-1`을 알려야 한다.
-- **구조**: `RelayWorker.attempt`가 쓰기(제출 기록, 건너뛰기, 결과, 되돌리기) 하나하나의 `RuntimeException`을 잡아 `WorkerEvents.writeFailed`로 알리고 다음 명령으로 넘어간다. 실패한 명령은 lease 만료 뒤 같은 이체 ID로 다시 잡힌다. Error는 삼키지 않는다.
-- **확인**: 고치기 전에는 바퀴가 예외로 끝나 테스트가 실패했다.
-
-### F25. lease가 응답 기다림보다 짧아 다른 워커가 같은 명령을 다시 보낸다 (리뷰에서 발견)
-
-- **깨지는 것**: lease는 claim에서 시작한다. 그래서 제출 기록, 응답 기다림(submit-timeout), 명령마다의 결과 쓰기를 모두 덮어야 한다. lease가 submit-timeout보다 짧으면 첫 워커가 응답을 기다리는 동안 다른 워커가 같은 명령을 다시 잡아 보낸다. fencing 덕분에 돈이 두 번 움직이지는 않는다. 하지만 두 번째 요청은 TB가 기억하는 거절에 `id_already_failed`를 받고, 첫 워커의 진짜 결과 쓰기는 0행으로 막혀 원래 사유를 잃는다.
-- **재현**: `WorkerSettingsTest` › 잘못 주면 › "lease가 submit-timeout의 두 배보다 짧으면".
-- **구조**: `WorkerSettings`는 `lease ≥ 2 × submitTimeout`이 아니면 거부한다. 결과 쓰기는 명령마다 핸들러를 포함한 트랜잭션 하나라서 batch-size에 비례한다. 큰 batch-size에서는 lease를 더 길게 잡아야 한다고 Javadoc에 적었다. 이 몫은 핸들러 속도에 달려 있어 설정 검증으로는 막지 못한다.
-- **확인**: 검사를 넣기 전에 그 행은 "예외가 없다"로 실패했다.
-
-### F26. TB 컨테이너가 listening 직후 들어온 TCP 접속에 panic한다 (완화. 열린 장애 O4를 원인까지 좁힘)
-
-- **깨지는 것**: TigerBeetle 0.17.9 컨테이너가 `listening on`을 찍고 2~130ms 뒤 `thread 1 panic: reached unreachable code`(exit 139)로 죽는다. 우리 클라이언트가 붙기 전이다. 테스트 클래스 하나가 통째로 `initializationError`로 실패한다. 2026-10-17에는 tigerbeetle 모듈 실행의 절반 이상에서 났다.
-- **재현과 원인 좁히기(2026-10-18, 픽스처와 같은 명령의 `docker run`)**:
-  - 포트를 공개하지 않고 띄우기만 하면 50번 중 0번이었다(단독 20번, 3개 동시 기동 30번).
-  - 포트를 공개(`-P`)하면 클라이언트가 없는데도 15번 중 2번 났다.
-  - 포트를 공개하지 않고, listening 직후 같은 네트워크 네임스페이스에서 `nc -z`로 TCP 접속만 했다 끊으면 30번 중 3번 났다.
-  - 같은 탐침을 3초 뒤에 하면 20번 중 0번이었다.
-  - 메모리 부족은 아니다. VM에 5.9GiB가 남아 있었고 dmesg에 OOM 기록이 없었다.
-  - 결론: listening 직후의 짧은 구간에 들어온 TCP 접속이 TB를 죽인다. 테스트에서 그 접속을 넣는 쪽은 Docker Desktop의 포트 공개 경로로 보인다. 우리 코드는 그 시점을 정할 수 없다. TB 쪽 버그로 보며, TB 소스로 확인하지는 않았다.
-- **구조(완화)**: `TigerBeetleContainer.start()`는 이번 시도의 로그에 `listening on`이 찍혔는데 기동이 실패하면 새 컨테이너로 다시 띄운다. 모두 3번 시도하므로 다시 띄우기는 최대 2번이다. 어느 단계가 죽음을 먼저 봤는지(Testcontainers의 기동 검사, 로그 대기, 1초 안정 확인)는 따지지 않는다. 처음 넣은 판정은 "안정 확인이 던진 예외"만 봤다. 그래서 listening 직후 바로 죽어 Testcontainers의 기동 검사가 먼저 보면 다시 띄우지 않았다(`aDeathSeenByTheStartupCheckIsRetried`로 재현). listening까지 못 간 실패(io_uring 등)는 다시 띄우지 않는다. 시도마다 로그에 `--- TB 시작 시도 n ---` 구분선이 들어가고, 다시 띄울 때마다 표준 오류에 `O4: …다시 띄운다(시도 n)`가 남는다. 프록시 구성(`ProxiedTigerBeetle`)의 TB는 포트를 공개하지 않는다. 클라이언트가 프록시로만 붙으므로 원인 경로 자체가 없다.
-- **재현 테스트**: `TigerBeetleContainerGuardTest` › `startRetriesWhenTheServerDiesRightAfterListening`(한 번 죽고 다음엔 사는 가짜 서버. 첫 시도의 panic과 둘째 시도 구분선이 로그에 있다), `aDeathSeenByTheStartupCheckIsRetried`(listening을 찍자마자 죽는 가짜 서버), `startFailsWhenServerDiesRightAfterListening`(매번 죽으면 "3번 시도"와 panic 로그로 실패).
-- **확인**: 시도 횟수를 1로 줄이는 대조군에서 두 테스트가 실패했다. 완화를 넣은 뒤 tigerbeetle 모듈을 5번 돌려 실패 0이었다. 다만 그 5번은 실제 TB의 재시도도 0번이었다(자연 발생 없음). 그래서 실제 panic에 대한 효과는 아직 관찰하지 못했다.
-
-### F27. 이미 TB에 보낸 멈춘 명령을 운영자가 "보내지 않음"으로 포기한다 (전체 리뷰에서 발견)
-
-- **깨지는 것**: HALTED는 접수 상태(PENDING)에서만 들어간다. 그런데 접수 상태에는 한 번 보냈다가 되돌린 명령(submit_count > 0)과 TB 결과를 받았는데 핸들러가 실패한 명령(known_result)도 있다. 이런 명령의 참조 예약 행이 사라지면 다음 claim에서 멈춘다. 운영자가 `abandonHalted`로 포기하면 PG는 SKIPPED(ABANDONED_BY_OPERATOR)가 되고, 핸들러는 "적용 안 됨"을 받는다. TB에서는 이미 확정됐을 수 있으므로 돈과 업무 상태가 어긋난다.
-- **재현**: `LedgerRelayContract` › 이미 TB에 보낸 뒤 멈춘 명령을 포기하려 하면 › `aReleasedCommandIsRefused`, `aCommandWithAKnownResultIsRefused`(메모리, PG DataSource, PG JPA).
-- **구조**: `CommandLifecycle.abandonHalted`는 `submitCount > 0`이거나 `knownResult`가 있으면 `IllegalStateException`("이미 TB에 보낸 적이 있어 포기할 수 없습니다")으로 거부한다. 이런 명령은 TB에서 이체를 확인한 뒤 사람이 정리한다. 운영자 공개 포트가 이 거부를 그대로 드러낸다.
-- **확인**: 넣기 전에 여섯 테스트가 "예외가 없다"로 실패했다.
-
-### F28. 예약이 지워진 뒤 같은 확정을 다시 접수하면 접수증 대신 "예약 없음"이 난다 (전체 리뷰에서 발견)
-
-- **깨지는 것**: `submit`이 참조 검사를 같은 commandId 판정보다 먼저 했다. 보관 작업은 끝난 지 N일 지난 명령을 지운다. 예약은 확정보다 먼저 끝나므로 먼저 지워질 수 있다. 그 뒤 앱이 응답을 놓친 확정을 같은 내용으로 다시 접수하면, 원래 접수증(`LedgerRelay.submit`의 약속) 대신 `ReservationNotFoundException`이 난다. 내용이 다른 재전송도 `CommandConflictException`이 아니라 "예약 없음"이 된다.
-- **재현**: `LedgerRelayContract` › 확정이 끝난 뒤 참조 예약 행이 사라진 상태에서 같은 확정을 다시 접수하면 › `resubmittingAFinishedPostAfterItsReservationIsGoneReturnsTheReceipt`, `resubmittingItWithOtherContentIsAConflict`.
-- **구조**: 순번을 받은 뒤 같은 commandId를 먼저 찾는다. 있으면 접수증이나 충돌로 끝내고 참조 검사는 하지 않는다. 경쟁 경로(`insertIfAbsent`가 다른 트랜잭션의 행을 돌려줌)는 그대로 해시를 비교한다.
-- **확인**: 바꾸기 전에 두 테스트가 `ReservationNotFoundException`으로 실패했다.
-
-### F29. 데이터가 어긋난 행 하나가 claim 트랜잭션 전체를 던져 릴레이가 멈춘다 (전체 리뷰에서 발견)
-
-- **깨지는 것**: claim은 후보마다 게이트와 상태 기계를 같은 트랜잭션 안에서 돌린다. 한 후보의 데이터가 규칙과 어긋나면 그 판단이 예외를 던진다. 예를 들어 참조 예약이 비어 있는 확정 행(DB 직접 수정)이 있으면 `Optional.orElseThrow`가 던진다. 그러면 claim 전체가 롤백되고 워커는 매 바퀴 같은 예외로 끝나, 모든 키가 멈춘다. "그 키만 막힌다"에 어긋난다.
-- **재현**: `LedgerRelayContract` › 데이터가 어긋난 행이 claim 후보가 되면 › `aMalformedRowIsHaltedAndOtherKeysKeepFlowing`. 다른 키의 pay-2는 잡히고 이상한 행은 멈춘 명령으로 실린다.
-- **구조**: `CommandLifecycle.claim`이 후보 하나의 판단 예외를 잡아 그 행을 HALTED로 주차한다. 판단은 순수 Java라 PG 트랜잭션은 멀쩡하다. 주차도 못 하면(저장소가 끝난 행을 후보로 낸 경우 등) 그 후보를 건너뛴다. 어느 쪽이든 이유(원래 예외)를 `ClaimBatch.problems`에 싣고, 워커가 `WorkerEvents.malformedCandidate`로 알린다(최종 리뷰에서 보강: 처음에는 예외를 버렸고 건너뛰는 경우는 아무 신호도 없었다. `ClaimIsolationTest`). 저장소가 행을 **읽는** 단계(결과 코드 저장 이름 해석)에서 나는 이상은 이 격리 밖이다. 그래서 `known_result`·`result_code`에 저장 이름 68개만 받는 CHECK를 둔다(`anUnknownResultCodeIsRefused`, `everyWireNameIsAccepted`). 그 밖의 이런 행을 막는 DB CHECK는 F31에 있다. 운영자는 멈춘 명령 목록으로 찾는다.
-- **확인**: 넣기 전에는 claim이 `NoSuchElementException`으로 끝나 테스트가 실패했다.
-
-### F30. 긴 commandId·순서 키가 접수를 SQL 오류로 깬다 (전체 리뷰에서 발견)
-
-- **깨지는 것**: `command_id`와 `ordering_key`는 b-tree 인덱스가 걸린 `text`다. PG는 약 2.7KB를 넘는 인덱스 항목을 거부한다. 앱이 그보다 긴 ID를 보내면 순번(`lockKeyAndTakeSeq`)의 upsert가 "index row size exceeds maximum"으로 끝나고 앱 트랜잭션 전체가 중단된다. F20과 같은 종류다.
-- **재현**: `LedgerCommandTest` › 규칙을 어긴 명령을 만들면 › "commandId가 UTF-8 513바이트면", "순서 키가 한글 171자(513바이트)면". 512바이트는 담긴다(`aCommandIdOf512BytesIsAccepted`). `isAcceptableId`도 513바이트면 false다.
-- **구조**: `LedgerCommand.MAX_ID_BYTES = 512`다. commandId, orderingKey, reservationCommandId에 적용하고, `isAcceptableId`도 같은 상한을 본다.
-- **확인**: 넣기 전에 세 테스트가 실패했다.
-
-### F31. 스키마가 ID 비교·이체 ID·행 불변식을 DB 쪽에서 지키지 않는다 (전체 리뷰에서 발견)
-
-- **깨지는 것**:
-  - **collation**: `command_id`의 유일 인덱스가 접수의 멱등성을 지킨다. 그런데 이 컬럼이 DB 기본 collation을 쓰면 문제가 된다. OS의 libc collation이 바뀌면(postgres 이미지의 Debian 판 변경, glibc 2.28류 업그레이드) text b-tree 인덱스가 조용히 어긋날 수 있다. 그러면 `ON CONFLICT (command_id)`가 있는 행을 못 찾아, 다시 보낸 접수가 새 이체 ID로 두 번째 행을 만들고 돈이 두 번 나간다.
-  - **이체 ID 중복**: `transfer_id`가 겹치면(생성기 버그) 두 번째 명령은 TB에서 `exists`를 받아 남의 이체를 자기 결과로 삼는다.
-  - **행 불변식**: 처리 중인데 lease 만료 시각이 없는 행은 영원히 다시 잡히지 않는다. 참조 예약이 없는 확정 행은 F29를 일으킨다. 운영 중 마이그레이션도 문제다. `ADD COLUMN` 뒤 `SELECT c.*`의 서버 준비 문장이 앱 트랜잭션 안에서 `0A000 cached plan must not change result type`으로 실패해, 그 앱 트랜잭션 전체가 중단된다.
-- **재현**: `JdbcCommandStoreTest` › jdbc 전용: 스키마가 지키는 것 › `idColumnsCompareByteForByte`(4), `aDuplicateTransferIdIsRefused`, `rowsThatBreakTheInvariantsAreRefused`(3), `findSurvivesAnAddedColumn`. 마지막 것은 앱 트랜잭션 안의 조회로 재현했다. 트랜잭션 밖에서는 pgjdbc가 스스로 다시 준비해 재현되지 않았다.
-- **구조**: ID 컬럼은 `COLLATE "C"`로 둔다. 이름 붙은 제약으로 `ledger_command_transfer_id_key UNIQUE`, `ledger_command_seq_check`, `ledger_command_reference_check`, `ledger_command_claimed_lease_check`, `ledger_command_skipped_reason_check`를 둔다. 질의는 공용 컬럼 목록(`JdbcCommandStore.COLUMNS`)을 쓴다. 계약 테스트의 행 빌더는 키마다 다른 이체 ID를 낸다(`TestTransferIds`).
-- **확인**: 넣기 전에 9건이 실패했다(collation 4, 이체 ID 1, CHECK 3, 컬럼 추가 1).
-
-### F32. claim 폴링 비용이 막힌 키 뒤의 백로그에 비례한다
-
-- **깨지는 것**: 옛 `lockDue`는 후보마다 "같은 키에 앞선 미완료가 있는가"를 찾았다(`NOT EXISTS`, 실행 계획에서는 Nested Loop Anti Join). 맨 앞이 backoff 중이거나 처리 중인 키 하나 뒤에 대기 명령 10만 건이 쌓이면, 폴링 한 번이 그 10만 건을 하나씩 확인한다. 앞선 미완료 찾기가 10만 번, 약 40만 페이지, 576~680ms였다(기준 0.2ms). 후보가 limit보다 적으면 `LIMIT`이 일찍 멈추지 못하고, 플래너는 대부분 통과한다고 잘못 추정했다. F19의 검사("Rows Removed by Filter")는 이 비용을 보지 못한다. 맨 앞이 backoff 중인 키가 많을 때도 같은 비례가 생긴다. TB 회복 직후 보낼 수 있는 맨 앞이 몰리면 접수 순서(id)로 정렬해야 한다. `FOR UPDATE`가 정렬과 `LIMIT` 사이에 끼어 상위 N개 정렬을 쓰지 못해, 실험에서 21ms가 걸리고 디스크 정렬로 넘어갔다.
-- **재현**: `LockDueBoundedWorkTest`의 세 테스트가 limit 128에서 실행 계획 맨 위 노드의 페이지를 1,000 이하로 본다. `aBacklogBehindABlockedKeyIsNotRead`(막힌 키 뒤 대기 2만 건 + 보낼 수 있는 키 100개), `headsWaitingForTheirRetryAreNotRead`(맨 앞이 1시간 backoff인 키 2만 개 + 100개), `manyReadyHeadsStopAtTheLimit`(끝난 이력 5만 건 뒤에 보낼 수 있는 맨 앞 2만 개). 측정은 `LockDueBacklogMeasurementTest`(`./gradlew :ledger-relay-jdbc:measurement`)의 네 장면이다.
-- **구조**:
-  - 후보 순서는 "보낼 수 있게 된 시각"이다. 접수 명령은 다음 시도 시각, 처리 중 명령은 lease 만료 시각이 그 시각이고, 같으면 접수 순서다. 포트 계약 `CommandStore.lockDue`가 정하고, 메모리와 PG 저장소가 같은 계약 테스트를 지난다. 같은 키 안의 순서는 맨 앞이 하나뿐이라 바뀌지 않는다.
-  - jdbc 어댑터는 `ledger_command.is_head`(키에서 지금 차례인 명령인가)와 `ready_at`(보낼 시각, 생성 컬럼)을 둔다.
-  - 인덱스는 둘이다. `ledger_command_ready ON (ready_at, id) WHERE is_head AND state IN ('PENDING','CLAIMED')`는 claim이 읽는다. 유일 `ledger_command_one_head ON (ordering_key) WHERE is_head`는 키당 맨 앞 둘을 막는다. `ledger_command_due`는 지웠다.
-  - 넣을 때 키에 맨 앞이 없으면 새 명령이 맨 앞이 된다. 명령이 끝나도 표시는 그대로 두고, 다음 claim이 그 키 행을 잡아 다음 미완료로 넘긴다(F33). 처음에는 완료가 키 행의 미완료 개수를 고치며 넘겼으나, 그 잠금이 핸들러와 교착해 바꿨다.
-  - DB를 직접 고친 뒤에는 `rebuild-heads.sql`로 다시 계산한다(docs/development.md).
-- **확인**:
-  - 옛 질의에서 페이지 테스트 둘이 실패했다(2만 건 백로그 61,097페이지·126ms, backoff 맨 앞 2만 개 1,447페이지).
-  - 새 순서 계약 테스트 둘(`aRetriedCommandQueuesAtItsRetryTime`, `anExpiredLeaseQueuesAtItsExpiry`)은 메모리와 PG에서 모두 실패했다.
-  - 변이 확인:
-    - `is_head` 조건을 빼면 jdbc 17건이 실패한다.
-    - `ORDER BY c.id`로 바꾸면 순서 계약 2건과 회복 몰림 페이지 테스트(1,993페이지)가 실패한다.
-  - 모든 계약 테스트 뒤에 표시가 행과 맞는지 검사한다(`PostgresStorage.assertHeadsConsistent`).
-  - 측정(limit 128, 10만 건, 세 번 실행): 기준 112페이지 0.12ms, 백로그 10만 건 121페이지 0.13ms(옛 576~680ms), backoff 맨 앞 10만 개 201페이지 0.10ms, 보낼 수 있는 맨 앞 10만 개 194페이지 0.11ms.
-- **남은 것**:
-  - DB를 직접 고치고 `rebuild-heads.sql`을 돌리지 않으면 그 키가 후보에서 빠지거나 맨 앞이 아닌 명령이 나갈 수 있다. 스크립트는 접수·claim과 겹치지 않게 `ledger_ordering_key`를 표 잠금한다(`HeadBookkeepingTest.rebuildWaitsForAnOpenSubmit`).
-  - 통계가 오래됐거나 일반 계획(generic plan)으로 바뀌어 플래너가 `ledger_command_ready` 대신 다른 인덱스와 정렬을 고르는 경우는 테스트하지 않았다.
-
-### F33. 결과를 쓰는 트랜잭션이 키 행을 쥔 채 핸들러를 돌려 앱의 접수와 교착한다
-
-- **깨지는 것**: 처음 구현에서 완료는 `compareAndSet` 안에서 그 키의 행(`ledger_ordering_key`)을 고쳐 잠갔다. 그 잠금을 커밋까지 쥔 채 핸들러를 불렀다. 흔한 앱 코드가 반대 순서로 잡는다. 앱은 주문 행을 고친 뒤 같은 트랜잭션에서 그 주문의 키에 접수한다(접수는 순번을 받으며 키 행을 잡는다). 핸들러는 결과를 받아 같은 주문 행을 고친다. 앱은 키 행을, 핸들러는 주문 행을 기다려 PG가 한쪽을 끊는다(40P01). 앱 쪽이 끊기면 사용자 요청이 간헐적으로 실패한다. 완료 쪽이 끊기면 핸들러 실패로 backoff 뒤 다시 돈다. 또 어떤 키에 접수를 연 채 오래 머무는 앱 트랜잭션이 있으면 그 키의 완료가 기다렸고, 워커는 결과를 한 건씩 쓰므로 뒤의 다른 키 결과도 함께 멈췄다. 이 잠금은 `compareAndSet`이라는 이름 뒤에 숨어 core 코드에서 보이지 않았다.
-- **재현**: `HeadRaceTest` › 앱과 핸들러가 같은 주문 행을 고치면 › `anAppThatMarksTheOrderThenSubmitsDoesNotDeadlockWithTheHandler`. `KeyLockFreeStoreTest`(다른 트랜잭션이 키 행을 쥐어도 저장소의 넣기·찾기·후보 잠그기·결과 쓰기가 기다리지 않는다). `HeadStatementRaceTest`(문장 사이의 경쟁 셋).
-- **구조**:
-  - 포트를 나눴다. 키 행을 잡는 호출은 `OrderingKeys`(`lockKeyAndTakeSeq`, `passOnFinishedHeads`)에만 있다. `CommandStore`는 키 행을 잡지 않는다. jdbc에서는 `JdbcOrderingKeys`와 `JdbcCommandStore`가 나눠 맡는다.
-  - 핸들러를 부르는 워커 쓰기는 `WorkerWrites`로 뗐고, 이 클래스는 `OrderingKeys`를 받지 않는다. `ArchitectureTest.theHandlerPathCannotLockAKey`가 "`onCompleted`를 부르는 클래스는 `OrderingKeys`에 의존하지 않는다"를 지킨다.
-  - 완료는 맨 앞 표시를 끝난 명령에 남긴다. claim이 후보를 잠그기 전에 끝난 맨 앞의 키 행을 `FOR UPDATE SKIP LOCKED`로 잡아 다음 미완료로 넘긴다. 앱이 쥔 키는 기다리지 않고 다음 claim으로 미룬다. 잡은 키 행은 값을 그대로 두고 갱신한다. 그래야 그보다 앞서 스냅숏을 잡은 REPEATABLE READ 이상의 앱이 그 키에서 순번을 받을 때 40001로 끝나 재시도한다. 그러지 않으면 그 앱은 옛 스냅숏에서 맨 앞이 있다고 보고 새 명령을 맨 앞으로 세우지 않아 그 키가 영원히 나가지 않는다.
-  - 맨 앞 표시를 켜는 두 문장(접수의 `MARK_FIRST_UNFINISHED`, 넘기기의 `MARK_NEXT_HEADS`)은 그 키에 맨 앞이 이미 있으면 아무것도 하지 않는다. READ COMMITTED는 문장마다 스냅숏을 새로 잡으므로, 접수가 표시를 끈 뒤 같은 키의 완료가 커밋되면 맨 앞이 둘이 되어 유일 인덱스가 접수를 깨뜨렸다(23505). 넘기기 쪽에도 같은 틈이 있었다. 넘기기 질의가 스냅숏을 잡은 뒤 다른 워커가 같은 키를 넘기고 커밋하면, 늦은 질의는 그 키 행을 그대로 잡는다(`SKIP LOCKED`는 키 행만 최신으로 다시 확인한다). 그다음 켜기가 결과를 쓰는 중인 새 맨 앞 행을 고치려 기다리면 핸들러와 교착했고, 그사이 새 맨 앞이 끝나면 맨 앞이 둘이 되어 claim이 깨졌다. 끝난 맨 앞 행까지 잠그는 방법(`FOR UPDATE OF k, c`)은 쓰지 않았다. 누가 그 행을 쥐면(예: 예약 행, F13) 키 전체의 넘기기가 미뤄지고, 계약 테스트 `aLockedReservationIsStillReported`가 깨졌다. 셋 다 리뷰어가 PG 18.6에서 재현했고, `HeadStatementRaceTest`가 문장 사이에 상대를 커밋시켜 본다.
-  - `unfinished_count`를 지웠다. 넘길 키는 `ledger_command_finished_head`(끝났는데 맨 앞인 명령)에서 찾는다. 키마다 다음 미완료를 따로 `min(seq)`로 찾는다. 키들을 묶은 `GROUP BY`는 막힌 키 뒤의 백로그를 모두 읽었다(2만 건에 564페이지, 지금 30페이지).
-  - 트랜잭션마다 잡는 행은 docs/development.md "트랜잭션과 잠금"에 표로 둔다.
-- **확인**:
-  - 고치기 전: 교착 테스트가 `deadlock detected`로 끝났고(완료 쪽이 끊겨 핸들러 실패), `KeyLockFreeStoreTest`의 결과 쓰기와 넣기가 2초 안에 끝나지 않았다.
-  - 변이 확인:
-    - 결과 쓰기에 키 행 잠금을 되살리면 6건이 실패한다(교착, 기다리지 않음 4, 저장소 1).
-    - 넘기기를 비우면 24건이 실패한다.
-    - 키 행 갱신을 빼면 RR·SERIALIZABLE 스냅숏 테스트 2건이 실패한다.
-    - `SKIP LOCKED`를 빼면 "앱이 쥔 키만 미룬다" 테스트가 실패한다.
-    - `WorkerWrites`에 `OrderingKeys` 필드를 넣으면 ArchUnit 규칙이 실패한다.
-    - `ledger_command_finished_head`를 지우면 넘기기 페이지 테스트가 실패한다.
-    - 접수의 켜기에서 "맨 앞이 이미 있으면" 조건을 빼면 `HeadStatementRaceTest`의 접수 경쟁이 23505로 실패한다. 넘기기의 켜기에서 빼면 늦은 넘기기 두 테스트가 실패한다(기다림, 23505).
-  - 측정(limit 128): 끝난 이력 5만 건 뒤 끝난 맨 앞 2만 개에서 넘길 키를 잠그는 데 519페이지, 0.19ms.
-- **남은 것**:
-  - 핸들러 안에서 접수하면 그 결과 쓰기 트랜잭션이 키 행을 잡는다. 접수한 뒤 주문 행을 고치는 핸들러는 "주문 행 → 접수" 앱과 교착할 수 있다. 막지 않고 docs/development.md "트랜잭션과 잠금"에 순서(주문 행을 먼저)를 적는다. 예약이 적용되면 확정을 접수하는 핸들러가 정당한 쓰임이라서다.
-  - 앱 트랜잭션끼리 여러 키를 서로 다른 순서로 접수하면 키 행끼리 교착한다. 이것은 02b부터 있던 성질이다(4절).
-  - REPEATABLE READ 이상의 앱은 claim의 넘기기와 겹친 접수에서 40001을 받을 수 있다. 앱은 이미 같은 키의 동시 접수에서 이 실패를 재시도해야 한다(4절).
-  - 앱이 키 행을 오래 쥐면 그 키의 다음 명령은 그 앱이 커밋할 때까지 나가지 않는다. 다른 키는 영향이 없다.
-
-### F34. 워커의 in-flight 슬롯이 새거나, 설정의 상한과 다른 슬롯으로 돈다
-
-- **깨지는 것**:
-  - `LedgerClient.submit`이 future 대신 `null`을 돌려주면, 그 배치의 슬롯을 future에 맡긴 직후 `NullPointerException`이 나 슬롯이 영영 돌아오지 않았다. 몇 번 반복되면 슬롯이 바닥나 그 프로세스의 claim이 멈춘다.
-  - `RelayWorker`는 `WorkerSettings.maxInFlight`와 `InFlightLimit`을 따로 받았다. 둘이 다르면 설정을 바꿔도 실제 동시 요청 수가 바뀌지 않는다.
-- **재현**: `RelayWorkerTest` › TB 클라이언트가 future 대신 null을 주면 › `aNullReplyGivesTheSlotsBackAndReleasesTheBatch`. 설정과 슬롯이 어긋나면 › `aWorkerRefusesSlotsThatDisagreeWithMaxInFlight`.
-- **구조**: `null`은 보내는 자리에서 던진 실패와 같은 경로(알리고, 되돌리고, 슬롯 반납)를 탄다. `InFlightLimit`은 만든 슬롯 수(`capacity()`)를 기억하고, `RelayWorker`는 그것이 `maxInFlight`와 다르면 만들어지지 않는다. Spring 자동 설정은 같은 설정값에서 슬롯을 만든다(`LedgerRelayAutoConfigurationTest.slotsFollowMaxInFlight`).
-- **확인**: 고치기 전 null 장은 `NullPointerException`으로, 불일치 장은 "거부가 없음"으로 실패했다. 자동 설정에서 슬롯을 1024로 고정하는 변이는 `slotsFollowMaxInFlight`가 잡는다.
-
-### F35. 핸들러 실패를 기록하는 쓰기마저 실패하면 핸들러 예외가 사라진다
-
-- **깨지는 것**: 핸들러가 던지면 그 트랜잭션을 롤백하고 새 트랜잭션에 "받은 결과와 핸들러 실패"를 남긴다. 이 두 번째 쓰기가 DB 오류로 실패하면 워커는 DB 오류만 받았다. 처음 원인인 핸들러 예외는 어디에도 남지 않아 운영자가 핸들러 버그를 볼 수 없었다.
-- **재현**: `RelayWorkerTest` › 핸들러가 던지고 그 기록마저 실패하면 › `theHandlersFailureSurvivesAFailedRecord`.
-- **구조**: 두 번째 쓰기의 예외에 핸들러 예외를 `addSuppressed`로 실어 던진다(`WorkerWrites.finish`). 워커 이벤트 `writeFailed`가 둘을 함께 받는다.
-- **확인**: 고치기 전에는 suppressed가 비어 실패했다.
-
-### F36. TB가 끊기면 health가 느려져 앱이 서비스에서 빠진다
-
-- **깨지는 것**: 첫 health는 요청마다 TB에 조회를 보내고 1초까지 기다렸고, 대기 명령을 모두 셌다. TB가 끊기면 health 한 번이 1초를 넘는다. 오케스트레이터의 probe timeout(Kubernetes 기본 1초)에 걸려 앱이 서비스에서 빠지거나 재시작된다. 그러면 접수까지 멈춘다. TB 없이도 접수를 받는다는 이 라이브러리의 요점과 정반대다. 장애가 길어지면 대기가 커져 health가 더 느려지고, 기다리다 끝난 조회는 TB 클라이언트에 계속 쌓였다.
-- **재현**: `LedgerRelayHealthIndicatorTest` › `healthDoesNotWaitForASilentLedger`, `aSilentLedgerIsProbedOnceAtATime`. `LockDueBoundedWorkTest` › 대기를 세면 › `countingAHugeBacklogReadsABoundedNumberOfPages`.
-- **구조**: TB 확인은 기다리지 않는다. 조회를 한 번에 하나만 보내고, 마지막 답이 5초 안이면 UP이다. 대기 수는 1,000까지만 세고(`Backlog.countsCapped`), 가장 오래된 대기는 새 인덱스 `ledger_command_waiting (id) WHERE state IN ('PENDING','CLAIMED')`의 첫 항목에서 읽는다.
-- **확인**: 고치기 전에는 TB가 답하지 않을 때 health 한 번이 probe 시간만큼 걸렸고, 요청 20번에 조회 20개가 쌓였다. 대기 5만 건에서 세는 질의가 2,856페이지를 읽었다. 상한 없는 세기로 되돌리는 변이는 대기 10만 건에서 7,191페이지로 실패한다(상한 2,500).
-
-### F37. 샘플 앱 두 대가 빈 DB에 동시에 뜨면 한쪽이 스키마를 만들다 죽는다 (샘플 쇼핑몰)
-
-- **깨지는 것**: compose는 같은 DB를 쓰는 앱 둘을 함께 띄운다. 둘 다 "표가 없으면 만든다"를 하면 같은 순간에 `CREATE TABLE`이 겹친다. 늦은 쪽이 `duplicate key value violates unique constraint "pg_type_typname_nsp_index"`(23505)로 실패해 기동하지 못한다. 저장소를 처음 받은 사람이 `docker compose up`을 했을 때 인스턴스 하나가 죽어 있는 장면이 된다(반목표 "처음 띄울 때 실패").
-- **재현**: `ShopBootstrapTest` › 빈 DB에서 › `twoInstancesStartingTogetherApplyTheSchemaOnce`. 빈 database에 두 스레드가 함께 `ShopSchema.apply`를 부른다.
-- **구조**: `ShopSchema.apply`는 한 트랜잭션에서 `pg_advisory_xact_lock(764)`를 잡은 뒤, `shop_order`가 없을 때만 라이브러리 `schema.sql`과 `shop-schema.sql`을 적용한다. 늦은 쪽은 앞쪽이 커밋할 때까지 lock에서 기다렸다가 표가 있는 것을 보고 지나간다. 적용은 `SmartInitializingSingleton`에서 하므로 워커 루프가 시작하기 전에 끝난다. 라이브러리는 여전히 스키마를 자동 적용하지 않는다. 이것은 샘플 앱만의 편의다.
-- **확인**: lock 줄을 지운 대조군에서 위 테스트가 5번 중 5번 23505로 실패했다.
-
-### F38. 결제 버튼을 두 번 누르면 주문이 둘 생기고 돈이 두 번 묶인다 (샘플 쇼핑몰)
-
-- **깨지는 것**: 같은 `Idempotency-Key`로 결제 요청 둘이 동시에 온다. "키로 찾아보고 없으면 넣는다"로 짜면 두 트랜잭션이 모두 "없다"를 보고 둘 다 넣으려 한다. 유일 제약이 있으면 늦은 쪽이 23505로 500을 받고(사용자는 결제가 실패했다고 본다), 유일 제약이 없으면 주문 둘과 예약 둘이 생겨 구매자 돈이 두 번 묶인다. 라이브러리의 멱등성(같은 commandId는 한 번)은 이것을 막지 못한다. 두 요청이 서로 다른 주문, 다른 commandId를 만들기 때문이다.
-- **재현**: `OrderFlowTest` › 결제하면 › `aDoubleClickMakesOneOrderAndOneReservation`(두 스레드가 같은 키로 함께 결제), HTTP로 부르면 › `aRepeatedRequestReturnsTheSameOrder`.
-- **구조**: `shop_order.idempotency_key`에 유일 제약을 두고 `INSERT … ON CONFLICT (idempotency_key) DO NOTHING RETURNING`으로 넣는다. 늦은 쪽은 앞 트랜잭션이 끝날 때까지 유일 인덱스에서 기다렸다가 아무것도 넣지 않는다. 이어서 키로 다시 읽는다. READ COMMITTED는 문장마다 스냅숏을 새로 잡으므로 앞쪽이 커밋한 주문이 보인다. 같은 키에 구매자나 상품이 다르면 422로 거부한다. 예약은 새로 넣은 쪽만 접수한다.
-- **확인**: `ON CONFLICT DO NOTHING`을 지운 대조군에서 4건이 실패했다(더블 클릭, 다른 상품 거부, HTTP 둘).
-
-### F39. TB 클라이언트에 호스트 이름 주소를 주면 앱이 기동하지 못한다 (샘플 쇼핑몰)
-
-- **깨지는 것**: TB Java 클라이언트(0.17.9)는 `IPv4:포트`만 받는다. compose 안에서 TB 앞의 Toxiproxy는 `toxiproxy:3001`처럼 이름으로만 찾을 수 있다. 이 값을 그대로 넘기면 `Client`를 만드는 순간 `Replica addresses format is invalid`로 실패해 앱이 뜨지 않는다.
-- **재현**: `ShopBootstrapTest` › TB 주소를 정하면 › `theClientRefusesAHostName`(TB의 동작을 고정하는 학습 테스트), `aHostNameBecomesAnIpv4Address`.
-- **구조**: 샘플 앱이 `shop.tigerbeetle.address`를 기동할 때 IPv4로 바꿔 `Client` 빈을 직접 만든다(`TigerBeetleClientConfig`). 라이브러리 자동 설정은 앱이 준 `Client`를 쓴다. 라이브러리의 `ledger-relay.tigerbeetle.addresses`도 같은 제약을 받으므로 그 설정에는 IP를 쓴다(docs/development.md).
-- **확인**: `localhost:<포트>`로 클라이언트를 만들면 위 메시지로 실패하고, 바꾼 `127.0.0.1:<포트>`로는 조회가 된다(2026-10-18, 테스트 컨테이너).
-
-### F40. health를 5초보다 드물게 부르면 TB가 멀쩡해도 TB DOWN으로 알린다 (라이브러리)
-
-- **깨지는 것**: F36의 health는 "TB의 마지막 답이 지금부터 5초 안인가"로 판정했다. 그런데 확인 조회는 health를 부를 때만 보낸다. 그래서 health를 5초보다 드물게 부르면, 앞 확인의 답은 늘 5초보다 오래됐고 새 확인의 답은 아직 오지 않아 TB가 멀쩡해도 늘 `ledger: DOWN`이다. Kubernetes probe의 기본 간격은 10초다. 운영자는 TB가 늘 끊겨 있다고 보게 되고, 진짜 장애와 구분할 수 없다. 샘플 앱을 5초 간격 curl로 지켜보다 찾았다(1초 간격이면 UP, 6초 간격이면 계속 DOWN).
-- **재현**: `LedgerRelayHealthIndicatorTest` › `aLedgerThatAnswersIsUpEvenWhenHealthIsCalledRarely`. TB가 조금 늦게 답하는 가짜(`FakeLedger.answerHeldLookups`)와 시계를 돌리는 테스트로, 10초 뒤 health를 부른다.
-- **구조**: 판정을 시각이 아니라 확인의 결과로 한다. 마지막으로 끝난 확인이 성공했고, 가 있는 확인이 `ledgerStaleAfter`(5초)보다 오래 답을 기다리지 않으면 UP이다. F36의 성질은 그대로다. health는 기다리지 않고, 조회는 한 번에 하나만 보낸다. 답 없는 확인이 5초를 넘으면 DOWN이다(`aProbeUnansweredForTooLongIsDown`).
-- **확인**: 고치기 전 규칙에서 위 테스트가 `ledger: DOWN`으로 실패했다. 기존 health 테스트 5건은 그대로 통과한다.
-
-### F41. 앱을 컨테이너로 띄우면 TB 클라이언트가 io_uring을 못 써 앱이 기동하지 못한다 (샘플 쇼핑몰)
-
-- **깨지는 것**: TB 서버만 io_uring을 쓰는 줄 알기 쉽다. 그런데 TB Java 클라이언트(0.17.9)도 네이티브 라이브러리 안에서 io_uring을 쓴다. Docker 기본 seccomp 프로필로 띄운 앱 컨테이너는 `Client`를 만드는 순간 `error(io): io_uring is not available` → `thread 7 panic: attempt to unwrap error: PermissionDenied`로 JVM째 죽는다(exit 133). 예외가 아니라 panic이라 앱이 잡을 수도 없다. compose의 `restart`가 다시 띄워도 매번 같다. 처음 compose를 띄웠을 때 앱 둘이 모두 이렇게 재시작을 반복했다. 테스트에서는 앱이 호스트 JVM이라 드러나지 않았다.
-- **재현**: `compose.yaml`의 앱 서비스에서 `security_opt`를 지우고 `docker compose up`. 끝-끝 테스트 `ShopComposeTest`가 기동 대기(`/actuator/health`)에서 실패한다.
-- **구조**: 앱 컨테이너에도 `security_opt: [seccomp=unconfined]`를 준다(TB 서버 컨테이너와 같다). 운영에서는 unconfined 대신 io_uring 시스템 호출만 더 허용한 seccomp 프로필을 쓰는 편이 낫다. docs/development.md에 적었다.
-- **확인**: 옵션 없이 띄운 앱 둘이 위 panic으로 재시작을 반복했고, 옵션을 준 뒤 둘 다 떠 health가 UP이었다(2026-10-18, Docker Desktop).
-
-### F42. 앱 둘이 같은 이미지를 동시에 빌드해 `docker compose up`이 가끔 실패한다 (샘플 쇼핑몰)
-
-- **깨지는 것**: 처음 compose는 `shop-a`와 `shop-b`에 모두 `build`와 같은 `image` 이름을 줬다. `docker compose up --build`는 둘을 동시에 빌드하고, 늦게 끝난 쪽이 이미지 이름을 붙이다 `image "docker.io/library/ledger-relay-shop:local": already exists`로 실패해 `up` 전체가 끝난다. 빌드 캐시 상태에 따라 날 때도 안 날 때도 있다. 처음 받은 사람이 띄울 때 나면 데모가 시작조차 하지 않는다(반목표).
-- **재현**: 전체 `./gradlew check --rerun-tasks`에서 `ShopComposeTest`가 `compose up -d --build` 단계에서 위 메시지로 실패했다(2026-10-18). 그전 두 번은 통과했다.
-- **구조**: 이미지는 `shop-a`만 빌드한다. `shop-b`는 같은 이미지 이름을 쓰고 `pull_policy: never`라 레지스트리에서 찾지 않는다. compose는 컨테이너를 만들기 전에 빌드를 끝내므로 `shop-b`는 `shop-a`가 빌드한 이미지로 뜬다.
-- **확인**: 고친 뒤 이미지를 지운 상태(처음 띄우는 상황)와 캐시가 있는 상태에서 `ShopComposeTest`를 차례로 돌려 둘 다 통과했다.
-
-### F43. 화면의 대사가 늦게 끝난 명령을 영영 건너뛰어 정합성 칸이 일부만 보고 초록이 된다
-
-- **깨지는 것**: 처음 정합성 칸은 대사를 "지난 위치부터 이어서" 했다. 라이브러리의 대사는 끝난 명령을 행 순서(id)로 읽는다. 그런데 명령은 행 순서대로 끝나지 않는다. 멈췄다 포기된 확정과 그 뒤 예약(장면 3), 워커 둘의 묶음, 늦게 커밋된 트랜잭션이 그렇다. 위치가 아직 안 끝난 행을 지나가면, 그 행은 끝난 뒤에도 다시 읽히지 않는다. 그래서 장면 3의 바로 그 명령들이 대사에서 빠졌다. 거기서 어긋남이 있어도 칸은 초록이었다. 반목표 "가짜 숫자 없음"에 어긋난다.
-- **재현**: `DemoScenarioTest` › 대사를 돌리면 › `theRunningReconciliationCountsCommandsThatFinishLate`. 잘못된 확정이 멈춘 동안 다른 주문이 끝나고, 그 뒤 포기한다. 고치기 전에는 끝난 명령 22건 중 18건만 대사했다.
-- **구조**: `LedgerSnapshot`이 갱신마다 처음부터 전부 대사하고 누계를 새로 쓴다(5만 건까지. 데모 크기에서는 늘 전부다). 운영 규모의 대사는 나중에 "아직 안 끝난 가장 작은 id"를 넘지 않는 위치로 다시 설계한다(열린 장애 목록의 대사 커서와 같은 문제).
-- **확인**: 위 테스트가 고치기 전 `expected: 22L but was: 18L`로 실패했고, 고친 뒤 통과한다.
-
-### F44. `docker compose down` 뒤 다시 띄우면 원장만 남아 화면에 거짓 중복 이체가 보인다
-
-- **깨지는 것**: 처음 compose는 TB 데이터를 이름 붙은 볼륨(`tigerbeetle-data`)에 두고, PG는 이미지의 이름 없는 볼륨을 썼다. 가장 흔한 끄기인 `docker compose down`(-v 없이)은 컨테이너와 함께 PG 데이터를 버리지만 TB 볼륨은 남긴다. 다음 `up`에서 PG는 비었는데 원장은 옛 이체를 그대로 갖는다. 주문 id가 1부터 다시 시작해 옛 확정(user_data = 옛 주문 id)이 새 주문과 엇갈린다. 화면의 중복 이체가 0보다 커지고, 가맹점 잔액과 결제 완료 합이 달라 정합성 칸이 계속 빨강이 된다. 돈이 정확히 한 번 움직인다는 것을 보여 주려는 데모가 거꾸로 보인다.
-- **재현**: `ComposeFileTest` › `neitherStoreOutlivesTheOther`(compose.yaml에 맨 위 `volumes:`가 없다). 손으로는 결제·출고 → `docker compose down` → `up`.
-- **구조**: TB도 이름 붙은 볼륨을 쓰지 않는다. 데이터 파일은 컨테이너 안에 있다. PG와 TB는 컨테이너와 함께 남고(Ctrl-C 뒤 `up`, `stop`/`start`, `restart: on-failure`) 함께 사라진다(`down`).
-- **확인**: 위 테스트가 고치기 전 실패했다. 고친 뒤 결제·출고 → `down` → `up`에서 둘 다 비고 정합성이 ok(대사 0/0, 중복 0)였다(2026-10-18). 확인 중 한 번은 `down` 뒤 옛 데이터가 그대로 보였는데, 다시 해 보면 재현되지 않아 원인을 모른다.
-
-## 2. 열린 장애
-
-| # | 장애 | 막을 곳 |
+- **What breaks**: PG `text` does not accept the 0x00 byte. If a commandId, ordering key or reservation contains U+0000, the acceptance INSERT ends with an SQL error, and in PG the whole app transaction is aborted. A lone surrogate (for example `\uD800`) becomes `?` in `getBytes(UTF_8)`. So `"order-\uD800"` and `"order-?"` get the same content hash, and different commands can be accepted as the same content (G7).
+- **Reproduction**: `LedgerCommandTest` › `InvalidCommands`, the rows for U+0000 in the commandId, a lone surrogate in the ordering key, and U+0000 in a post's reservation. `aTransferWithAPairedSurrogateIsAccepted` checks that a paired surrogate (emoji) is allowed.
+- **Status and abandon paths (found in review)**: blocking only acceptance leaves `status(commandId)` and `abandonHalted(commandId)` sending the same string to PG as is. `status` joins the app transaction, so an app transaction that looks up an external key (such as an idempotency key from an HTTP path) is broken entirely by a single U+0000. pgjdbc sends a lone surrogate as `?`, so `status("pay-\uD800")` returns the state of a different command, `pay-?`, and `abandonHalted` tries to abandon a different command. The commandId is not part of the hash, so the risk here is not a hash collision but matching another command.
+- **Reproduction**: `LedgerCommandTest` › `InvalidCommands`, the three rows above. `LedgerRelayContract` › `aMalformedIdIsNotFoundAndTheAppTransactionStaysUsable`, `aLoneSurrogateDoesNotMatchAnotherCommand`, `aLoneSurrogateIdIsRefusedAsUnknown`. They cannot fail on the in-memory store and fail only on PG (both the DataSource and the JPA contract).
+- **Structure**: `requireWellFormed` in the `LedgerCommand` constructor checks the three string fields and refuses with `InvalidCommandException`. The same check is exposed as the public static method `LedgerCommand.isAcceptableId`; for an id that could never be accepted, the service's `status` returns "not found" without asking the DB, and `abandonHalted` returns "a command that was never accepted". The decision lives in core, so the store never receives such values.
+- **Verification**: before the check was added, the three constructor rows failed with "no exception", and the three contract tests failed 6 times on PG (SQL error, the state of `pay-?`, the HALTED check of a different command).
+
+### F21. Returning slots right after the submit-timeout makes requests pile up without end while TB is down
+
+- **What breaks**: the TB Java client has no timeout. Even if the worker stops waiting at the submit-timeout, the request stays in the client and is resent until TB comes back. If the in-flight slots are returned at that point, the worker claims and sends again in the next cycle. While TB is down, requests pile up in the client without end, and the moment TB comes back they all arrive at once.
+- **Reproduction**: `RelayWorkerTest` › `aTimedOutRequestKeepsItsSlotsUntilItEnds`. With 4 slots, after two transfers are sent and time out, 2 slots must remain, and only after the held replies complete does it return to 4. `noSlotsMeansNoClaim` pins that slots are taken before claiming. Without slots there is no claim, so the commands stay accepted without a lease.
+- **Structure**: `RelayWorker` takes batch-size slots before claiming. The share it does not send is returned at once, and the share it sent is returned only in `whenComplete` of the request future.
+- **Verification**: two control experiments. Moving the return from `whenComplete` to "right after sending" failed `aTimedOutRequestKeepsItsSlotsUntilItEnds` and `unusedSlotsAreGivenBackAtOnce`. Turning off the slot check before claiming failed `noSlotsMeansNoClaim`.
+
+### F22. If the number of results differs from the request, commands end with someone else's result
+
+- **What breaks**: the worker pairs TB results with commands in request order. If one result is missing or extra, the later commands receive the result of an earlier command. A successful transfer ends as rejected, or the other way around. The handler processes the business with the wrong result.
+- **Reproduction**: `RelayWorkerTest` › `aReplyWithTheWrongCountWritesNothing`. When one result comes back for two transfers, it writes nothing, releases both, and reports `malformedReply:2:1`.
+- **Structure**: `RelayWorker` compares the number of results with the number of requests. If they differ, it releases all of them. A resend uses the same transfer ids, so anything TB already recorded comes back as `exists`. The adapter does not check the count; the decision lives in core.
+- **Verification**: before the handling was added, `results.get(i)` went out of range and the cycle ended with an exception (test failure).
+
+### F23. A command whose reply was lost is resent with a new transfer id and money moves twice (closes open failure O3)
+
+- **What breaks**: TB executes each id only once. So if the transfer id changes when the same command is resent, TB records it as a new transfer. If the first request, whose reply was lost, was already recorded, the money goes out twice.
+- **Reproduction**: `RelayOnTigerBeetleTest` › `aLostReplyIsRetriedWithTheSameTransferIdAndMovesMoneyOnce`. The first request is recorded in the real TB, but the reply never reaches the worker (test double `ReplyLosingLedger`). When the worker releases it on timeout and resends after the backoff, both requests have the same transfer id, the second TB result is `Exists`, and only 500 moves. A cut connection (`aCutConnectionIsRetriedAfterItIsRestored`, Toxiproxy) also ends as applied after it is restored, and money moves only once.
+- **Structure**: the transfer id is issued by the generator at acceptance and stored in the row (`transfer_id`). The worker only sends the id of the claimed row and never creates a new one. A resend of the same id to TB comes back as `exists` (same body, A1·A3) or `id_already_failed` (transient failure, PRIOR_FAILURE report).
+- **Verification**: as a control experiment, giving the second request a new transfer id moved 1000 and the test failed.
+
+### F24. A store error on one command while writing results discards the other results of the same batch (found in review)
+
+- **What breaks**: after receiving the TB results, the worker writes each command separately. If the write of one command ends with a store exception (lost DB connection and so on) and that stops the whole cycle, the later commands cannot keep the results they received and stay in flight until the lease ends. When the lease ends they are resent with the same transfer ids. A rejection TB remembers (`exceeds_credits` and so on) then comes back as `id_already_failed`, loses its original reason and ends as PRIOR_FAILURE. The outcome that F3 and F4 were meant to prevent happens by another route.
+- **Reproduction**: `RelayWorkerTest` › `theOtherResultsOfTheBatchAreStillWritten`. The batch is [pay-1 Created, pay-2 ExceedsCredits], and the store throws once when the result of pay-1 is written. pay-2 must become rejected with `ExceedsCredits`, and `writeFailed:pay-1` must be reported.
+- **Structure**: `RelayWorker.attempt` catches the `RuntimeException` of each write (recording the submission, skipping, the result, releasing), reports it through `WorkerEvents.writeFailed`, and moves on to the next command. The failed command is claimed again with the same transfer id after the lease expires. An Error is not swallowed.
+- **Verification**: before the fix, the cycle ended with an exception and the test failed.
+
+### F25. The lease is shorter than the wait for the reply, so another worker resends the same command (found in review)
+
+- **What breaks**: the lease starts at the claim. So it has to cover recording the submission, waiting for the reply (submit-timeout), and writing the result of each command. If the lease is shorter than the submit-timeout, another worker claims and sends the same command again while the first worker is waiting for the reply. Fencing keeps money from moving twice. But the second request gets `id_already_failed` for a rejection TB remembers, and the first worker's real result write is blocked with 0 rows, so the original reason is lost.
+- **Reproduction**: `WorkerSettingsTest` › `Invalid`, the row where the lease is shorter than twice the submit-timeout.
+- **Structure**: `WorkerSettings` refuses settings unless `lease ≥ 2 × submitTimeout`. Writing the results is one transaction per command, including the handler, so it grows with batch-size. The Javadoc says a large batch-size needs a longer lease. This share depends on the handler's speed, so a settings check cannot prevent it.
+- **Verification**: before the check was added, that row failed with "no exception".
+
+### F26. The TB container panics on a TCP connection that arrives right after listening (mitigated; open failure O4 narrowed down to its cause)
+
+- **What breaks**: the TigerBeetle 0.17.9 container prints `listening on` and dies 2–130 ms later with `thread 1 panic: reached unreachable code` (exit 139). This happens before our client connects. A whole test class fails with `initializationError`. On 2026-10-17 it happened in more than half of the runs of the tigerbeetle module.
+- **Reproduction and narrowing the cause (2026-10-18, `docker run` with the same command as the fixture)**:
+  - Starting without publishing the port: 0 out of 50 (20 alone, 30 with three starting at the same time).
+  - Publishing the port (`-P`): 2 out of 15, even without any client.
+  - Without publishing the port, making only a TCP connection with `nc -z` from the same network namespace right after listening and closing it: 3 out of 30.
+  - The same probe 3 seconds later: 0 out of 20.
+  - Not a memory shortage. The VM had 5.9 GiB free, and dmesg had no OOM record.
+  - Conclusion: a TCP connection that arrives in a short window right after listening kills TB. In the tests, the side that makes this connection appears to be Docker Desktop's port publishing path. Our code cannot control that timing. We consider it a bug on the TB side; it was not confirmed in the TB source.
+- **Structure (mitigation)**: `TigerBeetleContainer.start()` starts a new container when this attempt's log shows `listening on` but the startup failed. It makes 3 attempts in total, so at most 2 restarts. It does not matter which step saw the death first (Testcontainers' startup check, the log wait, the 1-second stability check). The first version of this check only looked at "an exception thrown by the stability check", so when TB died right after listening and Testcontainers' startup check saw it first, it did not restart (reproduced by `aDeathSeenByTheStartupCheckIsRetried`). Failures that do not reach listening (io_uring and so on) are not retried. Each attempt writes a separator line `--- TB start attempt n ---` to the log, and each restart leaves `O4: TigerBeetle exited right after listening; starting a new container (attempt n)` on standard error. The TB of the proxied setup (`ProxiedTigerBeetle`) does not publish its port. The client connects only through the proxy, so the cause has no path at all.
+- **Reproduction tests**: `TigerBeetleContainerGuardTest` › `startRetriesWhenTheServerDiesRightAfterListening` (a fake server that dies once and then lives; the log has the panic of the first attempt and the separator of the second), `aDeathSeenByTheStartupCheckIsRetried` (a fake server that dies as soon as it prints listening), `startFailsWhenServerDiesRightAfterListening` (if it dies every time, it fails with "3 attempts all exited right after listening" and the panic log).
+- **Verification**: a control experiment that reduces the number of attempts to 1 failed two tests. After the mitigation, the tigerbeetle module was run 5 times with 0 failures. However, those 5 runs also had 0 retries of the real TB (no natural occurrence). So the effect on a real panic has not been observed yet.
+
+### F27. The operator abandons a halted command that was already sent to TB as "not sent" (found in full review)
+
+- **What breaks**: HALTED is entered only from the accepted state (PENDING). But the accepted state also includes commands that were sent once and released (submit_count > 0), and commands that received a TB result but whose handler failed (known_result). If the referenced reservation row of such a command disappears, it halts at the next claim. If the operator abandons it with `abandonHalted`, PG becomes SKIPPED (ABANDONED_BY_OPERATOR) and the handler receives "not applied". In TB it may already be posted, so the money and the business state diverge.
+- **Reproduction**: `LedgerRelayContract` › `aReleasedCommandIsRefused`, `aCommandWithAKnownResultIsRefused` (in-memory, PG DataSource, PG JPA).
+- **Structure**: `CommandLifecycle.abandonHalted` refuses with `IllegalStateException` (the command has already been sent to TB and cannot be abandoned) when `submitCount > 0` or a `knownResult` exists. A person cleans up such commands after checking the transfer in TB. The public operator port surfaces this refusal as is.
+- **Verification**: before it was added, six tests failed with "no exception".
+
+### F28. Resubmitting the same post after its reservation was deleted gives "reservation missing" instead of the receipt (found in full review)
+
+- **What breaks**: `submit` did the reference check before the same-commandId check. The archiving job deletes commands N days after they finish. A reservation finishes before its post, so it can be deleted first. If the app then resubmits a post whose reply it missed, with the same content, it gets `ReservationNotFoundException` instead of the original receipt (the promise of `LedgerRelay.submit`). A resend with different content also becomes "reservation missing" instead of `CommandConflictException`.
+- **Reproduction**: `LedgerRelayContract` › `resubmittingAFinishedPostAfterItsReservationIsGoneReturnsTheReceipt`, `resubmittingItWithOtherContentIsAConflict`.
+- **Structure**: after taking the sequence number, it first looks up the same commandId. If found, it ends with the receipt or a conflict and does not do the reference check. The race path (`insertIfAbsent` returns another transaction's row) still compares hashes.
+- **Verification**: before the change, both tests failed with `ReservationNotFoundException`.
+
+### F29. One row with inconsistent data makes the whole claim transaction throw and the relay stops (found in full review)
+
+- **What breaks**: claim runs the gate and the state machine for each candidate in the same transaction. If one candidate's data violates the rules, that decision throws. For example, with a post row whose referenced reservation is empty (direct DB edit), `Optional.orElseThrow` throws. Then the whole claim rolls back, the worker ends every cycle with the same exception, and all keys stop. This contradicts "only that key is blocked".
+- **Reproduction**: `LedgerRelayContract` › `aMalformedRowIsHaltedAndOtherKeysKeepFlowing`. pay-2 of another key is claimed, and the bad row is reported as a halted command.
+- **Structure**: `CommandLifecycle.claim` catches the decision exception of a single candidate and parks that row as HALTED. The decision is pure Java, so the PG transaction is intact. If it cannot even park it (for example, the store returned a finished row as a candidate), it skips that candidate. Either way, the reason (the original exception) is put in `ClaimBatch.problems`, and the worker reports it through `WorkerEvents.malformedCandidate` (strengthened in the final review: at first the exception was discarded and the skip case gave no signal at all; `ClaimIsolationTest`). Problems that occur while the store **reads** a row (resolving the stored name of a result code) are outside this isolation. So `known_result` and `result_code` have a CHECK that accepts only the 68 stored names (`anUnknownResultCodeIsRefused`, `everyWireNameIsAccepted`). The other DB CHECKs that block such rows are in F31. The operator finds them in the list of halted commands.
+- **Verification**: before it was added, claim ended with `NoSuchElementException` and the test failed.
+
+### F30. A long commandId or ordering key breaks acceptance with an SQL error (found in full review)
+
+- **What breaks**: `command_id` and `ordering_key` are `text` columns with b-tree indexes. PG refuses index entries larger than about 2.7 KB. If the app sends a longer id, the upsert for the sequence number (`lockKeyAndTakeSeq`) ends with "index row size exceeds maximum" and the whole app transaction is aborted. It is the same kind of failure as F20.
+- **Reproduction**: `LedgerCommandTest` › `InvalidCommands`, the rows for a commandId of 513 UTF-8 bytes and an ordering key of 171 Hangul characters (513 bytes). 512 bytes fit (`aCommandIdOf512BytesIsAccepted`). `isAcceptableId` is also false at 513 bytes.
+- **Structure**: `LedgerCommand.MAX_ID_BYTES = 512`. It applies to commandId, orderingKey and reservationCommandId, and `isAcceptableId` checks the same limit.
+- **Verification**: before it was added, three tests failed.
+
+### F31. The schema does not enforce id comparison, transfer ids and row invariants on the DB side (found in full review)
+
+- **What breaks**:
+  - **Collation**: the unique index on `command_id` keeps acceptance idempotent. But this is a problem if the column uses the DB's default collation. If the OS libc collation changes (a new Debian release in the postgres image, a glibc 2.28-style upgrade), text b-tree indexes can silently become inconsistent. Then `ON CONFLICT (command_id)` misses the existing row, a resent acceptance creates a second row with a new transfer id, and the money goes out twice.
+  - **Duplicate transfer id**: if `transfer_id` values collide (a generator bug), the second command gets `exists` from TB and takes someone else's transfer as its own result.
+  - **Row invariants**: a row that is in flight but has no lease expiry time is never claimed again. A post row without a referenced reservation causes F29. Online migrations are a problem too. After `ADD COLUMN`, the server-prepared statement of `SELECT c.*` fails inside an app transaction with `0A000 cached plan must not change result type`, and the whole app transaction is aborted.
+- **Reproduction**: `JdbcCommandStoreTest` › `TheSchemaGuards` › `idColumnsCompareByteForByte` (4), `aDuplicateTransferIdIsRefused`, `rowsThatBreakTheInvariantsAreRefused` (3), `findSurvivesAnAddedColumn`. The last one was reproduced with a lookup inside an app transaction. Outside a transaction, pgjdbc re-prepares on its own and it did not reproduce.
+- **Structure**: the id columns use `COLLATE "C"`. Named constraints: `ledger_command_transfer_id_key UNIQUE`, `ledger_command_seq_check`, `ledger_command_reference_check`, `ledger_command_claimed_lease_check`, `ledger_command_skipped_reason_check`. Queries use the shared column list (`JdbcCommandStore.COLUMNS`). The contract tests' row builders give each key a different transfer id (`TestTransferIds`).
+- **Verification**: before they were added, 9 tests failed (collation 4, transfer id 1, CHECK 3, added column 1).
+
+### F32. The cost of claim polling grows with the backlog behind a blocked key
+
+- **What breaks**: the old `lockDue` searched, for each candidate, "is there an earlier unfinished command in the same key" (`NOT EXISTS`, a Nested Loop Anti Join in the plan). If 100,000 waiting commands pile up behind one key whose head is in backoff or in flight, one poll checks those 100,000 one by one. It took 100,000 searches for an earlier unfinished command, about 400,000 pages, 576–680 ms (baseline 0.2 ms). When there are fewer candidates than the limit, `LIMIT` cannot stop early, and the planner wrongly estimated that most rows pass. F19's check ("Rows Removed by Filter") does not see this cost. The same proportional cost appears when many keys have their head in backoff. When many sendable heads pile up right after TB recovers, they have to be sorted in acceptance order (id). `FOR UPDATE` sits between the sort and `LIMIT`, so a top-N sort cannot be used; in the experiment it took 21 ms and spilled to a disk sort.
+- **Reproduction**: the three tests of `LockDueBoundedWorkTest` check, at limit 128, that the top node of the plan reads 1,000 pages or fewer. `aBacklogBehindABlockedKeyIsNotRead` (20,000 waiting behind a blocked key + 100 sendable keys), `headsWaitingForTheirRetryAreNotRead` (20,000 keys whose head is in a 1-hour backoff + 100), `manyReadyHeadsStopAtTheLimit` (20,000 sendable heads behind 50,000 finished rows). The measurements are the four scenes of `LockDueBacklogMeasurementTest` (`./gradlew :ledger-relay-jdbc:measurement`).
+- **Structure**:
+  - Candidates are ordered by "the time they became sendable". For an accepted command that time is the next attempt time, for an in-flight command the lease expiry time, and ties go in acceptance order. The port contract `CommandStore.lockDue` defines this, and the in-memory and PG stores pass the same contract tests. The order within a key does not change, because a key has only one head.
+  - The jdbc adapter has `ledger_command.is_head` (is this the command whose turn it is in the key) and `ready_at` (the time to send, a generated column).
+  - There are two indexes. `ledger_command_ready ON (ready_at, id) WHERE is_head AND state IN ('PENDING','CLAIMED')` is what claim reads. The unique `ledger_command_one_head ON (ordering_key) WHERE is_head` prevents two heads per key. `ledger_command_due` was dropped.
+  - On insert, if the key has no head, the new command becomes the head. When a command finishes, the flag stays as it is, and the next claim locks that key row and passes the flag on to the next unfinished command (F33). At first, completion passed it on by updating the unfinished count on the key row, but that lock deadlocked with the handler, so it was changed.
+  - After a direct DB edit, recompute with `rebuild-heads.sql` (docs/development.md).
+- **Verification**:
+  - With the old query, two page tests failed (backlog of 20,000: 61,097 pages, 126 ms; 20,000 heads in backoff: 1,447 pages).
+  - The two new ordering contract tests (`aRetriedCommandQueuesAtItsRetryTime`, `anExpiredLeaseQueuesAtItsExpiry`) failed on both the in-memory store and PG.
+  - Mutation checks:
+    - Removing the `is_head` condition fails 17 jdbc tests.
+    - Switching to `ORDER BY c.id` fails the 2 ordering contract tests and the recovery-burst page test (1,993 pages).
+  - After every contract test, the flags are checked against the rows (`PostgresStorage.assertHeadsConsistent`).
+  - Measurement (limit 128, 100,000 rows, three runs): baseline 112 pages 0.12 ms, backlog of 100,000 121 pages 0.13 ms (previously 576–680 ms), 100,000 heads in backoff 201 pages 0.10 ms, 100,000 sendable heads 194 pages 0.11 ms.
+- **Remaining**:
+  - If the DB is edited directly and `rebuild-heads.sql` is not run, the key can drop out of the candidates or a command that is not the head can go out. The script takes a table lock on `ledger_ordering_key` so that it does not overlap with acceptance and claim (`HeadBookkeepingTest.rebuildWaitsForAnOpenSubmit`).
+  - The case where stale statistics or a switch to a generic plan make the planner choose another index and a sort instead of `ledger_command_ready` is not tested.
+
+### F33. The result-writing transaction runs the handler while holding the key row and deadlocks with the app's acceptance
+
+- **What breaks**: in the first implementation, completion updated and locked the key's row (`ledger_ordering_key`) inside `compareAndSet`, and called the handler while holding that lock until commit. Common app code locks in the opposite order. The app updates the order row and then, in the same transaction, submits on that order's key (acceptance locks the key row to take a sequence number). The handler receives the result and updates the same order row. The app waits for the key row, the handler for the order row, and PG aborts one side (40P01). If the app side is aborted, user requests fail intermittently. If the completion side is aborted, it runs again after a backoff as a handler failure. Also, when an app transaction kept an acceptance on some key open for a long time, the completion on that key waited, and since the worker writes results one at a time, the results of other keys behind it stalled too. This lock was hidden behind the name `compareAndSet` and was not visible in the core code.
+- **Reproduction**: `HeadRaceTest` › `anAppThatMarksTheOrderThenSubmitsDoesNotDeadlockWithTheHandler`. `KeyLockFreeStoreTest` (the store's insert, find, candidate locking and result writing do not wait even when another transaction holds the key row). `HeadStatementRaceTest` (three races between statements).
+- **Structure**:
+  - The port was split. Calls that lock a key row exist only in `OrderingKeys` (`lockKeyAndTakeSeq`, `passOnFinishedHeads`). `CommandStore` does not lock key rows. In jdbc, `JdbcOrderingKeys` and `JdbcCommandStore` divide the work.
+  - The worker writes that call the handler were moved into `WorkerWrites`, and this class does not receive `OrderingKeys`. `ArchitectureTest.theHandlerPathCannotLockAKey` keeps "a class that calls `onCompleted` does not depend on `OrderingKeys`".
+  - Completion leaves the head flag on the finished command. Before locking candidates, claim locks the key rows of finished heads with `FOR UPDATE SKIP LOCKED` and passes the flag on to the next unfinished command. A key held by the app is not waited for but deferred to the next claim. A locked key row is updated with its values unchanged. This makes an app at REPEATABLE READ or higher that took its snapshot earlier end with 40001 and retry when it takes a sequence number on that key. Otherwise that app would see a head in its old snapshot, would not make the new command the head, and the key would never go out.
+  - The two statements that set the head flag (acceptance's `MARK_FIRST_UNFINISHED` and passing on's `MARK_NEXT_HEADS`) do nothing if the key already has a head. READ COMMITTED takes a new snapshot per statement, so when a completion on the same key committed after acceptance cleared the flag, there were two heads and the unique index broke the acceptance (23505). Passing on had the same gap. If another worker passed on the same key and committed after the passing-on query took its snapshot, the late query still locked that key row (`SKIP LOCKED` rechecks only the key row against the latest version). When the following flag-setting then waited to update the new head row that was in the middle of writing its result, it deadlocked with the handler, and if the new head finished in the meantime, there were two heads and claim broke. Locking the finished head row as well (`FOR UPDATE OF k, c`) was not used. If someone holds that row (for example a reservation row, F13), passing on for the whole key is deferred, and the contract test `aLockedReservationIsStillReported` broke. The reviewer reproduced all three on PG 18.6, and `HeadStatementRaceTest` commits the other side between statements to check them.
+  - `unfinished_count` was dropped. Keys to pass on are found in `ledger_command_finished_head` (commands that are finished but still the head). The next unfinished command is found separately per key with `min(seq)`. A `GROUP BY` over the keys read the whole backlog behind a blocked key (564 pages for 20,000 rows, now 30 pages).
+  - The rows each transaction locks are listed in a table in docs/development.md, "Transactions and locks".
+- **Verification**:
+  - Before the fix: the deadlock test ended with `deadlock detected` (the completion side was aborted, a handler failure), and result writing and insert in `KeyLockFreeStoreTest` did not finish within 2 seconds.
+  - Mutation checks:
+    - Restoring the key row lock in result writing fails 6 tests (deadlock, 4 not-waiting, 1 store).
+    - Emptying the passing on fails 24 tests.
+    - Removing the key row update fails 2 RR and SERIALIZABLE snapshot tests.
+    - Removing `SKIP LOCKED` fails the "defers only the keys held by the app" test.
+    - Adding an `OrderingKeys` field to `WorkerWrites` fails the ArchUnit rule.
+    - Dropping `ledger_command_finished_head` fails the passing-on page test.
+    - Removing the "if the key already has a head" condition from acceptance's flag-setting fails the acceptance race of `HeadStatementRaceTest` with 23505. Removing it from passing on's flag-setting fails the two late passing-on tests (waiting, 23505).
+  - Measurement (limit 128): locking the keys to pass on, with 20,000 finished heads behind 50,000 finished rows, took 519 pages, 0.19 ms.
+- **Remaining**:
+  - If the handler submits, its result-writing transaction locks the key row. A handler that submits and then updates the order row can deadlock with an app that does "order row → submit". This is not prevented; the order (order row first) is written in docs/development.md, "Transactions and locks". A handler that submits the post when the reservation is applied is a legitimate use.
+  - If app transactions submit on several keys in different orders, the key rows deadlock with each other. This property has existed since 02b (section 4).
+  - An app at REPEATABLE READ or higher can get 40001 on an acceptance that overlaps claim's passing on. The app already has to retry this failure for concurrent acceptances on the same key (section 4).
+  - If an app holds a key row for a long time, the next command of that key does not go out until the app commits. Other keys are not affected.
+
+### F34. The worker's in-flight slots leak, or it runs with slots that differ from the configured limit
+
+- **What breaks**:
+  - If `LedgerClient.submit` returned `null` instead of a future, a `NullPointerException` occurred right after the batch's slots were handed to the future, and the slots never came back. After a few repetitions the slots ran out and claiming stopped in that process.
+  - `RelayWorker` received `WorkerSettings.maxInFlight` and `InFlightLimit` separately. If the two differed, changing the setting did not change the actual number of concurrent requests.
+- **Reproduction**: `RelayWorkerTest` › `aNullReplyGivesTheSlotsBackAndReleasesTheBatch`, `aWorkerRefusesSlotsThatDisagreeWithMaxInFlight`.
+- **Structure**: `null` takes the same path as a failure thrown at the send site (report, release, return the slots). `InFlightLimit` remembers the number of slots it was created with (`capacity()`), and `RelayWorker` cannot be created if that differs from `maxInFlight`. The Spring auto-configuration creates the slots from the same setting (`LedgerRelayAutoConfigurationTest.slotsFollowMaxInFlight`).
+- **Verification**: before the fix, the null test failed with `NullPointerException` and the mismatch test with "no refusal". A mutation that fixes the slots at 1024 in the auto-configuration is caught by `slotsFollowMaxInFlight`.
+
+### F35. If even the write that records a handler failure fails, the handler exception disappears
+
+- **What breaks**: when the handler throws, its transaction rolls back and "the received result and the handler failure" are kept in a new transaction. If this second write failed with a DB error, the worker received only the DB error. The original cause, the handler exception, was kept nowhere, and the operator could not see the handler bug.
+- **Reproduction**: `RelayWorkerTest` › `theHandlersFailureSurvivesAFailedRecord`.
+- **Structure**: the handler exception is attached to the second write's exception with `addSuppressed` and thrown (`WorkerWrites.finish`). The worker event `writeFailed` receives both.
+- **Verification**: before the fix, suppressed was empty and the test failed.
+
+### F36. When TB is unreachable, health slows down and the app is taken out of service
+
+- **What breaks**: the first health sent a lookup to TB on every request, waited up to 1 second, and counted all waiting commands. When TB was unreachable, one health call took more than 1 second. It hit the orchestrator's probe timeout (Kubernetes default 1 second), and the app was taken out of service or restarted. Then even acceptance stopped. That is the exact opposite of this library's point, accepting without TB. During a long outage the backlog grew and health got slower, and lookups that timed out kept piling up in the TB client.
+- **Reproduction**: `LedgerRelayHealthIndicatorTest` › `healthDoesNotWaitForASilentLedger`, `aSilentLedgerIsProbedOnceAtATime`. `LockDueBoundedWorkTest` › `countingAHugeBacklogReadsABoundedNumberOfPages`.
+- **Structure**: the TB check does not wait. Only one lookup is sent at a time, and it is UP if the last answer was within 5 seconds. Waiting commands are counted only up to 1,000 (`Backlog.countsCapped`), and the oldest waiting command is read from the first entry of the new index `ledger_command_waiting (id) WHERE state IN ('PENDING','CLAIMED')`.
+- **Verification**: before the fix, when TB did not answer, one health call took as long as the probe time, and 20 requests piled up 20 lookups. With 50,000 waiting commands, the counting query read 2,856 pages. A mutation that restores uncapped counting fails with 7,191 pages at 100,000 waiting commands (cap 2,500).
+
+### F37. When two sample apps start on an empty DB at the same time, one dies while creating the schema (sample shop)
+
+- **What breaks**: compose starts two apps that use the same DB together. If both do "create the tables if they do not exist", their `CREATE TABLE` statements overlap at the same moment. The late one fails with `duplicate key value violates unique constraint "pg_type_typname_nsp_index"` (23505) and cannot start. Someone who just cloned the repository runs `docker compose up` and sees one instance dead (the non-goal "fails on first start").
+- **Reproduction**: `ShopBootstrapTest` › `twoInstancesStartingTogetherApplyTheSchemaOnce`. Two threads call `ShopSchema.apply` together on an empty database.
+- **Structure**: `ShopSchema.apply` takes `pg_advisory_xact_lock(764)` in one transaction and applies the library's `schema.sql` and `shop-schema.sql` only if `shop_order` does not exist. The late one waits on the lock until the first one commits, then sees the tables and moves on. It is applied in `SmartInitializingSingleton`, so it finishes before the worker loop starts. The library still does not apply the schema automatically; this is a convenience of the sample app only.
+- **Verification**: in a control experiment with the lock line removed, the test above failed 5 out of 5 times with 23505.
+
+### F38. Pressing the pay button twice creates two orders and holds the money twice (sample shop)
+
+- **What breaks**: two payment requests with the same `Idempotency-Key` arrive at the same time. If the code does "look up by key, insert if missing", both transactions see "missing" and both try to insert. With a unique constraint, the late one gets 500 from 23505 (the user sees a failed payment); without it, two orders and two reservations are created and the buyer's money is held twice. The library's idempotency (the same commandId once) does not prevent this, because the two requests create different orders with different commandIds.
+- **Reproduction**: `OrderFlowTest` › `aDoubleClickMakesOneOrderAndOneReservation` (two threads pay together with the same key), `aRepeatedRequestReturnsTheSameOrder` (over HTTP).
+- **Structure**: `shop_order.idempotency_key` has a unique constraint, and the row is inserted with `INSERT … ON CONFLICT (idempotency_key) DO NOTHING RETURNING`. The late one waits on the unique index until the earlier transaction ends and then inserts nothing. It then reads again by key. READ COMMITTED takes a new snapshot per statement, so it sees the order the earlier one committed. If the same key comes with a different buyer or product, it is refused with 422. Only the side that inserted submits the reservation.
+- **Verification**: a control experiment with `ON CONFLICT DO NOTHING` removed failed 4 tests (double click, refusing a different product, two over HTTP).
+
+### F39. Giving the TB client a host name address keeps the app from starting (sample shop)
+
+- **What breaks**: the TB Java client (0.17.9) accepts only `IPv4:port`. Inside compose, the Toxiproxy in front of TB can only be found by name, like `toxiproxy:3001`. Passing this value as is fails with `Replica addresses format is invalid` the moment the `Client` is created, and the app does not start.
+- **Reproduction**: `ShopBootstrapTest` › `theClientRefusesAHostName` (a learning test that pins TB's behavior), `aHostNameBecomesAnIpv4Address`.
+- **Structure**: at startup, the sample app converts `shop.tigerbeetle.address` to IPv4 and creates the `Client` bean itself (`TigerBeetleClientConfig`). The library auto-configuration uses the `Client` the app provides. The library's `ledger-relay.tigerbeetle.addresses` has the same constraint, so use an IP in that setting (docs/development.md).
+- **Verification**: creating a client with `localhost:<port>` fails with the message above, and with the converted `127.0.0.1:<port>` lookups work (2026-10-18, test container).
+
+### F40. When health is called less often than every 5 seconds, it reports TB DOWN even though TB is fine (library)
+
+- **What breaks**: F36's health decided by "is TB's last answer within 5 seconds of now". But the check lookup is only sent when health is called. So when health is called less often than every 5 seconds, the previous check's answer is always older than 5 seconds and the new check's answer has not arrived yet, so it is always `ledger: DOWN` even though TB is fine. The default interval of a Kubernetes probe is 10 seconds. The operator would see TB as always cut off and could not tell a real outage apart. This was found while watching the sample app with curl every 5 seconds (UP at 1-second intervals, DOWN all the time at 6-second intervals).
+- **Reproduction**: `LedgerRelayHealthIndicatorTest` › `aLedgerThatAnswersIsUpEvenWhenHealthIsCalledRarely`. A test with a fake that answers TB lookups slightly late (`FakeLedger.answerHeldLookups`) and an advancing clock calls health after 10 seconds.
+- **Structure**: the decision is based on the result of the checks, not on time. It is UP when the last finished check succeeded and no check in flight has been waiting for an answer longer than `ledgerStaleAfter` (5 seconds). The properties of F36 remain: health does not wait, and only one lookup is sent at a time. A check unanswered for more than 5 seconds is DOWN (`aProbeUnansweredForTooLongIsDown`).
+- **Verification**: under the rule before the fix, the test above failed with `ledger: DOWN`. The existing 5 health tests still pass.
+
+### F41. When the app runs in a container, the TB client cannot use io_uring and the app does not start (sample shop)
+
+- **What breaks**: it is easy to assume that only the TB server uses io_uring. But the TB Java client (0.17.9) also uses io_uring in its native library. An app container started with Docker's default seccomp profile dies, JVM and all, the moment it creates the `Client`: `error(io): io_uring is not available` → `thread 7 panic: attempt to unwrap error: PermissionDenied` (exit 133). It is a panic, not an exception, so the app cannot catch it. compose's `restart` starts it again, with the same result every time. When compose was first started, both apps kept restarting like this. In the tests the app is a host JVM, so it did not show up.
+- **Reproduction**: remove `security_opt` from the app services in `compose.yaml` and run `docker compose up`. The end-to-end test `ShopComposeTest` fails while waiting for startup (`/actuator/health`).
+- **Structure**: the app containers also get `security_opt: [seccomp=unconfined]` (same as the TB server container). In production, a seccomp profile that additionally allows only the io_uring system calls is better than unconfined. This is written in docs/development.md.
+- **Verification**: started without the option, both apps kept restarting with the panic above; with the option, both started and health was UP (2026-10-18, Docker Desktop).
+
+### F42. Both apps build the same image at the same time and `docker compose up` sometimes fails (sample shop)
+
+- **What breaks**: the first compose gave both `shop-a` and `shop-b` a `build` and the same `image` name. `docker compose up --build` builds both at the same time, and the one that finishes later fails while tagging the image with `image "docker.io/library/ledger-relay-shop:local": already exists`, which ends the whole `up`. Depending on the build cache state, it happens sometimes and sometimes not. If it happens when someone starts it for the first time, the demo does not even start (non-goal).
+- **Reproduction**: in a full `./gradlew check --rerun-tasks`, `ShopComposeTest` failed at the `compose up -d --build` step with the message above (2026-10-18). The two runs before it passed.
+- **Structure**: only `shop-a` builds the image. `shop-b` uses the same image name and has `pull_policy: never`, so it does not look in a registry. compose finishes the builds before creating containers, so `shop-b` starts from the image that `shop-a` built.
+- **Verification**: after the fix, `ShopComposeTest` was run in turn with the images deleted (the first-start situation) and with a cache, and both passed.
+
+### F43. The screen's reconciliation skips commands that finish late forever, so the consistency panel turns green after checking only part
+
+- **What breaks**: at first the consistency panel ran reconciliation "continuing from the last position". The library's reconciliation reads finished commands in row order (id). But commands do not finish in row order: a post that halted and was abandoned and the reservation after it (scene 3), the batches of two workers, transactions that commit late. When the position moves past a row that has not finished yet, that row is never read again after it finishes. So exactly the commands of scene 3 were left out of reconciliation. Even if there was a mismatch there, the panel was green. This contradicts the non-goal "no fake numbers".
+- **Reproduction**: `DemoScenarioTest` › `theRunningReconciliationCountsCommandsThatFinishLate`. Other orders finish while a bad post is halted, and then it is abandoned. Before the fix, only 18 of 22 finished commands were reconciled.
+- **Structure**: `LedgerSnapshot` reconciles everything from the start on every refresh and rewrites the totals (up to 50,000 commands; at demo size it is always everything). Reconciliation at production scale will be redesigned later with a position that does not pass "the smallest id not yet finished" (the same problem as the reconciliation cursor in the list of open failures).
+- **Verification**: the test above failed before the fix with `expected: 22L but was: 18L`, and passes after the fix.
+
+### F44. Starting again after `docker compose down` keeps only the ledger, and the screen shows false duplicate transfers
+
+- **What breaks**: the first compose kept TB data in a named volume (`tigerbeetle-data`), while PG used the image's anonymous volume. The most common way to shut down, `docker compose down` (without -v), discards the PG data together with the containers but keeps the TB volume. On the next `up`, PG is empty but the ledger still has the old transfers. Order ids start again from 1, so old posts (user_data = old order id) get mixed up with new orders. The duplicate transfers on the screen go above 0, the merchant balance and the total of paid orders differ, and the consistency panel stays red. A demo meant to show that money moves exactly once shows the opposite.
+- **Reproduction**: `ComposeFileTest` › `neitherStoreOutlivesTheOther` (compose.yaml has no top-level `volumes:`). By hand: pay and ship → `docker compose down` → `up`.
+- **Structure**: TB does not use a named volume either. The data file is inside the container. PG and TB stay with their containers (`up` after Ctrl-C, `stop`/`start`, `restart: on-failure`) and go away together (`down`).
+- **Verification**: the test above failed before the fix. After the fix, pay and ship → `down` → `up` left both empty, and consistency was ok (reconciliation 0/0, duplicates 0) (2026-10-18). Once during the check the old data was still visible after `down`, but it did not reproduce on retry, and the cause is unknown.
+
+## 2. Open failures
+
+| # | Failure | Where to prevent it |
 |---|---|---|
-| O2 | 워커가 어느 지점에서 죽어도 중복 없이 복구되는가(kill -9) | 장애 실험(아직 없음) |
-| O7 | 덤프·복원이나 다른 클러스터로 옮긴 DB에서는 옮겨 온 `accepted_xact`가 새 트랜잭션 ID와 우연히 같아져, 이미 커밋된 예약을 참조한 정상 확정이 `ReservationNotFoundException`으로 거부될 수 있다. 재현 테스트는 두지 않았다. 클러스터 이전을 재현하는 비용이 절차 한 줄보다 크다 | 이전 절차: 복원 직후 `UPDATE ledger_command SET accepted_xact = '0'`(docs/development.md) |
+| O2 | Does a worker recover without duplicates no matter where it dies (kill -9) | Failure experiments (none yet) |
+| O7 | In a DB moved by dump and restore or to another cluster, a moved `accepted_xact` can happen to equal a new transaction id, and a valid post referencing an already committed reservation can be refused with `ReservationNotFoundException`. There is no reproduction test. Reproducing a cluster move costs more than one line of procedure | Migration procedure: right after the restore, `UPDATE ledger_command SET accepted_xact = '0'` (docs/development.md) |
 
-닫힌 열린 장애: O1(행 잠금 동시성)은 F11~F15로, O3(응답 유실 뒤 재전송)은 F23으로, O4(TB 기동 panic)는 F26으로 옮겼다(F26은 완화). O6(연결이 묶이지 않은 접수)은 F18로 막았다. O5(멈춘 명령을 볼 방법이 없음)는 03b의 운영자 포트 `LedgerRelayOperator.haltedCommands`(멈춘 이유와 시각 포함)로 닫았다.
+Closed open failures: O1 (row lock concurrency) moved to F11–F15, O3 (resending after a lost reply) to F23, and O4 (TB startup panic) to F26 (F26 is a mitigation). O6 (acceptance not bound to the connection) was prevented by F18. O5 (no way to see halted commands) was closed by the operator port `LedgerRelayOperator.haltedCommands` in 03b (including the halt reason and time).
 
-## 3. 데드레터큐를 쓰지 않는 이유
+## 3. Why there is no dead letter queue
 
-문제 명령을 DLQ로 빼고 같은 키의 다음 명령을 처리하면, 그 키의 원장 순서(G4)가 깨진다. 예를 들어 예약보다 확정이 먼저 가면 잘못 거절된다. 그래서 문제 명령은 그 자리에 두고 **그 키만** 막는다. 다른 키는 계속 처리된다.
+If a problem command is moved to a DLQ and the next command of the same key is processed, the ledger order of that key (G4) breaks. For example, if a post goes before its reservation, it is wrongly rejected. So the problem command stays where it is and **only that key** is blocked. Other keys keep being processed.
 
-| | HALT (F9) | 핸들러 실패 (F3~F5) |
+| | HALT (F9) | Handler failure (F3–F5) |
 |---|---|---|
-| 성격 | 규칙 위반, 버그 신호 | 일시적일 수 있음 |
-| 처리 | 바로 멈춤, 재시도 없음 | backoff로 계속 재시도. 그동안 그 키는 막힘 |
-| 드러내는 곳 | health의 `halted`, 운영자 포트 `haltedCommands` | 행의 `handler_failures` 열, 워커 로그 |
-| 사람이 할 일 | 원인 수정 후 `abandonHalted`로 포기 | 핸들러 수정 |
+| Nature | Rule violation, a sign of a bug | Can be transient |
+| Handling | Halts at once, no retry | Keeps retrying with backoff. The key is blocked meanwhile |
+| Where it shows | `halted` in health, operator port `haltedCommands` | The row's `handler_failures` column, worker logs |
+| What a person does | Fix the cause, then abandon with `abandonHalted` | Fix the handler |
 
-## 4. 격리 수준과 무관한 이유
+## 4. Why the isolation level does not matter
 
-"동시성 문제면 격리 수준을 SERIALIZABLE로 올리면 되지 않나?"에 대한 답이다.
+This answers "if it is a concurrency problem, why not just raise the isolation level to SERIALIZABLE?"
 
-**잠금으로 못 막는 문제가 있다.** 대표가 write skew다. "당직 의사가 최소 한 명은 남아야 한다"는 규칙에서 두 의사가 동시에 "나 빼고 한 명 이상 남는가?"를 확인하고 둘 다 빠지면 0명이 된다. 각자 자기 행만 고쳤으므로 행 잠금끼리 부딪히지 않는다. 판단의 근거가 "조건을 만족하는 행들의 집합"이고 그 집합을 잠글 행이 없기 때문이다. 이런 문제는 SERIALIZABLE이어야 DB가 잡는다.
+**Some problems cannot be prevented with locks.** The typical one is write skew. With the rule "at least one doctor must stay on call", two doctors check at the same time "will at least one remain without me?", both leave, and zero remain. Each changed only their own row, so the row locks never collide. The decision is based on "the set of rows that satisfy the condition", and there is no row to lock for that set. Only SERIALIZABLE makes the DB catch such problems.
 
-**우리 설계는 집합 판단마다 잠글 행을 만들어 두었다**(충돌의 실체화). 그래서 READ COMMITTED에서 잠금만으로 충분하다.
+**Our design creates a row to lock for every decision over a set** (materializing the conflict). So locks alone are enough at READ COMMITTED.
 
-| 집합 판단 | 막는 장치 | 기록 |
+| Decision over a set | What prevents it | Record |
 |---|---|---|
-| 이 commandId가 이미 있나 | 유니크 제약 + `ON CONFLICT DO NOTHING` | F15 |
-| 이 키에서 내 순번은 몇 번인가 | 키 행 잠금(커밋까지 유지). 그리고 `UNIQUE (ordering_key, seq)` | F14 |
-| 이 키의 맨 앞 명령이 나인가(`NOT EXISTS`) | 키 행 잠금 덕분에 나보다 앞 순번이 나중에 생길 수 없다 | F12 |
-| 이 키의 맨 앞 표시(`is_head`)를 누가 갖나 | 표시를 정하는 접수와 claim의 넘기기가 둘 다 키 행을 잡는다. 넘기기는 키 행을 갱신해, 옛 스냅숏으로 접수하는 높은 수준의 앱을 40001로 돌려보낸다 | F32, F33 |
-| 이 명령을 내가 가져가도 되나 (행 하나) | `FOR UPDATE OF c SKIP LOCKED` | F12, F13 |
-| 결과를 써도 되나 (행 하나) | 상태·토큰 조건부 쓰기 | F2 |
+| Does this commandId already exist | Unique constraint + `ON CONFLICT DO NOTHING` | F15 |
+| What is my sequence number in this key | Key row lock (held until commit), plus `UNIQUE (ordering_key, seq)` | F14 |
+| Am I the head command of this key (`NOT EXISTS`) | Thanks to the key row lock, no earlier sequence number can appear later | F12 |
+| Who holds this key's head flag (`is_head`) | Both acceptance, which sets the flag, and claim's passing on lock the key row. Passing on updates the key row, which sends an app at a higher level that accepts with an old snapshot back with 40001 | F32, F33 |
+| May I take this command (one row) | `FOR UPDATE OF c SKIP LOCKED` | F12, F13 |
+| May I write the result (one row) | Write conditioned on state and token | F2 |
 
-**DB 기본값을 바꾸는 방식은 쓰지 않는다.** `default_transaction_isolation`은 기본값일 뿐이다. 실제 수준은 트랜잭션을 여는 쪽이 매번 정한다. 라이브러리가 DB 전체 설정을 바꾸면 같은 DB를 쓰는 앱의 다른 코드까지 바뀌고, 바꿔도 앱이 트랜잭션마다 덮어쓴다. 그래서 약속은 "어떤 격리 수준에서도 데이터는 깨지지 않는다"이다. "에러가 없다"가 아니다.
+**Changing the DB default is not used.** `default_transaction_isolation` is only a default. The real level is set each time by whoever opens the transaction. If the library changed the setting for the whole DB, it would change the other code of the apps that use the same DB, and even then the app overrides it per transaction. So the promise is "the data does not break at any isolation level", not "there are no errors".
 
-**높은 수준에서 바뀌는 것은 기다림이 에러가 된다는 것뿐이다.**
+**The only thing that changes at higher levels is that waiting becomes an error.**
 
-- 워커 단계는 우리가 새로 여는 트랜잭션이라 READ COMMITTED로 명시한다(F17).
-- 접수는 앱 트랜잭션에 합류하므로 앱의 수준을 따른다. REPEATABLE READ·SERIALIZABLE에서 같은 키나 같은 commandId의 동시 접수는 늦은 쪽이 직렬화 실패(SQLSTATE 40001)로 끝난다. 행은 하나만 남고 순번은 꼬이지 않는다. 앱은 40001을 보고 재시도한다. 확인: `HigherIsolationSubmitTest`의 세 장, 두 수준. 모두 6건이다(셋째 장은 02c에 더한 "다른 순서 키의 같은 commandId"). READ COMMITTED의 같은 경우는 `ReadCommittedSubmitTest`가 본다. claim이 끝난 맨 앞을 넘긴 키에 그보다 앞선 스냅숏으로 접수해도 40001이다(`HeadRaceTest`, F33).
-- 대조군(앞의 두 장 4건 기준): 순번을 키 잠금 없이 `max(seq)+1`로 내면 4건 중 1건(같은 키, REPEATABLE READ)만 실패한다. 늦은 쪽이 재시도 가능한 40001이 아니라 유일성 위반(23505)으로 끝난다. 나머지 3건이 통과하는 이유는 `UNIQUE (ordering_key, seq)`가 순번 공유를 막고, SERIALIZABLE에서는 PostgreSQL이 동시 트랜잭션의 유일성 위반을 40001로 바꾸기 때문이다. 높은 수준에서는 키 잠금 말고 방어선이 하나 더 있는 셈이다. READ COMMITTED에서 키 잠금이 빠진 것은 F14가 잡는다.
+- Worker steps are transactions we open ourselves, so they set READ COMMITTED explicitly (F17).
+- Acceptance joins the app transaction, so it follows the app's level. At REPEATABLE READ and SERIALIZABLE, concurrent acceptances on the same key or with the same commandId end with a serialization failure (SQLSTATE 40001) on the late side. Only one row remains and the sequence numbers do not get tangled. The app sees 40001 and retries. Verification: the three chapters of `HigherIsolationSubmitTest` at two levels, 6 tests in total (the third chapter, "the same commandId on a different ordering key", was added in 02c). The same cases at READ COMMITTED are covered by `ReadCommittedSubmitTest`. Accepting on a key whose finished head claim has passed on, with a snapshot older than that, is also 40001 (`HeadRaceTest`, F33).
+- Control experiment (based on the 4 tests of the first two chapters): taking the sequence number as `max(seq)+1` without the key lock fails only 1 of the 4 (same key, REPEATABLE READ). The late side ends with a unique violation (23505) instead of a retryable 40001. The other 3 pass because `UNIQUE (ordering_key, seq)` prevents sharing a sequence number, and at SERIALIZABLE PostgreSQL turns unique violations of concurrent transactions into 40001. At higher levels there is effectively one more line of defense besides the key lock. A missing key lock at READ COMMITTED is caught by F14.
 
-모든 트랜잭션을 SERIALIZABLE로 강제하지 않는 이유: 워커끼리 부딪힐 때마다 재시도가 생겨 처리량이 떨어진다. 이미 잠금으로 막은 문제를 비싸게 한 번 더 막는 셈이다.
-- 교착: 한 앱 트랜잭션이 키 K1, K2 순서로 접수하고 다른 트랜잭션이 K2, K1 순서로 접수하면, 두 트랜잭션이 `ledger_ordering_key`의 행 잠금을 서로 기다려 교착(40P01)한다. READ COMMITTED에서도 같다. 한 트랜잭션에서 여러 키를 접수하면 키를 정해진 순서(예: 문자열 순)로 접수한다. 또 긴 앱 트랜잭션은 커밋할 때까지 그 키의 다른 접수를 모두 기다리게 한다(lock_timeout을 앱이 정한다).
-
+Why all transactions are not forced to SERIALIZABLE: every collision between workers would cause a retry and lower throughput. It would block, a second time and at a high cost, a problem already blocked by locks.
+- Deadlock: if one app transaction submits on keys K1, K2 in that order and another transaction submits on K2, K1, the two transactions wait for each other's row locks on `ledger_ordering_key` and deadlock (40P01). The same happens at READ COMMITTED. When one transaction submits on several keys, submit the keys in a fixed order (for example string order). Also, a long app transaction makes every other acceptance on that key wait until it commits (the app sets lock_timeout).

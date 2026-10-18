@@ -11,15 +11,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-@DisplayName("TB 결과 분류 — 분류표")
+@DisplayName("TB result classification — the classification table")
 class ResultClassificationTest {
 
-    /** 분류표를 그대로 옮긴 것. 기대값은 손으로 쓴다. */
+    /** A direct copy of the classification table. The expected values are written by hand. */
     static final String CLASSIFICATION_TABLE = """
-            # 적용됨
+            # Applied
             Created, APPLIED
             Exists, APPLIED
-            # 충돌: 같은 ID에 다른 내용 (11종)
+            # Conflict: same id with different content (11 codes)
             ExistsWithDifferentFlags, CONFLICT
             ExistsWithDifferentPendingId, CONFLICT
             ExistsWithDifferentTimeout, CONFLICT
@@ -31,7 +31,7 @@ class ResultClassificationTest {
             ExistsWithDifferentUserData32, CONFLICT
             ExistsWithDifferentLedger, CONFLICT
             ExistsWithDifferentCode, CONFLICT
-            # 거절·업무
+            # Rejected, business
             ExceedsCredits, BUSINESS
             ExceedsDebits, BUSINESS
             DebitAccountAlreadyClosed, BUSINESS
@@ -45,9 +45,9 @@ class ResultClassificationTest {
             OverflowsCreditsPosted, BUSINESS
             OverflowsDebits, BUSINESS
             OverflowsCredits, BUSINESS
-            # 거절·이전 실패: 응답이 유실된 첫 시도가 TB의 일시적 실패 7종 중 하나였다. 계좌 없음(INVALID)일 수도 있어 알린다
+            # Rejected, prior failure: the first attempt, whose response was lost, hit one of TB's 7 transient failures. It may also have been a missing account (INVALID), so alert
             IdAlreadyFailed, PRIOR_FAILURE
-            # 거절·잘못된 요청: 앱 버그 또는 설정 오류
+            # Rejected, invalid request: an app bug or a configuration error
             DebitAccountNotFound, INVALID
             CreditAccountNotFound, INVALID
             PendingTransferNotFound, INVALID
@@ -77,11 +77,11 @@ class ResultClassificationTest {
             ReservedFlag, INVALID
             FlagsAreMutuallyExclusive, INVALID
             TimestampMustBeZero, INVALID
-            # 예약 금액은 바뀌지 않아 앱이 미리 안다. 결정적이고 ID를 소진하지 않는다 — ReservationSemanticsTest 장 2·3
+            # The reservation amount does not change, so the app knows it in advance. Deterministic and does not use up the id — ReservationSemanticsTest chapters 2 and 3
             ExceedsPendingTransferAmount, INVALID
-            # timestamp + timeout이 2^63ns(2262년)를 넘을 때만 나온다. timeout 최대 2^32초(136년)라 2126년 전에는 버그·시계 이상이다
+            # Occurs only when timestamp + timeout exceeds 2^63 ns (year 2262). timeout is at most 2^32 s (136 years), so before 2126 it means a bug or a broken clock
             OverflowsTimeout, INVALID
-            # v1 해당 없음: linked chain과 imported 이벤트
+            # Not applicable in v1: linked chains and imported events
             LinkedEventFailed, UNSUPPORTED
             LinkedEventChainOpen, UNSUPPORTED
             ImportedEventExpected, UNSUPPORTED
@@ -96,18 +96,18 @@ class ResultClassificationTest {
 
     @Nested
     @Order(1)
-    @DisplayName("TB 결과 코드를 받으면")
+    @DisplayName("When a TB result code comes back")
     class Codes {
 
         @ParameterizedTest(name = "{0} → {1}", quoteTextArguments = false)
         @CsvSource(textBlock = CLASSIFICATION_TABLE)
-        @DisplayName("분류표에 적힌 분류로 나뉜다")
+        @DisplayName("It falls into the category written in the classification table")
         void fallsIntoItsCategory(LedgerResultCode code, ResultCategory expected) {
             assertFallsInto(code, expected);
         }
 
         @Test
-        @DisplayName("분류표는 모든 코드를 정확히 한 번씩 담는다 — 표에서 빠진 코드가 없게")
+        @DisplayName("The classification table lists every code exactly once — so no code is missing from the table")
         void tableListsEveryCodeOnce() {
             // given
             List<String> codesInTheTable = CLASSIFICATION_TABLE.lines()
@@ -126,32 +126,32 @@ class ResultClassificationTest {
 
     @Nested
     @Order(2)
-    @DisplayName("분류가 정해지면")
+    @DisplayName("Once the category is decided")
     class Categories {
 
         @ParameterizedTest(name = "{0} → {2}", quoteTextArguments = false)
         @CsvSource(textBlock = """
-                APPLIED,       false, 알리지 않는다
-                CONFLICT,      true,  사람에게 알린다
-                BUSINESS,      false, 알리지 않는다
-                PRIOR_FAILURE, true,  사람에게 알린다
-                INVALID,       true,  사람에게 알린다
-                UNSUPPORTED,   true,  사람에게 알린다
+                APPLIED,       false, does not alert
+                CONFLICT,      true,  alerts a person
+                BUSINESS,      false, does not alert
+                PRIOR_FAILURE, true,  alerts a person
+                INVALID,       true,  alerts a person
+                UNSUPPORTED,   true,  alerts a person
                 """)
-        @DisplayName("사람에게 알릴지가 정해진다")
+        @DisplayName("It decides whether to alert a person")
         void decidesWhetherToAlert(ResultCategory category, boolean alerts, String meaning) {
             assertAlerts(category, alerts);
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ──────────────────────────────────────────
 
     private static void assertFallsInto(LedgerResultCode code, ResultCategory expected) {
-        assertThat(code.category()).as("%s가 분류표의 %s로 나뉘기", code, expected).isEqualTo(expected);
+        assertThat(code.category()).as("%s falls into %s of the classification table", code, expected).isEqualTo(expected);
     }
 
     private static void assertAlerts(ResultCategory category, boolean expected) {
-        assertThat(category.alerts()).as("%s 분류가 %s", category, expected ? "알리기" : "알리지 않기")
+        assertThat(category.alerts()).as("category %s %s", category, expected ? "alerts" : "does not alert")
                 .isEqualTo(expected);
     }
 }

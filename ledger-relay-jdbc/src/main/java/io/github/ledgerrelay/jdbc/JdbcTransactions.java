@@ -10,16 +10,19 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Spring 트랜잭션 매니저 위의 트랜잭션 포트. 앱이 쓰는 매니저(DataSource, JPA)를 그대로 받으므로 접수는 앱
- * 트랜잭션에 합류한다. 이미 열린 트랜잭션이 있으면 합류하고(PROPAGATION_REQUIRED), 없으면 새로 연다.
+ * Transaction port on top of a Spring transaction manager. It takes the manager the app uses (DataSource, JPA) as is,
+ * so acceptance joins the app transaction. If a transaction is already open it joins it (PROPAGATION_REQUIRED);
+ * otherwise it opens a new one.
  *
- * <p>새로 여는 트랜잭션(워커 단계)은 READ COMMITTED로 연다. 행 잠금으로 순서를 잡는 설계라, 풀의 기본값이
- * REPEATABLE READ여도 다른 워커와 부딪히면 직렬화 실패로 터지지 않고 기다려야 한다. 합류할 때는 앱의 격리 수준을 그대로
- * 둔다(Spring은 합류 시 격리 수준을 바꾸지 않는다). 높은 수준의 앱 트랜잭션에서는 동시 접수가 직렬화 실패로 끝날 수
- * 있으며 재시도는 앱이 한다.
+ * <p>Transactions it opens itself (worker steps) run at READ COMMITTED. The design orders work with row locks, so even
+ * if the pool default is REPEATABLE READ, a clash with another worker must wait instead of failing with a
+ * serialization failure. When joining, the app's isolation level stays as it is (Spring does not change the isolation
+ * level when joining). In an app transaction at a higher level, concurrent acceptance can end in a serialization
+ * failure, and the app does the retry.
  *
- * <p>JTA({@code JtaTransactionManager})는 지원하지 않는다. 트랜잭션이 시작될 때 DataSource 커넥션이 묶이지 않아 {@link #requireActive()}가
- * 접수를 거부한다. JPA의 {@code DefaultJpaDialect}는 격리 수준 지정을 거부하므로 워커 트랜잭션이 시작하지 못한다(docs/development.md).
+ * <p>JTA ({@code JtaTransactionManager}) is not supported. The DataSource connection is not bound when the transaction
+ * starts, so {@link #requireActive()} rejects acceptance. JPA's {@code DefaultJpaDialect} rejects setting an isolation
+ * level, so worker transactions cannot start (docs/development.md).
  */
 public final class JdbcTransactions implements Transactions {
 
@@ -27,8 +30,8 @@ public final class JdbcTransactions implements Transactions {
     private final DataSource dataSource;
 
     /**
-     * @param dataSource 저장소({@link JdbcCommandStore})가 쓰는 것과 같은 DataSource. 접수할 때 이 DataSource의 커넥션이
-     *                   트랜잭션에 묶여 있는지 확인한다
+     * @param dataSource the same DataSource the store ({@link JdbcCommandStore}) uses. On acceptance it checks that a
+     *                   connection of this DataSource is bound to the transaction
      */
     public JdbcTransactions(PlatformTransactionManager transactionManager, DataSource dataSource) {
         this.dataSource = dataSource;
@@ -42,20 +45,21 @@ public final class JdbcTransactions implements Transactions {
     }
 
     /**
-     * 접수 앞의 확인(G1). 트랜잭션이 열려 있는 것만으로는 부족하다. 그 트랜잭션에 저장소의 DataSource 커넥션이 묶여 있어야
-     * 접수가 앱 트랜잭션과 함께 커밋·롤백된다. 묶여 있지 않으면(JDBC 커넥션을 노출하지 않는 JPA dialect, 트랜잭션 매니저와
-     * 저장소가 서로 다른 DataSource 객체를 쥔 경우) {@code JdbcClient}는 별도 커넥션으로 auto-commit한다. 그래서 거부한다(F18).
+     * Check before acceptance (G1). An open transaction is not enough. A connection of the store's DataSource must be
+     * bound to that transaction, so that acceptance commits and rolls back with the app transaction. If it is not bound
+     * (a JPA dialect that does not expose the JDBC connection, or a transaction manager and store that hold different
+     * DataSource objects), {@code JdbcClient} auto-commits on a separate connection. So it is rejected (F18).
      */
     @Override
     public void requireActive() {
         if (!isActive()) {
             throw new IllegalTransactionStateException(
-                    "트랜잭션 밖에서는 명령을 접수할 수 없습니다(G1). 앱 트랜잭션 안에서 submit()을 부르세요");
+                    "Commands cannot be accepted outside a transaction (G1). Call submit() inside an app transaction");
         }
         if (TransactionSynchronizationManager.getResource(dataSource) == null) {
-            throw new IllegalTransactionStateException("열린 트랜잭션에 저장소의 DataSource 커넥션이 묶여 있지 않습니다(G1). "
-                    + "트랜잭션 매니저와 JdbcCommandStore에 같은 DataSource를 주고, JPA라면 JDBC 커넥션을 노출하는 "
-                    + "dialect(HibernateJpaDialect)를 쓰세요");
+            throw new IllegalTransactionStateException("The open transaction has no bound connection from the store's "
+                    + "DataSource (G1). Give the transaction manager and JdbcCommandStore the same DataSource, "
+                    + "and with JPA use a dialect that exposes the JDBC connection (HibernateJpaDialect)");
         }
     }
 

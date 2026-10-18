@@ -10,8 +10,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-/** 워커는 짧은 간격으로 계속 claim한다. 한 번의 claim이 끝난 이력의 크기에 비례해 일하면 안 된다(F19). */
-@DisplayName("claim 후보 질의의 비용 — 끝난 이력이 쌓여도 미완료 행만 읽는다")
+/** Workers claim continuously at short intervals. One claim must not do work proportional to the size of finished history (F19). */
+@DisplayName("Cost of the claim candidate query — it reads only unfinished rows as finished history grows")
 class LockDueScanTest {
 
     static final int FINISHED_HISTORY = 200_000;
@@ -42,11 +42,11 @@ class LockDueScanTest {
 
     @Nested
     @Order(1)
-    @DisplayName("끝난 명령 20만 건 뒤에 접수된 명령 100건이 있으면")
+    @DisplayName("When 100 accepted commands sit behind 200,000 finished commands")
     class BehindALongHistory {
 
         @Test
-        @DisplayName("claim 질의는 끝난 행을 하나씩 걸러 내며 훑지 않는다")
+        @DisplayName("The claim query does not scan through finished rows filtering them out one by one")
         void theDueQueryDoesNotFilterThroughFinishedRows() {
             // when
             String plan = storage.transactions().inTransaction(() -> storage.sql()
@@ -58,13 +58,13 @@ class LockDueScanTest {
         }
     }
 
-    /** 실행 계획의 "Rows Removed by Filter"를 모두 더한 값이 상한 이하다. */
+    /** The sum of all "Rows Removed by Filter" in the query plan is within the limit. */
     private static void assertFilteredOutAtMost(long limit, String plan) {
         Matcher removed = Pattern.compile("Rows Removed by Filter: (\\d+)").matcher(plan);
         long total = 0;
         while (removed.find()) {
             total += Long.parseLong(removed.group(1));
         }
-        assertThat(total).as("걸러 낸 행 수 (실행 계획:%n%s)", plan).isLessThanOrEqualTo(limit);
+        assertThat(total).as("rows filtered out (query plan:%n%s)", plan).isLessThanOrEqualTo(limit);
     }
 }

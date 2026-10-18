@@ -11,8 +11,8 @@ import org.testcontainers.containers.Network;
 import org.testcontainers.toxiproxy.ToxiproxyContainer;
 
 /**
- * Toxiproxy를 앞에 둔 TigerBeetle. 클라이언트는 프록시로만 접속하므로, 프록시를 끊으면
- * "요청은 보냈지만 응답이 없는" 상황을 결정적으로 만들 수 있다(기반).
+ * TigerBeetle behind Toxiproxy. The client connects only through the proxy, so cutting the proxy produces the situation
+ * "the request was sent but no reply arrives" deterministically (foundation).
  */
 public final class ProxiedTigerBeetle implements AutoCloseable {
 
@@ -37,11 +37,13 @@ public final class ProxiedTigerBeetle implements AutoCloseable {
         return start(network -> new ToxiproxyContainer(TOXIPROXY_IMAGE));
     }
 
-    /** 테스트 전용: Toxiproxy 컨테이너 생성을 바꿔 기동 실패 경로를 검증한다. */
+    /** Test only: replaces how the Toxiproxy container is created, to verify the startup failure path. */
     static ProxiedTigerBeetle start(Function<Network, ToxiproxyContainer> toxiproxyFactory) {
         Network network = Network.newNetwork();
-        // 네트워크 별칭은 사용자 정의 네트워크에서만 유효하므로 여기서 붙인다(TigerBeetleContainer 단독 사용 시에는 없음)
-        // 클라이언트는 프록시로만 붙으므로 TB 포트를 호스트에 공개하지 않는다(F26의 원인 경로를 없앤다)
+        // Network aliases work only on a user-defined network, so they are added here (none when TigerBeetleContainer
+        // is used alone)
+        // The client connects only through the proxy, so the TB port is not published on the host (removes the cause
+        // path of F26)
         TigerBeetleContainer tigerBeetle = new TigerBeetleContainer()
                 .withoutPublishedPort()
                 .withNetwork(network)
@@ -57,12 +59,13 @@ public final class ProxiedTigerBeetle implements AutoCloseable {
                     TigerBeetleContainer.NETWORK_ALIAS + ":" + TigerBeetleContainer.PORT);
             return new ProxiedTigerBeetle(network, tigerBeetle, toxiproxy, proxy);
         } catch (RuntimeException | IOException e) {
-            // 어느 단계에서 실패하든 이미 띄운 것을 정리한다. 기동 전 컨테이너의 stop()은 아무 일도 하지 않는다.
+            // Whatever step fails, clean up what was already started. stop() on a container that never started does
+            // nothing.
             toxiproxy.stop();
             tigerBeetle.stop();
             network.close();
             if (e instanceof IOException io) {
-                throw new UncheckedIOException("Toxiproxy 프록시 생성 실패", io);
+                throw new UncheckedIOException("Failed to create the Toxiproxy proxy", io);
             }
             throw (RuntimeException) e;
         }
@@ -72,7 +75,10 @@ public final class ProxiedTigerBeetle implements AutoCloseable {
         return TigerBeetleContainer.ipv4(toxiproxy.getHost()) + ":" + toxiproxy.getMappedPort(PROXY_PORT);
     }
 
-    /** Toxiproxy 관리 API 주소({@code http://IPv4:포트}). 프록시 이름은 {@code tigerbeetle}이다. 앱이 직접 끊고 이을 때 쓴다. */
+    /**
+     * Address of the Toxiproxy admin API ({@code http://IPv4:port}). The proxy is named {@code tigerbeetle}. Used when
+     * the app cuts and restores the connection itself.
+     */
     public String controlUrl() {
         return "http://" + TigerBeetleContainer.ipv4(toxiproxy.getHost()) + ":" + toxiproxy.getMappedPort(CONTROL_PORT);
     }
@@ -81,17 +87,17 @@ public final class ProxiedTigerBeetle implements AutoCloseable {
         return new Client(UInt128.asBytes(0), new String[] {clientAddress()});
     }
 
-    /** 프록시 뒤 TB 서버가 살아 있는지 확인한다. {@link TigerBeetleContainer#assertAlive()} 참고. */
+    /** Checks that the TB server behind the proxy is alive. See {@link TigerBeetleContainer#assertAlive()}. */
     public void assertAlive() {
         tigerBeetle.assertAlive();
     }
 
-    /** 프록시를 끊는다. 기존 연결도 닫힌다. */
+    /** Cuts the proxy. Existing connections are closed too. */
     public void cutConnection() throws IOException {
         proxy.disable();
     }
 
-    /** 프록시를 다시 연다. */
+    /** Opens the proxy again. */
     public void restoreConnection() throws IOException {
         proxy.enable();
     }

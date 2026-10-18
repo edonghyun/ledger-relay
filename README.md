@@ -1,103 +1,103 @@
 # ledger-relay
 
-PostgreSQL에 업무 데이터를 두고 TigerBeetle(TB)에 돈의 이동을 기록하는 Java/Spring 애플리케이션을 위한 라이브러리다. 원장 명령을 업무 데이터와 **같은 PG 트랜잭션**으로 접수하고, **순서 키 단위로 원장 결과를 기준 삼아** 순서대로 TB에 제출한다. 그 결과를 업무 상태로 분류해 앱의 후속 처리와 함께 원자적으로 기록한다.
+A library for Java/Spring applications that keep business data in PostgreSQL and record money movements in TigerBeetle (TB). It accepts ledger commands in **the same PG transaction** as the business data and submits them to TB in order, **per ordering key, based on the ledger result**. It classifies each result into a business state and records it atomically together with the application's follow-up work.
 
-PG와 TB는 한 트랜잭션으로 묶을 수 없다. TB 응답은 유실될 수 있고(클라이언트에 timeout이 없다), 일시적 실패로 끝난 ID는 다시 쓸 수 없으며, 확정이 예약보다 먼저 도착하면 확정 ID가 소진된다. 일반 Outbox는 "전달 성공"으로 순서를 매긴다. 이 모듈은 "원장 결과"로 다음 명령을 보낼지, 기다릴지, 건너뛸지 정한다.
+PG and TB cannot share one transaction. TB replies can be lost (the client has no timeout), an id that ended in a transient failure cannot be used again, and a post that arrives before its reservation uses up the post's id. A regular outbox orders messages by "delivered successfully". This module decides from the "ledger result" whether to send the next command, wait, or skip it.
 
-> 상태: 개발 중(v0.1 전). 공개 API는 아직 바뀔 수 있다.
+> Status: in development (before v0.1). The public API may still change.
 
-## 만든 방식
+## How this was built
 
-이 저장소의 코드, 테스트, 문서는 **Claude Code(Anthropic의 AI 코딩 도구)가 작성했다.** 나(Donghyun Lee)는 무엇을 만들지와 설계 방향을 정하고, 단계마다 설계와 구현 계획을 승인하고, 결과를 검토했다. 커밋마다 붙은 `Co-Authored-By: Claude` 줄이 그 기록이다.
+The code, tests and documentation in this repository were **written by Claude Code (Anthropic's AI coding tool).** I (Donghyun Lee) decided what to build and the design direction, approved the design and the implementation plan at each stage, and reviewed the results. The `Co-Authored-By: Claude` line on each commit is the record of this.
 
-단계마다 같은 순서로 진행했다.
+Each stage followed the same steps.
 
-1. 설계 문서를 쓰고 승인한다.
-2. 구현 계획을 쓰고 승인한다.
-3. 테스트를 먼저 쓰고, 실패를 확인한 뒤 구현한다(TDD).
-4. 새 리뷰어가 브랜치 전체를 리뷰하고, 찾은 결함을 재현 테스트와 함께 고친다.
+1. Write the design document and approve it.
+2. Write the implementation plan and approve it.
+3. Write the tests first, confirm that they fail, then implement (TDD).
+4. A fresh reviewer reviews the whole branch, and the defects found are fixed together with a reproduction test.
 
-장애를 막은 변경마다 재현 테스트와 대조군 결과를 `docs/failure-modes.md`에 남겼다. 대조군은 그 수리를 되돌렸을 때 테스트가 실제로 실패하는지 확인한 것이다.
+For every change that prevents a failure, the reproduction test and the control experiment result are recorded in `docs/failure-modes.md`. The control experiment checks that the test really fails when the fix is reverted.
 
-## 샘플 쇼핑몰로 보기
+## Try it with the sample shop
 
-준비물은 Docker뿐이다(JDK, Node 필요 없음). Docker에 메모리를 3GB 이상 준다(TigerBeetle만 1.5GB쯤 쓴다). 저장소 루트에서:
+You only need Docker (no JDK, no Node). Give Docker at least 3 GB of memory (TigerBeetle alone uses about 1.5 GB). From the repository root:
 
 ```bash
-docker compose up --build        # 처음에는 이미지 빌드로 몇 분 걸린다
+docker compose up --build        # the first run takes a few minutes to build the images
 ```
 
-브라우저로 <http://localhost:8090>을 연다(포트를 바꾸려면 `SHOP_PORT=9000 docker compose up --build`). 끌 때는 `docker compose down`. 데모는 매번 빈 DB와 빈 원장에서 시작한다(Ctrl-C로 멈췄다 `up`하면 그대로 이어진다).
+Open <http://localhost:8090> in a browser (to change the port: `SHOP_PORT=9000 docker compose up --build`). To shut it down: `docker compose down`. The demo starts from an empty DB and an empty ledger each time (if you stop it with Ctrl-C and run `up` again, it continues where it was).
 
-구성은 PostgreSQL, TigerBeetle, 둘 사이의 Toxiproxy(끊기 스위치), 같은 이미지로 띄운 앱 둘(`shop-a`는 화면과 워커, `shop-b`는 워커)이다. 화면의 숫자는 모두 PG와 TB의 실제 상태에서 나온다. 통화는 태국 바트(฿)이고, 결제는 카드처럼 **승인(예약) → 출고 때 매입(확정)** 이다.
+It runs PostgreSQL, TigerBeetle, Toxiproxy between them (the cut-off switch), and two apps from the same image (`shop-a` serves the UI and runs a worker, `shop-b` runs a worker). Every number on the screen comes from the real state of PG and TB. The currency is the Thai baht (฿), and payment works like a card: **authorize (reserve) → capture on shipping (post)**.
 
-| 장면 | 하는 것 | 보이는 것 |
+| Scene | What you do | What you see |
 |---|---|---|
-| ① 정상 결제 | Store에서 `결제하기` → 주문의 `Ship` | `authorized`(구매자 돈이 묶임) → `paid`(가맹점으로 이동). 오른쪽 타임라인에 단계별 시각, 이체 ID, TB 전송 횟수, 잔액 |
-| ② TB 장애 | Scenarios에서 TigerBeetle 스위치를 끄고 몇 번 결제 → 다시 켬 | 결제는 바로 접수되고 backlog가 쌓이며 TB 점이 빨강. 켜면 몇 초 안에 backlog가 비고 아래 Consistency는 초록 그대로 |
-| ③ 멈춤과 운영자 | Scenarios의 `Inject bad post` → Operator에서 `Abandon` | 그 주문의 확정만 멈추고 다른 주문은 흐른다. 포기하면 해제가 뒤따라 주문은 `cancelled`, 잔액은 원래대로 |
-| ④ 멱등 | Scenarios의 `Double click` | 같은 Idempotency-Key 요청 둘 → 주문 하나(201과 200), 예약 하나 |
-| ⑤ 취소 | 결제 승인된 주문의 `Cancel` | 예약 해제, 묶였던 돈이 풀림 |
+| ① Normal payment | `Pay` in Store → `Ship` on the order | `authorized` (the buyer's money is held) → `paid` (moved to the merchant). The timeline on the right shows the time of each step, the transfer id, the number of sends to TB, and the balances |
+| ② TB outage | In Scenarios, turn the TigerBeetle switch off, pay a few times → turn it back on | Payments are accepted at once, the backlog grows and the TB dot turns red. After you turn it on, the backlog empties within a few seconds and Consistency below stays green |
+| ③ Halt and operator | `Inject bad post` in Scenarios → `Abandon` in Operator | Only that order's post halts; other orders keep flowing. Abandoning it is followed by a void, the order becomes `cancelled`, and the balances return to where they were |
+| ④ Idempotency | `Double click` in Scenarios | Two requests with the same Idempotency-Key → one order (201 and 200), one reservation |
+| ⑤ Cancel | `Cancel` on an authorized order | The reservation is voided and the held money is released |
 
-`Burst ×50`은 주문 50건을 한꺼번에 넣는다. Store의 Workers 칸에서 두 인스턴스가 나눠 보내는 것이 보인다. 이 장면들은 끝-끝 테스트(`./gradlew :examples-shop:composeTest`)가 실제 `compose.yaml`로 그대로 돈다.
+`Burst ×50` places 50 orders at once. The Workers panel in Store shows the two instances sharing the sends. The end-to-end test (`./gradlew :examples-shop:composeTest`) runs these scenes as they are against the real `compose.yaml`.
 
-## 지금 되는 것
+## What works now
 
-| 모듈 | 내용 |
+| Module | Contents |
 |---|---|
-| `ledger-relay-core` | 명령 모델과 검증, 내용 해시, 상태 전이표·결과 분류표, 순서 게이트, 서비스(접수, claim, 결과 쓰기, 멈춤·포기), 워커 한 바퀴(`RelayWorker`: 묶음 제출, in-flight 상한, submit-timeout). JDK만 쓴다 |
-| `ledger-relay-jdbc` | PostgreSQL 저장소(`JdbcCommandStore`)와 Spring 트랜잭션 어댑터(`JdbcTransactions`), 스키마 `schema.sql`. DataSource·JPA 트랜잭션 매니저에서 앱 트랜잭션에 합류한다 |
-| `ledger-relay-tigerbeetle` | TB 0.17.9 Java 클라이언트 어댑터(`TigerBeetleLedgerClient`: 제출, 대사용 조회), 시간순 이체 ID 생성기(`TigerBeetleTransferIds`), Testcontainers 픽스처 |
-| `ledger-relay-spring-boot` | Spring Boot 4.0 자동 설정, 워커 루프와 정상 종료, health(TB가 끊겨도 UP), 운영자 포트 빈 |
+| `ledger-relay-core` | Command model and validation, content hash, state transition table and result classification table, ordering gate, services (acceptance, claim, writing the result, halt and abandon), one worker cycle (`RelayWorker`: batched submission, in-flight limit, submit-timeout). Uses only the JDK |
+| `ledger-relay-jdbc` | PostgreSQL store (`JdbcCommandStore`), Spring transaction adapter (`JdbcTransactions`), schema `schema.sql`. Joins the app transaction from a DataSource or JPA transaction manager |
+| `ledger-relay-tigerbeetle` | Adapter for the TB 0.17.9 Java client (`TigerBeetleLedgerClient`: submission, lookups for reconciliation), time-ordered transfer id generator (`TigerBeetleTransferIds`), Testcontainers fixture |
+| `ledger-relay-spring-boot` | Spring Boot 4.0 auto-configuration, worker loop and graceful shutdown, health (UP even when TB is unreachable), operator port bean |
 
-운영자 포트 `LedgerRelayOperator`: 멈춘 명령 목록(이유·시각), 포기, PG와 TB의 대사.
+Operator port `LedgerRelayOperator`: list of halted commands (reason and time), abandon, reconciliation between PG and TB.
 
-샘플 앱 `examples/shop`(Gradle 프로젝트 `:examples-shop`)은 라이브러리를 쓰는 쪽의 본보기다. 라이브러리 모듈은 이것에 의존하지 않는다.
+The sample app `examples/shop` (Gradle project `:examples-shop`) shows how an application uses the library. The library modules do not depend on it.
 
-## 앱에서 쓰기 (Spring Boot)
+## Using it in an app (Spring Boot)
 
-1. 의존성을 더한다. 아직 Maven Central에 올리지 않았으므로 이 저장소에서 `./gradlew publishToMavenLocal`로 로컬 Maven 저장소에 올린 뒤, 앱에서 `mavenLocal()`과 `io.github.ledgerrelay:ledger-relay-spring-boot:0.1.0-SNAPSHOT`을 쓴다. 조립 예시는 `examples/shop`에 있다.
-2. `schema.sql`(jdbc jar의 `io/github/ledgerrelay/jdbc/schema.sql`)을 앱의 마이그레이션 도구로 적용한다. 라이브러리는 스키마를 자동 적용하지 않는다.
-3. 설정:
+1. Add the dependency. It is not on Maven Central yet, so run `./gradlew publishToMavenLocal` in this repository to publish it to the local Maven repository, then use `mavenLocal()` and `io.github.ledgerrelay:ledger-relay-spring-boot:0.1.0-SNAPSHOT` in the app. `examples/shop` shows the wiring.
+2. Apply `schema.sql` (`io/github/ledgerrelay/jdbc/schema.sql` in the jdbc jar) with the app's migration tool. The library does not apply the schema automatically.
+3. Configuration:
 
 ```yaml
 ledger-relay:
-  tigerbeetle: { cluster-id: 0, addresses: "127.0.0.1:3000" }   # IP:포트만 된다(F39). 또는 com.tigerbeetle.Client 빈
+  tigerbeetle: { cluster-id: 0, addresses: "127.0.0.1:3000" }   # IP:port only (F39). Or a com.tigerbeetle.Client bean
   worker: { concurrency: 4, batch-size: 128, max-in-flight: 1024, lease-duration: 30s, submit-timeout: 5s }
   backoff: { initial: 200ms, max: 30s }
 ```
 
-4. 명령이 끝났을 때 앱의 데이터에 결과를 반영하는 `LedgerOutcomeHandler` 빈을 하나 등록한다. 핸들러는 결과 쓰기와 같은 트랜잭션에서 돈다. 핸들러 안에서 다시 접수할 때는 **앱의 행을 먼저 고친 뒤 접수한다**(`docs/development.md` "트랜잭션과 잠금").
-5. 앱 트랜잭션 안에서 `LedgerRelay.submit(...)`으로 접수한다. 업무 데이터와 함께 커밋되거나 함께 롤백된다.
+4. Register one `LedgerOutcomeHandler` bean that applies the result to the app's data when a command finishes. The handler runs in the same transaction as writing the result. When the handler submits again, **update the app's rows first, then submit** (`docs/development.md`, "Transactions and locks").
+5. Submit with `LedgerRelay.submit(...)` inside an app transaction. The command commits or rolls back together with the business data.
 
-앱을 컨테이너로 띄울 때는 TB Java 클라이언트가 io_uring을 쓰므로 seccomp가 그것을 허용해야 한다(F41, `docs/development.md`).
+When you run the app in a container, seccomp must allow io_uring, because the TB Java client uses it (F41, `docs/development.md`).
 
-## 아직 안 되는 것
+## Not done yet
 
-- Micrometer 지표와 대시보드
-- 워커를 처리 도중 강제로 죽이는 장애 실험(열린 장애 O2)
-- 끝난 명령의 보관·정리 작업
-- Maven Central 배포
+- Micrometer metrics and dashboards
+- Failure experiments that kill a worker in the middle of processing (open failure O2)
+- Archiving and cleanup of finished commands
+- Publishing to Maven Central
 
-## 문서
+## Documentation
 
-- [docs/design.md](docs/design.md): 보장(G1~G7), 핵심 개념, 모듈 구성
-- [docs/failure-modes.md](docs/failure-modes.md): 막은 장애마다 깨지는 것, 재현 테스트, 구조, 확인(대조군)
-- [docs/development.md](docs/development.md): 트랜잭션과 잠금 순서, 운영 메모, 샘플 앱 구성, 알려진 문제
-- [docs/testing.md](docs/testing.md): 테스트 작성 규칙(테스트 트리 = 스펙 목차, given/when/then, 효과 이름 assert)
+- [docs/design.md](docs/design.md): guarantees (G1–G7), core concepts, module layout
+- [docs/failure-modes.md](docs/failure-modes.md): for each prevented failure, what breaks, the reproduction test, the structure, and the verification (control experiment)
+- [docs/development.md](docs/development.md): transactions and lock order, operations notes, sample app setup, known issues
+- [docs/testing.md](docs/testing.md): rules for writing tests (test tree = table of contents of the spec, given/when/then, asserts named after effects)
 
-## 빌드와 테스트
+## Build and test
 
-JDK 21이 필요하다(없으면 Gradle toolchain이 내려받는다). PG와 TB 테스트는 Docker(Testcontainers)를 쓴다.
+Requires JDK 21 (the Gradle toolchain downloads it if missing). The PG and TB tests use Docker (Testcontainers).
 
 ```bash
-./gradlew test                          # 끝-끝 테스트를 뺀 전체
-./gradlew :ledger-relay-core:test       # Docker 없이 도는 core만
-./gradlew check                         # 위에 더해 샘플 앱 끝-끝 테스트(compose.yaml로 이미지 빌드부터)
+./gradlew test                          # everything except the end-to-end tests
+./gradlew :ledger-relay-core:test       # core only, runs without Docker
+./gradlew check                         # the above plus the sample app end-to-end tests (builds the images from compose.yaml)
 ```
 
-TB 컨테이너는 `seccomp=unconfined`로 띄운다(io_uring). 기동 직후의 간헐 panic과 그 완화는 `docs/failure-modes.md` F26에 있다.
+The TB container runs with `seccomp=unconfined` (io_uring). The intermittent panic right after startup and its mitigation are described in `docs/failure-modes.md` F26.
 
-## 라이선스
+## License
 
 [Apache License 2.0](LICENSE)

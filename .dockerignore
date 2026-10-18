@@ -1,4 +1,4 @@
-# 샘플 쇼핑몰 이미지 빌드에 필요 없는 것
+# Not needed to build the sample shop image
 **/build
 .gradle
 .git

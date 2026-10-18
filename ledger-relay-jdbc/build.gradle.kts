@@ -3,13 +3,13 @@ plugins {
     `java-test-fixtures`
 }
 
-// main 의존은 core와 Spring JDBC·TX뿐이다. 드라이버·풀·JPA는 앱이 고른다
+// main depends only on core and Spring JDBC/TX. The app chooses the driver, the pool and JPA
 dependencies {
     api(project(":ledger-relay-core"))
     implementation(libs.spring.jdbc)
     implementation(libs.spring.tx)
 
-    // PostgreSQL 테스트 컨테이너와 스키마. spring-boot 모듈과 샘플 앱의 테스트도 쓴다
+    // PostgreSQL test container and schema. The spring-boot module and the sample app tests use them too
     testFixturesApi(libs.testcontainers.postgresql)
     testFixturesImplementation(libs.spring.jdbc)
 
@@ -17,7 +17,7 @@ dependencies {
     testImplementation(libs.archunit)
     testImplementation(libs.postgresql)
     testImplementation(libs.hikaricp)
-    // 앱이 JPA 트랜잭션 매니저를 쓰는 경우
+    // For apps that use a JPA transaction manager
     testImplementation(libs.spring.orm)
     testImplementation(libs.spring.context)
     testImplementation(libs.hibernate.core)
@@ -26,12 +26,12 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform {
-        // 측정용 테스트는 기본 실행에서 뺀다(:ledger-relay-jdbc:measurement)
+        // Measurement tests are excluded from the default run (:ledger-relay-jdbc:measurement)
         excludeTags("measurement")
     }
 }
 
-// 측정용 테스트만 돈다. 판정하지 않고 실행 계획을 표준 출력에 남긴다
+// Runs only the measurement tests. They assert nothing and print query plans to standard output
 tasks.register<Test>("measurement") {
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath

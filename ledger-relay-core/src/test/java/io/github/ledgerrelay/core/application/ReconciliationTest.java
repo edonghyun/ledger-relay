@@ -24,13 +24,15 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("대사 — PG의 최종 상태와 TB에 실제로 있는 이체를 맞춘다")
+@DisplayName("Reconciliation — matches final states in PG against the transfers that actually exist in TB")
 class ReconciliationTest {
 
     static final WorkerSettings SETTINGS =
             new WorkerSettings(128, 1024, Duration.ofSeconds(30), Duration.ofMillis(200), Duration.ofMillis(100));
     static final Duration LOOKUP_TIMEOUT = Duration.ofMillis(300);
-    /** 이체 ID 생성기는 1부터 차례로 낸다. 테스트의 첫 접수가 받는 ID다. */
+    /**
+     * The transfer id generator hands out ids from 1 in order. This is the id the test's first accepted command gets.
+     */
     static final BigInteger FIRST_TRANSFER_ID = BigInteger.ONE;
 
     InMemoryStorage storage;
@@ -51,11 +53,11 @@ class ReconciliationTest {
 
     @Nested
     @Order(1)
-    @DisplayName("PG와 TB가 같으면")
+    @DisplayName("When PG and TB agree")
     class InAgreement {
 
         @Test
-        @DisplayName("적용된 명령이 모두 일치한다")
+        @DisplayName("Every applied command matches")
         void everythingAppliedMatches() {
             // given
             processed(transfer("pay-1", "order-1"), transfer("pay-2", "order-2"));
@@ -64,13 +66,13 @@ class ReconciliationTest {
             ReconciliationReport report = operator.reconcile(0, 10);
 
             // then
-            assertThat(report.checked()).as("확인한 명령").isEqualTo(2);
-            assertThat(report.matched()).as("일치").isEqualTo(2);
-            assertThat(report.mismatches()).as("어긋남").isEmpty();
+            assertThat(report.checked()).as("commands checked").isEqualTo(2);
+            assertThat(report.matched()).as("matched").isEqualTo(2);
+            assertThat(report.mismatches()).as("mismatches").isEmpty();
         }
 
         @Test
-        @DisplayName("예약이 적용된 뒤 확정돼도 예약은 일치한다 — TB에는 보류 이체가 그대로 있다")
+        @DisplayName("A reservation still matches after it is posted — the pending transfer stays in TB as is")
         void aReservationLaterPostedStillMatches() {
             // given
             processed(LedgerCommand.reserve("hold-1").orderingKey("order-1").debit(1).credit(2).amount(500).ledger(1)
@@ -81,12 +83,12 @@ class ReconciliationTest {
             ReconciliationReport report = operator.reconcile(0, 10);
 
             // then
-            assertThat(report.checked()).as("확인한 명령").isEqualTo(2);
-            assertThat(report.matched()).as("일치").isEqualTo(2);
+            assertThat(report.checked()).as("commands checked").isEqualTo(2);
+            assertThat(report.matched()).as("matched").isEqualTo(2);
         }
 
         @Test
-        @DisplayName("거절된 명령은 TB에 없으므로 일치한다")
+        @DisplayName("A rejected command is not in TB, so it matches")
         void aRejectionAbsentFromTheLedgerMatches() {
             // given
             fake.answer(FIRST_TRANSFER_ID, ExceedsCredits);
@@ -96,17 +98,17 @@ class ReconciliationTest {
             ReconciliationReport report = operator.reconcile(0, 10);
 
             // then
-            assertThat(report.matched()).as("일치").isEqualTo(1);
+            assertThat(report.matched()).as("matched").isEqualTo(1);
         }
     }
 
     @Nested
     @Order(2)
-    @DisplayName("PG와 TB가 다르면")
+    @DisplayName("When PG and TB disagree")
     class InDisagreement {
 
         @Test
-        @DisplayName("PG는 적용인데 TB에 없으면 TB에 없음으로 알린다")
+        @DisplayName("Applied in PG but absent from TB is reported as missing in TB")
         void anAppliedCommandMissingInTheLedgerIsReported() {
             // given
             processed(transfer("pay-1", "order-1"));
@@ -116,12 +118,12 @@ class ReconciliationTest {
             ReconciliationReport report = operator.reconcile(0, 10);
 
             // then
-            assertThat(report.mismatches()).as("어긋남")
+            assertThat(report.mismatches()).as("mismatches")
                     .containsExactly(new Mismatch("pay-1", transferIdOf("pay-1"), Mismatch.Kind.MISSING_IN_LEDGER));
         }
 
         @Test
-        @DisplayName("PG는 거절인데 TB에 있으면 TB에 있으면 안 됨으로 알린다")
+        @DisplayName("Rejected in PG but present in TB is reported as unexpected in TB")
         void aRejectedCommandFoundInTheLedgerIsReported() {
             // given
             fake.answer(FIRST_TRANSFER_ID, ExceedsCredits);
@@ -133,12 +135,12 @@ class ReconciliationTest {
             ReconciliationReport report = operator.reconcile(0, 10);
 
             // then
-            assertThat(report.mismatches()).as("어긋남")
+            assertThat(report.mismatches()).as("mismatches")
                     .containsExactly(new Mismatch("pay-1", transferIdOf("pay-1"), Mismatch.Kind.UNEXPECTED_IN_LEDGER));
         }
 
         @Test
-        @DisplayName("금액이 다르면 다름으로 알린다")
+        @DisplayName("A different amount is reported as different")
         void aDifferentAmountIsReported() {
             // given
             processed(transfer("pay-1", "order-1"));
@@ -148,18 +150,18 @@ class ReconciliationTest {
             ReconciliationReport report = operator.reconcile(0, 10);
 
             // then
-            assertThat(report.mismatches()).as("어긋남")
+            assertThat(report.mismatches()).as("mismatches")
                     .containsExactly(new Mismatch("pay-1", transferIdOf("pay-1"), Mismatch.Kind.DIFFERENT));
         }
     }
 
     @Nested
     @Order(3)
-    @DisplayName("범위와 실패")
+    @DisplayName("Paging and failure")
     class PagingAndFailure {
 
         @Test
-        @DisplayName("충돌로 끝난 명령은 보지 않는다 — 그 ID의 TB 이체는 우리 것이 아니다")
+        @DisplayName("Commands that ended in conflict are not checked — the TB transfer with that id is not ours")
         void conflictsAreNotChecked() {
             // given
             fake.answer(FIRST_TRANSFER_ID, ExistsWithDifferentAmount);
@@ -169,12 +171,12 @@ class ReconciliationTest {
             ReconciliationReport report = operator.reconcile(0, 10);
 
             // then
-            assertThat(report.checked()).as("확인한 명령").isZero();
-            assertThat(report.lastPosition()).as("마지막 위치").isEqualTo(rowIdOf("pay-1"));
+            assertThat(report.checked()).as("commands checked").isZero();
+            assertThat(report.lastPosition()).as("last position").isEqualTo(rowIdOf("pay-1"));
         }
 
         @Test
-        @DisplayName("마지막 위치부터 이어서 다음 페이지를 본다")
+        @DisplayName("The next page continues from the last position")
         void theLastPositionContinuesTheNextPage() {
             // given
             processed(transfer("pay-1", "order-1"), transfer("pay-2", "order-2"), transfer("pay-3", "order-3"));
@@ -184,24 +186,24 @@ class ReconciliationTest {
             ReconciliationReport second = operator.reconcile(first.lastPosition(), 2);
 
             // then
-            assertThat(first.checked()).as("첫 페이지").isEqualTo(2);
-            assertThat(first.lastPosition()).as("첫 페이지의 마지막 위치").isEqualTo(rowIdOf("pay-2"));
-            assertThat(second.checked()).as("둘째 페이지").isEqualTo(1);
+            assertThat(first.checked()).as("first page").isEqualTo(2);
+            assertThat(first.lastPosition()).as("last position of the first page").isEqualTo(rowIdOf("pay-2"));
+            assertThat(second.checked()).as("second page").isEqualTo(1);
         }
 
         @Test
-        @DisplayName("TB가 조회에 답하지 않으면 TB를 쓸 수 없음으로 끝난다 — 끝없이 기다리지 않는다")
+        @DisplayName("When TB does not answer the lookup, it ends with TB unavailable — it does not wait forever")
         void aSilentLedgerFailsAsUnavailable() {
             // given
             processed(transfer("pay-1", "order-1"));
             fake.holdLookups();
 
             // then
-            assertThatThrownBy(() -> operator.reconcile(0, 10)).as("대사").isInstanceOf(LedgerUnavailableException.class);
+            assertThatThrownBy(() -> operator.reconcile(0, 10)).as("reconciliation").isInstanceOf(LedgerUnavailableException.class);
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ──────────────────────────────────────────
 
     private void processed(LedgerCommand... commands) {
         for (LedgerCommand command : commands) {

@@ -2,45 +2,45 @@ package io.github.ledgerrelay.core.domain;
 
 import java.util.Set;
 
-/** 전이표 한 칸의 결과. */
+/** The result of one cell of the transition table. */
 public record Transition(Outcome outcome, StoredState to, Set<Effect> effects) {
 
     public enum Outcome {
-        /** {@link #to()} 상태로 이동하고 {@link #effects()}를 낸다. */
+        /** Moves to state {@link #to()} and produces {@link #effects()}. */
         MOVE,
-        /** 게이트가 닫혀 아무것도 하지 않는다. */
+        /** The gate is closed; nothing is done. */
         UNCHANGED,
-        /** fenced UPDATE가 0행을 갱신한다. 정상적인 경쟁 결과이며 stale_write_rejected로 기록한다. */
+        /** The fenced UPDATE updates zero rows. A normal race outcome, recorded as stale_write_rejected. */
         ZERO_ROWS,
-        /** 모듈이 이 사건을 만들면 버그다. */
+        /** If the module produces this event, it is a bug. */
         IMPOSSIBLE,
-        /** 이 상태에서는 개념상 생길 수 없는 사건이다. */
+        /** The event cannot conceptually occur in this state. */
         NOT_APPLICABLE
     }
 
     public enum Effect {
-        /** lease_token += 1, lease_expires_at 갱신. */
+        /** lease_token += 1, and lease_expires_at is renewed. */
         INCREMENT_LEASE_TOKEN,
-        /** 결과 반영 핸들러를 같은 트랜잭션에서 실행한다(G6). */
+        /** Runs the outcome handler in the same transaction (G6). */
         RUN_HANDLER,
         /** next_attempt_at = now() + backoff. */
         BACKOFF,
-        /** TB 결과를 known_result로 남겨 다음 claim이 TB를 건너뛰게 한다. */
+        /** Keeps the TB result as known_result so the next claim bypasses TB. */
         KEEP_KNOWN_RESULT,
-        /** submit_count += 1. 처음이면 first_submitted_at = now(). */
+        /** submit_count += 1, and first_submitted_at = now() the first time. */
         RECORD_SUBMISSION,
-        /** handler_failures += 1. 막힌 키를 지표로 드러내는 근거다. */
+        /** handler_failures += 1. This is what exposes blocked keys in the metrics. */
         COUNT_HANDLER_FAILURE
     }
 
-    /** 이동만 목적 상태와 효과를 갖는다. 나머지 결과는 둘 다 없다. */
+    /** Only a move has a target state and effects. The other outcomes have neither. */
     public Transition {
         effects = Set.copyOf(effects);
         if (outcome == Outcome.MOVE && to == null) {
-            throw new IllegalArgumentException("이동(MOVE)에는 목적 상태가 필요하다");
+            throw new IllegalArgumentException("A move (MOVE) requires a target state");
         }
         if (outcome != Outcome.MOVE && (to != null || !effects.isEmpty())) {
-            throw new IllegalArgumentException(outcome + "에는 목적 상태와 효과가 없어야 한다: " + to + ", " + effects);
+            throw new IllegalArgumentException(outcome + " must have no target state and no effects: " + to + ", " + effects);
         }
     }
 

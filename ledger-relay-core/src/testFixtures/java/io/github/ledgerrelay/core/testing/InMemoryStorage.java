@@ -5,7 +5,7 @@ import io.github.ledgerrelay.core.spi.OrderingKeys;
 import io.github.ledgerrelay.core.spi.Transactions;
 import java.time.Duration;
 
-/** 메모리 저장소 한 벌. 계약 테스트와 6단계 무작위 검증(E6a)이 쓴다. */
+/** One set of in-memory storage. Used by the contract tests and the stage 6 randomized checks (E6a). */
 public record InMemoryStorage(InMemoryCommandStore memory, ManualClock clock) implements StorageUnderTest {
 
     public static InMemoryStorage create() {

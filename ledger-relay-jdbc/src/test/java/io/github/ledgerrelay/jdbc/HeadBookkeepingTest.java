@@ -28,10 +28,11 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 /**
- * 키마다 지금 차례인 명령의 표시(is_head). 넣을 때 키에 맨 앞이 없으면 켜고, 명령이 끝나면 다음 claim이 넘긴다.
- * claim 질의가 막힌 키의 백로그를 훑지 않고 맨 앞만 읽으려면 이 표시가 행과 늘 맞아야 한다.
+ * The mark (is_head) on the command whose turn it is on each key. It is set on insert if the key has no head, and the
+ * next claim passes it on when the command finishes. For the claim query to read only heads, without scanning the
+ * backlog of a blocked key, this mark must always match the rows.
  */
-@DisplayName("키마다 맨 앞 표시")
+@DisplayName("Head mark per key")
 class HeadBookkeepingTest {
 
     static final Duration LEASE = Duration.ofSeconds(30);
@@ -54,11 +55,11 @@ class HeadBookkeepingTest {
 
     @Nested
     @Order(1)
-    @DisplayName("접수하면")
+    @DisplayName("On submit")
     class Submitting {
 
         @Test
-        @DisplayName("키의 첫 명령이 맨 앞이다")
+        @DisplayName("The first command of a key is its head")
         void theFirstCommandOfAKeyIsItsHead() {
             // when
             submit(transfer("pay-1"));
@@ -68,7 +69,7 @@ class HeadBookkeepingTest {
         }
 
         @Test
-        @DisplayName("뒤에 온 명령은 맨 앞 뒤에서 기다린다")
+        @DisplayName("A later command waits behind the head")
         void aLaterCommandWaitsBehindTheHead() {
             // when
             submit(transfer("pay-1"));
@@ -79,12 +80,12 @@ class HeadBookkeepingTest {
         }
 
         @Test
-        @DisplayName("롤백된 접수는 아무것도 남기지 않는다")
+        @DisplayName("A rolled-back submit leaves nothing")
         void aRolledBackSubmitLeavesNothing() {
             // when
             assertThatThrownBy(() -> storage.transactions().inTransaction(() -> {
                 relay.submit(transfer("pay-1"));
-                throw new IllegalStateException("앱이 롤백한다");
+                throw new IllegalStateException("the app rolls back");
             })).isInstanceOf(IllegalStateException.class);
 
             // then
@@ -92,7 +93,7 @@ class HeadBookkeepingTest {
         }
 
         @Test
-        @DisplayName("같은 명령을 다시 접수해도 맨 앞은 그대로다")
+        @DisplayName("Submitting the same command again keeps the head")
         void aDuplicateSubmitKeepsTheHead() {
             // when
             submit(transfer("pay-1"));
@@ -103,7 +104,7 @@ class HeadBookkeepingTest {
         }
 
         @Test
-        @DisplayName("끝난 맨 앞 뒤에 접수하면 접수가 맨 앞을 넘겨받는다 — 키 행을 이미 쥐었으므로")
+        @DisplayName("A submit behind a finished head takes over the head — it already holds the key row")
         void aSubmitBehindAFinishedHeadTakesTheHead() {
             // given
             submit(transfer("pay-1"));
@@ -119,11 +120,11 @@ class HeadBookkeepingTest {
 
     @Nested
     @Order(2)
-    @DisplayName("맨 앞이 끝나면")
+    @DisplayName("When the head finishes")
     class Finishing {
 
         @Test
-        @DisplayName("다음 claim까지는 끝난 명령이 표시를 쥐고 있다 — 완료는 키 행을 잡지 않으므로")
+        @DisplayName("The finished command keeps the mark until the next claim — completion does not lock the key row")
         void theFinishedHeadKeepsTheMarkUntilTheNextClaim() {
             // given
             submit(transfer("pay-1"));
@@ -137,7 +138,7 @@ class HeadBookkeepingTest {
         }
 
         @Test
-        @DisplayName("다음 claim이 맨 앞을 다음 명령으로 넘기고 그 claim에서 잡는다")
+        @DisplayName("The next claim passes the head on to the next command and claims it in the same claim")
         void theNextClaimPassesTheHeadOnAndClaimsIt() {
             // given
             submit(transfer("pay-1"));
@@ -148,12 +149,12 @@ class HeadBookkeepingTest {
             List<String> claimed = claimedNow();
 
             // then
-            assertThat(claimed).as("다음 claim이 잡은 명령").containsExactly("pay-2");
+            assertThat(claimed).as("commands claimed by the next claim").containsExactly("pay-2");
             assertHeadOf("order-1", "pay-2");
         }
 
         @Test
-        @DisplayName("마지막 명령이 끝나면 다음 claim 뒤에는 맨 앞이 없다")
+        @DisplayName("When the last command finishes, there is no head after the next claim")
         void finishingTheLastLeavesNoHead() {
             // given
             submit(transfer("pay-1"));
@@ -167,12 +168,12 @@ class HeadBookkeepingTest {
         }
 
         @Test
-        @DisplayName("멈춘 맨 앞은 계속 키를 막고, 운영자가 포기하면 다음 claim이 다음 명령을 잡는다 — F9")
+        @DisplayName("A halted head keeps blocking the key, and after the operator abandons it the next claim claims the next command — F9")
         void aHaltedHeadStillBlocksAndAbandoningPassesItOn() {
-            // given: capture-1이 같은 키의 뒤에 있는 예약을 참조해 claim에서 멈춘다
+            // given: capture-1 refers to a reservation later on the same key and halts in the claim
             insertPastTheChecks(reserveRow("hold-1", 2));
             insertPastTheChecks(postRow("capture-1", 1, "hold-1"));
-            assertThat(relay.claim(10, LEASE).halted()).as("멈춘 명령").containsExactly("capture-1");
+            assertThat(relay.claim(10, LEASE).halted()).as("halted commands").containsExactly("capture-1");
             assertHeadOf("order-1", "capture-1");
             relay.abandonHalted("capture-1");
 
@@ -180,18 +181,18 @@ class HeadBookkeepingTest {
             List<String> claimed = claimedNow();
 
             // then
-            assertThat(claimed).as("포기 뒤 claim이 잡은 명령").containsExactly("hold-1");
+            assertThat(claimed).as("commands claimed after abandon").containsExactly("hold-1");
             assertHeadOf("order-1", "hold-1");
         }
     }
 
     @Nested
     @Order(3)
-    @DisplayName("DB를 직접 고친 뒤")
+    @DisplayName("After editing the DB by hand")
     class AfterHandEdits {
 
         @Test
-        @DisplayName("다시 계산하면 맨 앞을 되찾는다")
+        @DisplayName("Recomputing restores the head")
         void rebuildRepairsHandEditedRows() {
             // given
             submit(transfer("pay-1"));
@@ -206,9 +207,9 @@ class HeadBookkeepingTest {
         }
 
         @Test
-        @DisplayName("다시 계산은 열린 접수가 끝나기를 기다린다 — 계산하는 동안 접수가 맨 앞을 바꾸지 않게")
+        @DisplayName("Recomputing waits for an open submit to end — so a submit cannot change the head during the computation")
         void rebuildWaitsForAnOpenSubmit() {
-            // given: pay-2 접수가 열려 있다
+            // given: the submit of pay-2 is open
             submit(transfer("pay-1"));
             try (OtherTransaction<CommandReceipt> open = OtherTransaction.start(storage.transactions(),
                     () -> relay.submit(transfer("pay-2")));
@@ -229,7 +230,7 @@ class HeadBookkeepingTest {
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Vocabulary used only in this file ──────────────────────────────
 
     private <T> OtherTransaction<T> startAfter(OtherTransaction<?> earlier, java.util.function.Supplier<T> work) {
         earlier.awaitWork();
@@ -240,7 +241,7 @@ class HeadBookkeepingTest {
         storage.transactions().inTransaction(() -> relay.submit(command));
     }
 
-    /** 지금 claim이 잡는 명령. */
+    /** Commands a claim now claims. */
     private List<String> claimedNow() {
         return relay.claim(10, LEASE).claimed().stream().map(ClaimedCommand::commandId).toList();
     }
@@ -253,16 +254,16 @@ class HeadBookkeepingTest {
 
     private void insertPastTheChecks(NewCommand row) {
         if (storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(row)).isPresent()) {
-            throw new IllegalStateException("given 준비 실패: " + row.commandId() + "가 이미 있었다");
+            throw new IllegalStateException("given setup failed: " + row.commandId() + " already existed");
         }
     }
 
     private void assertHeadOf(String orderingKey, String commandId) {
-        assertThat(heads(orderingKey)).as("%s의 맨 앞", orderingKey).containsExactly(commandId);
+        assertThat(heads(orderingKey)).as("head of %s", orderingKey).containsExactly(commandId);
     }
 
     private void assertNoHeadOf(String orderingKey) {
-        assertThat(heads(orderingKey)).as("%s의 맨 앞", orderingKey).isEmpty();
+        assertThat(heads(orderingKey)).as("head of %s", orderingKey).isEmpty();
     }
 
     private java.util.List<String> heads(String orderingKey) {

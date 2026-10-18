@@ -19,11 +19,12 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 /**
- * READ COMMITTED(기본) 앱 트랜잭션 둘이 같은 commandId를 겹쳐 접수할 때(G7). 늦은 쪽은 먼저 커밋한 쪽을 기다린 뒤 같은 내용이면
- * 같은 접수증을, 다른 내용이면 내용 충돌을 받는다. 다른 순서 키면 순번 단계에서 기다리지 않으므로 넣기({@code ON CONFLICT})에서
- * 만난다.
+ * When two READ COMMITTED (default) app transactions submit the same commandId at the same time (G7). The later one
+ * waits for the one that commits first, then gets the same receipt if the content is the same, or a content conflict
+ * if it differs. On different ordering keys they do not wait at the sequence step, so they meet at the insert
+ * ({@code ON CONFLICT}).
  */
-@DisplayName("READ COMMITTED 앱 트랜잭션에서 같은 commandId의 동시 접수 — G7")
+@DisplayName("Concurrent submits of the same commandId in READ COMMITTED app transactions — G7")
 class ReadCommittedSubmitTest {
 
     static final Duration BLOCKED = Duration.ofMillis(300);
@@ -40,11 +41,11 @@ class ReadCommittedSubmitTest {
 
     @Nested
     @Order(1)
-    @DisplayName("같은 순서 키로 겹쳐 접수하면")
+    @DisplayName("When both submit on the same ordering key")
     class OnTheSameKey {
 
         @Test
-        @DisplayName("같은 내용이면 늦은 쪽도 먼저 커밋한 쪽의 접수증을 받고, 행은 하나다")
+        @DisplayName("With the same content, the later one also gets the receipt of the one that committed first, and there is one row")
         void theSameContentGetsTheFirstReceipt() {
             try (OtherTransaction<CommandReceipt> first = OtherTransaction.start(storage.transactions(),
                     () -> relay.submit(transfer("pay-1", "order-1", 500)));
@@ -56,14 +57,14 @@ class ReadCommittedSubmitTest {
                 first.commit();
 
                 // then
-                assertThat(second.awaitWork()).as("늦은 접수의 접수증").isEqualTo(first.awaitWork());
+                assertThat(second.awaitWork()).as("receipt of the later submit").isEqualTo(first.awaitWork());
                 second.commit();
                 assertOneRowOf("pay-1");
             }
         }
 
         @Test
-        @DisplayName("다른 내용이면 늦은 쪽은 내용 충돌로 거부된다")
+        @DisplayName("With different content, the later one is rejected with a content conflict")
         void otherContentIsAConflict() {
             try (OtherTransaction<CommandReceipt> first = OtherTransaction.start(storage.transactions(),
                     () -> relay.submit(transfer("pay-1", "order-1", 500)));
@@ -75,7 +76,7 @@ class ReadCommittedSubmitTest {
                 first.commit();
 
                 // then
-                assertThatThrownBy(second::awaitWork).as("늦은 접수").isInstanceOf(CommandConflictException.class);
+                assertThatThrownBy(second::awaitWork).as("later submit").isInstanceOf(CommandConflictException.class);
                 assertOneRowOf("pay-1");
             }
         }
@@ -83,11 +84,11 @@ class ReadCommittedSubmitTest {
 
     @Nested
     @Order(2)
-    @DisplayName("다른 순서 키로 겹쳐 접수하면 — 넣기에서 만난다")
+    @DisplayName("When they submit on different ordering keys — they meet at the insert")
     class OnAnotherKey {
 
         @Test
-        @DisplayName("다른 내용이면 늦은 쪽은 내용 충돌로 거부되고, 행은 하나다")
+        @DisplayName("With different content, the later one is rejected with a content conflict, and there is one row")
         void otherContentIsAConflict() {
             try (OtherTransaction<CommandReceipt> first = OtherTransaction.start(storage.transactions(),
                     () -> relay.submit(transfer("pay-1", "order-1", 500)));
@@ -99,7 +100,7 @@ class ReadCommittedSubmitTest {
                 first.commit();
 
                 // then
-                assertThatThrownBy(second::awaitWork).as("늦은 접수").isInstanceOf(CommandConflictException.class);
+                assertThatThrownBy(second::awaitWork).as("later submit").isInstanceOf(CommandConflictException.class);
                 assertOneRowOf("pay-1");
             }
         }
@@ -117,6 +118,6 @@ class ReadCommittedSubmitTest {
 
     private void assertOneRowOf(String commandId) {
         assertThat(storage.sql().sql("SELECT count(*) FROM ledger_command WHERE command_id = :id")
-                .param("id", commandId).query(Long.class).single()).as("%s의 행 수", commandId).isEqualTo(1L);
+                .param("id", commandId).query(Long.class).single()).as("row count of %s", commandId).isEqualTo(1L);
     }
 }

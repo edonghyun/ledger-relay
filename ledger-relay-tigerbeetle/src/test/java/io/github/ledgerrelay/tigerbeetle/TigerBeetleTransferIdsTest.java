@@ -9,13 +9,13 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("이체 ID 생성기 — TB의 시간순 ID, 0과 최댓값은 거부")
+@DisplayName("Transfer id generator — TB's time-ordered ids; 0 and the maximum are rejected")
 class TigerBeetleTransferIdsTest {
 
     static final BigInteger U128_MAX = BigInteger.ONE.shiftLeft(128).subtract(BigInteger.ONE);
 
     @Test
-    @DisplayName("낸 ID는 모두 다르고 앞의 것보다 크다")
+    @DisplayName("Issued ids are all distinct and each is greater than the previous one")
     void idsAreUniqueAndIncreasing() {
         // given
         TigerBeetleTransferIds ids = new TigerBeetleTransferIds();
@@ -28,12 +28,12 @@ class TigerBeetleTransferIdsTest {
 
         // then
         for (int i = 1; i < issued.size(); i++) {
-            assertThat(issued.get(i)).as("%d번째 ID", i).isGreaterThan(issued.get(i - 1));
+            assertThat(issued.get(i)).as("id #%d", i).isGreaterThan(issued.get(i - 1));
         }
     }
 
     @Test
-    @DisplayName("0을 내려 하면 거부한다 — TB는 0을 ID로 받지 않는다")
+    @DisplayName("Issuing 0 is rejected — TB does not accept 0 as an id")
     void zeroIsRefused() {
         // given
         TigerBeetleTransferIds ids = new TigerBeetleTransferIds(() -> BigInteger.ZERO);
@@ -43,12 +43,12 @@ class TigerBeetleTransferIdsTest {
     }
 
     @Test
-    @DisplayName("2^128-1을 내려 하면 거부한다 — TB는 최댓값을 ID로 받지 않는다")
+    @DisplayName("Issuing 2^128-1 is rejected — TB does not accept the maximum as an id")
     void theMaximumIsRefused() {
         // given
         TigerBeetleTransferIds ids = new TigerBeetleTransferIds(() -> U128_MAX);
 
         // then
-        assertThatThrownBy(ids::next).as("최댓값").isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(ids::next).as("maximum").isInstanceOf(IllegalStateException.class);
     }
 }

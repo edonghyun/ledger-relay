@@ -26,10 +26,11 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 /**
- * 맨 앞을 정하는 SQL 문장 사이에 다른 트랜잭션이 커밋할 때. READ COMMITTED는 문장마다 새 스냅숏을 잡으므로,
- * 트랜잭션 경계만 엇갈리는 {@code HeadRaceTest}로는 보이지 않는 경쟁이다. 문장을 하나씩 실행해 그 사이에 상대를 커밋시킨다.
+ * When another transaction commits between the SQL statements that settle the head. READ COMMITTED takes a new
+ * snapshot per statement, so this race does not show in {@code HeadRaceTest}, where only transaction boundaries
+ * interleave. The statements run one by one, and the other side commits in between.
  */
-@DisplayName("맨 앞을 정하는 문장 사이에 다른 트랜잭션이 커밋하면")
+@DisplayName("When another transaction commits between the statements that settle the head")
 class HeadStatementRaceTest {
 
     static final Duration BLOCKED = Duration.ofMillis(300);
@@ -58,11 +59,11 @@ class HeadStatementRaceTest {
 
     @Nested
     @Order(1)
-    @DisplayName("접수가 맨 앞을 정하는 동안")
+    @DisplayName("While a submit settles the head")
     class WhileASubmitSettlesTheHead {
 
         @Test
-        @DisplayName("끄기와 켜기 사이에 맨 앞의 완료가 커밋돼도 접수는 실패하지 않고, 다음 claim이 뒤 명령을 잡는다")
+        @DisplayName("A completion of the head committing between clearing and marking does not fail the submit, and the next claim claims the later command")
         void aCompletionCommittingBetweenTheTwoStatementsDoesNotFailTheSubmit() {
             CountDownLatch cleared = new CountDownLatch(1);
             CountDownLatch markNow = new CountDownLatch(1);
@@ -77,7 +78,7 @@ class HeadStatementRaceTest {
                     storage.sql().sql(JdbcCommandStore.MARK_FIRST_UNFINISHED).param("key", "order-1").update();
                     return true;
                 })) {
-                    // given: 접수가 끄기 문장을 마쳤고, 그 뒤 pay-1의 완료가 커밋된다
+                    // given: the submit has run the clearing statement, and then the completion of pay-1 commits
                     await(cleared);
                     completion.commit();
 
@@ -89,7 +90,7 @@ class HeadStatementRaceTest {
             }
 
             // then
-            assertThat(claimedNow()).as("다음 claim이 잡은 명령").containsExactly("pay-2");
+            assertThat(claimedNow()).as("commands claimed by the next claim").containsExactly("pay-2");
         }
 
         private boolean complete() {
@@ -99,13 +100,13 @@ class HeadStatementRaceTest {
 
     @Nested
     @Order(2)
-    @DisplayName("claim이 끝난 맨 앞을 넘기는 동안")
+    @DisplayName("While a claim passes on a finished head")
     class WhileAClaimPassesOn {
 
         @Test
-        @DisplayName("다른 워커가 먼저 넘긴 키를 늦게 도착한 넘기기가 잡아도, 결과를 쓰는 중인 새 맨 앞을 기다리지 않는다 — 핸들러와 교착하지 않게")
+        @DisplayName("A late pass-on that picks a key another worker already passed on does not wait for the new head that is writing its result — so it cannot deadlock with the handler")
         void aLatePassOnDoesNotWaitForTheNewHeadBeingCompleted() {
-            // given: pay-1이 끝났고 pay-2가 기다린다. 늦은 워커의 넘기기가 스냅숏을 잡은 채 멈춰 있다
+            // given: pay-1 has finished and pay-2 is waiting. A late worker's pass-on has taken its snapshot and is paused
             storage.transactions().inTransaction(() -> relay.submit(transfer("pay-2")));
             complete(pay1);
             try (OtherTransaction<Boolean> gate = OtherTransaction.start(storage.transactions(), () -> {
@@ -116,7 +117,7 @@ class HeadStatementRaceTest {
                 try (OtherTransaction<List<String>> late = OtherTransaction.start(storage.transactions(),
                         HeadStatementRaceTest.this::latePassOn)) {
                     late.assertStillWorkingAfter(BLOCKED);
-                    // 그사이 다른 워커가 order-1을 넘겨 pay-2를 잡고, pay-2의 결과를 쓰는 트랜잭션이 열려 있다
+                    // Meanwhile another worker passes on order-1 and claims pay-2, and a transaction writing the result of pay-2 is open
                     ClaimedCommand pay2 = relay.claim(10, LEASE).claimed().get(0);
                     relay.markSubmitted(pay2);
                     try (OtherTransaction<Boolean> completion = OtherTransaction.start(storage.transactions(),
@@ -127,7 +128,7 @@ class HeadStatementRaceTest {
                         gate.commit();
 
                         // then
-                        assertThat(late.assertFinishedWithin(NOT_BLOCKED)).as("늦은 넘기기가 잡은 키")
+                        assertThat(late.assertFinishedWithin(NOT_BLOCKED)).as("keys picked by the late pass-on")
                                 .containsExactly("order-1");
                         late.commit();
                         completion.commit();
@@ -137,9 +138,9 @@ class HeadStatementRaceTest {
         }
 
         @Test
-        @DisplayName("켜기 직전에 새 맨 앞의 완료가 커밋돼도 맨 앞을 하나 더 켜지 않는다 — claim이 유일 인덱스에 깨지지 않게")
+        @DisplayName("A completion of the new head committing just before marking does not add a second head — so the claim does not break on the unique index")
         void markingDoesNotAddASecondHeadNextToAFinishedOne() {
-            // given: 맨 앞이 pay-2로 넘어갔고 pay-3이 기다린다. pay-2가 방금 끝났다(표시는 쥔 채)
+            // given: the head has passed to pay-2 and pay-3 is waiting. pay-2 has just finished (still holding the mark)
             storage.transactions().inTransaction(() -> relay.submit(transfer("pay-2")));
             storage.transactions().inTransaction(() -> relay.submit(transfer("pay-3")));
             complete(pay1);
@@ -147,17 +148,17 @@ class HeadStatementRaceTest {
             relay.markSubmitted(pay2);
             complete(pay2);
 
-            // when: 늦은 넘기기가 pay-1의 끄기만 마친 상태에서 켜기를 실행한다
+            // when: a late pass-on that has only cleared pay-1 runs the marking statement
             int marked = storage.transactions().inTransaction(() -> storage.sql().sql(JdbcOrderingKeys.MARK_NEXT_HEADS)
                     .param("keys", List.of("order-1")).update());
 
             // then
-            assertThat(marked).as("맨 앞으로 켠 행").isZero();
-            assertThat(claimedNow()).as("다음 claim이 잡은 명령").containsExactly("pay-3");
+            assertThat(marked).as("rows marked as head").isZero();
+            assertThat(claimedNow()).as("commands claimed by the next claim").containsExactly("pay-3");
         }
     }
 
-    /** 늦은 워커의 넘기기: 운영 코드와 같은 문장이고, 잠글 키를 고르는 질의만 문을 지나간다. */
+    /** A late worker's pass-on: the same statements as production code; only the query that picks keys to lock goes through the gate. */
     private List<String> latePassOn() {
         List<String> keys = storage.sql().sql(gated(JdbcOrderingKeys.LOCK_KEYS_TO_PASS_ON)).param("gate", GATE)
                 .param("limit", 10).query(String.class).list();
@@ -169,19 +170,19 @@ class HeadStatementRaceTest {
         return keys;
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Vocabulary used only in this file ──────────────────────────────
 
-    /** 질의가 스냅숏을 잡은 뒤, 끝난 맨 앞을 읽기 전에 advisory lock {@code :gate}를 기다리게 한다. */
+    /** Makes the query wait for advisory lock {@code :gate} after taking its snapshot and before reading finished heads. */
     private static String gated(String query) {
         String gated = query.replace("WHERE c.is_head",
                 "WHERE (SELECT true FROM pg_advisory_xact_lock_shared(:gate)) AND c.is_head");
         if (gated.equals(query)) {
-            throw new IllegalStateException("given 준비 실패: 질의에 문을 끼울 곳이 없다");
+            throw new IllegalStateException("given setup failed: the query has no place to insert the gate");
         }
         return gated;
     }
 
-    /** 워커가 그 명령의 TB 결과를 쓴다. 핸들러 없이 저장소의 조건부 쓰기만 한다. */
+    /** The worker writes the TB result of that command. Only the store's conditional write, without a handler. */
     private boolean complete(ClaimedCommand claimed) {
         long submitCount = storage.sql().sql("SELECT submit_count FROM ledger_command WHERE id = :id")
                 .param("id", claimed.rowId()).query(Long.class).single();
@@ -189,12 +190,12 @@ class HeadStatementRaceTest {
                 Optional.of(Created), 0);
         if (!storage.store().compareAndSet(new RowChange(claimed.rowId(), StoredState.CLAIMED, claimed.leaseToken(),
                 applied, new RowChange.Stamp.Completion()))) {
-            throw new IllegalStateException("given 준비 실패: " + claimed.commandId() + "의 결과를 쓰지 못했다");
+            throw new IllegalStateException("given setup failed: could not write the result of " + claimed.commandId());
         }
         return true;
     }
 
-    /** 접수가 넣는 것과 같은 대기 행을 맨 앞 정하기 없이 넣는다. */
+    /** Inserts the same pending row a submit inserts, without settling the head. */
     private void insertPendingRow(String commandId, long seq) {
         storage.sql().sql("""
                 INSERT INTO ledger_command (command_id, transfer_id, ordering_key, seq, kind, debit_account_id,
@@ -211,11 +212,11 @@ class HeadStatementRaceTest {
     private static void await(CountDownLatch latch) {
         try {
             if (!latch.await(10, TimeUnit.SECONDS)) {
-                throw new AssertionError("10초 안에 신호가 오지 않았다");
+                throw new AssertionError("no signal within 10 seconds");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new AssertionError("기다리다 인터럽트되었다", e);
+            throw new AssertionError("interrupted while waiting", e);
         }
     }
 

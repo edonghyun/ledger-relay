@@ -26,10 +26,11 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.ComposeContainer;
 
 /**
- * 저장소 루트의 {@code compose.yaml}을 그대로 띄우고 README의 장면 1~5를 HTTP로 돈다. 앱 이미지 빌드, 인스턴스 둘,
- * TB 기동까지 함께 검증한다. 저장소를 처음 받은 사람이 {@code docker compose up}을 했을 때 실패하지 않게 하려는 테스트다.
+ * Starts the {@code compose.yaml} at the repository root as is and runs scenarios 1-5 of the README over HTTP. It also
+ * verifies the app image build, the two instances and the TB startup. The test exists so that {@code docker compose up}
+ * does not fail for someone who has just cloned the repository.
  */
-@DisplayName("docker compose up 한 번으로 뜬 샘플 쇼핑몰 — 장면 1~5")
+@DisplayName("Sample shop started with a single docker compose up — scenarios 1-5")
 class ShopComposeTest {
 
     static final Duration SETTLE = Duration.ofSeconds(30);
@@ -68,7 +69,7 @@ class ShopComposeTest {
 
     @Test
     @Order(1)
-    @DisplayName("장면 1 — 결제하면 결제 승인됨, 출고하면 결제 완료가 되고 가맹점이 금액을 받는다")
+    @DisplayName("Scenario 1 — paying makes the order authorized, shipping makes it paid and the merchant receives the amount")
     void scene1HappyPath() throws Exception {
         // given
         long merchantBefore = number(get("/api/consistency"), "$.merchantPostedSatang");
@@ -82,12 +83,12 @@ class ShopComposeTest {
         awaitOrder(order, "PAID");
         String consistency = await(SETTLE, "/api/consistency",
                 json -> number(json, "$.merchantPostedSatang") == merchantBefore + EARBUDS);
-        assertThat(number(consistency, "$.paidOrdersSatang")).as("결제 완료 주문 합").isEqualTo(merchantBefore + EARBUDS);
+        assertThat(number(consistency, "$.paidOrdersSatang")).as("sum of paid orders").isEqualTo(merchantBefore + EARBUDS);
     }
 
     @Test
     @Order(2)
-    @DisplayName("장면 2 — TB를 끊어도 결제는 접수되고 대기가 쌓이며, 다시 이으면 모두 처리된다")
+    @DisplayName("Scenario 2 — with TB cut, payments are still accepted and the backlog grows; after restoring, everything is processed")
     void scene2LedgerOutage() throws Exception {
         // given
         post("/api/demo/ledger/cut");
@@ -97,20 +98,20 @@ class ShopComposeTest {
             for (int i = 0; i < orders.length; i++) {
                 long started = System.nanoTime();
                 Checkout checkout = checkout(UUID.randomUUID().toString(), 1002, "mouse");
-                assertThat(checkout.status()).as("TB가 끊긴 동안 결제 응답").isEqualTo(201);
-                assertThat(Duration.ofNanos(System.nanoTime() - started)).as("결제에 걸린 시간")
+                assertThat(checkout.status()).as("payment response while TB is cut").isEqualTo(201);
+                assertThat(Duration.ofNanos(System.nanoTime() - started)).as("payment time")
                         .isLessThan(Duration.ofSeconds(1));
                 orders[i] = checkout.id();
             }
 
-            // then: 쌓이고, 화면의 TB 점이 빨강이 된다
-            assertThat(number(get("/api/status"), "$.tiles.backlog")).as("대기").isGreaterThanOrEqualTo(3);
+            // then: the backlog grows and the TB dot in the UI turns red
+            assertThat(number(get("/api/status"), "$.tiles.backlog")).as("backlog").isGreaterThanOrEqualTo(3);
             await(SETTLE, "/api/status", json -> Boolean.FALSE.equals(JsonPath.read(json, "$.ledgerUp")));
         } finally {
             post("/api/demo/ledger/restore");
         }
 
-        // then: 다시 이으면 모두 승인된다
+        // then: after restoring, every order is authorized
         for (long order : orders) {
             awaitOrder(order, "AUTHORIZED");
         }
@@ -119,7 +120,7 @@ class ShopComposeTest {
 
     @Test
     @Order(3)
-    @DisplayName("장면 3 — 잘못된 확정은 그 주문만 멈추고, 포기하면 취소됨과 원래 잔액으로 끝난다")
+    @DisplayName("Scenario 3 — a bad post halts only its order; abandoning it ends cancelled with the original balance")
     void scene3HaltAndAbandon() throws Exception {
         // given
         long heldBefore = heldBy(1003);
@@ -128,17 +129,17 @@ class ShopComposeTest {
         await(SETTLE, "/api/operator/halted",
                 json -> !((List<?>) JsonPath.read(json, "$[?(@.commandId == '" + postCommand + "')]")).isEmpty());
 
-        // when: 다른 주문은 흐른다
+        // when: other orders keep flowing
         long other = checkout(UUID.randomUUID().toString(), 1004, "mouse").id();
         awaitOrder(other, "AUTHORIZED");
         post("/api/orders/" + other + "/ship");
         awaitOrder(other, "PAID");
 
-        // when: 운영자가 포기한다
+        // when: the operator abandons it
         String abandoned = post("/api/operator/halted/" + postCommand + "/abandon");
 
         // then
-        assertThat((String) JsonPath.read(abandoned, "$.outcome")).as("포기 결과").isEqualTo("ABANDONED");
+        assertThat((String) JsonPath.read(abandoned, "$.outcome")).as("abandon outcome").isEqualTo("ABANDONED");
         awaitOrder(injected, "CANCELLED");
         await(SETTLE, "/api/orders/" + injected + "/timeline",
                 json -> JsonPath.read(json, "$.buyer") != null && number(json, "$.buyer.heldSatang") == heldBefore);
@@ -146,7 +147,7 @@ class ShopComposeTest {
 
     @Test
     @Order(4)
-    @DisplayName("장면 4 — 같은 키로 동시에 두 번 결제하면 주문 하나, 예약 하나다")
+    @DisplayName("Scenario 4 — paying twice at the same time with the same key gives one order and one reservation")
     void scene4DoubleClick() throws Exception {
         // given
         String key = UUID.randomUUID().toString();
@@ -158,16 +159,16 @@ class ShopComposeTest {
         Checkout b = second.get();
 
         // then
-        assertThat(a.id()).as("두 요청이 받은 주문").isEqualTo(b.id());
-        assertThat(List.of(a.status(), b.status())).as("응답 상태").containsExactlyInAnyOrder(201, 200);
+        assertThat(a.id()).as("order returned to both requests").isEqualTo(b.id());
+        assertThat(List.of(a.status(), b.status())).as("response statuses").containsExactlyInAnyOrder(201, 200);
         awaitOrder(a.id(), "AUTHORIZED");
         assertThat((List<String>) JsonPath.read(get("/api/orders/" + a.id() + "/timeline"), "$.steps[*].kind"))
-                .as("주문의 명령").containsExactly("RESERVE");
+                .as("commands of the order").containsExactly("RESERVE");
     }
 
     @Test
     @Order(5)
-    @DisplayName("장면 5 — 출고 전에 취소하면 묶였던 돈이 풀린다")
+    @DisplayName("Scenario 5 — cancelling before shipping releases the held money")
     void scene5Cancel() throws Exception {
         // given
         long heldBefore = heldBy(1001);
@@ -185,7 +186,7 @@ class ShopComposeTest {
 
     @Test
     @Order(6)
-    @DisplayName("몰아넣기 50건이 모두 승인되고, 두 인스턴스가 모두 TB에 보낸다 — 워커 둘이 나눠 처리한다")
+    @DisplayName("A burst of 50 is fully authorized and both instances send to TB — the two workers split the work")
     void burstIsSharedByTwoInstances() throws Exception {
         // given
         String before = await(SETTLE, "/api/status", json -> ((List<?>) JsonPath.read(json, "$.instances")).size() == 2);
@@ -195,7 +196,7 @@ class ShopComposeTest {
         List<Number> ids = JsonPath.read(post("/api/demo/burst?count=50"), "$.orderIds");
 
         // then
-        assertThat(ids).as("만든 주문").hasSize(50);
+        assertThat(ids).as("created orders").hasSize(50);
         for (Number id : ids) {
             awaitOrder(id.longValue(), "AUTHORIZED");
         }
@@ -203,10 +204,10 @@ class ShopComposeTest {
             Map<String, Long> sent = sentByInstance(json);
             return sent.size() == 2 && sent.entrySet().stream().allMatch(e -> e.getValue() > sentBefore.getOrDefault(e.getKey(), 0L));
         });
-        assertThat(sentByInstance(after).keySet()).as("보낸 인스턴스").containsExactlyInAnyOrder("shop-a", "shop-b");
+        assertThat(sentByInstance(after).keySet()).as("sending instances").containsExactlyInAnyOrder("shop-a", "shop-b");
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ───────────────────────────────────
 
     record Checkout(int status, long id) {
     }
@@ -216,7 +217,7 @@ class ShopComposeTest {
                 .header("Content-Type", "application/json").header("Idempotency-Key", key)
                 .POST(HttpRequest.BodyPublishers.ofString("{\"buyerId\":" + buyer + ",\"product\":\"" + product + "\"}"))
                 .timeout(Duration.ofSeconds(10)).build(), HttpResponse.BodyHandlers.ofString());
-        assertThat(response.statusCode()).as("결제 응답 " + response.body()).isIn(200, 201);
+        assertThat(response.statusCode()).as("payment response " + response.body()).isIn(200, 201);
         return new Checkout(response.statusCode(), number(response.body(), "$.id"));
     }
 
@@ -233,7 +234,7 @@ class ShopComposeTest {
         awaitOrder(order, "AUTHORIZED");
         post("/api/orders/" + order + "/cancel");
         awaitOrder(order, "CANCELLED");
-        // 잔액은 1초마다 모으는 값이다. 취소가 반영될 만큼 기다린 뒤, 연달아 두 번 같은 값을 읽을 때까지 본다
+        // Balances are collected every second. Wait long enough for the cancel to show, then read until two reads in a row match
         long previous = -1;
         while (true) {
             Thread.sleep(1_500);
@@ -288,7 +289,7 @@ class ShopComposeTest {
             }
             Thread.sleep(250);
         }
-        throw new AssertionError(path + "가 " + limit + " 안에 기대한 값이 되지 않았다. 마지막 응답: " + last);
+        throw new AssertionError(path + " did not reach the expected value within " + limit + ". Last response: " + last);
     }
 
     private static long number(String json, String path) {

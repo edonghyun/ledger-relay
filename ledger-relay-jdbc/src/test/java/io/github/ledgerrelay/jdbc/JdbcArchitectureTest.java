@@ -11,30 +11,30 @@ import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/** 저장소 어댑터는 판단하지 않는다. 판단은 core의 서비스와 도메인 규칙에만 있다. */
-@DisplayName("jdbc 어댑터의 경계 — 판단은 core에만")
+/** The storage adapter makes no decisions. Decisions live only in the core services and domain rules. */
+@DisplayName("Boundaries of the jdbc adapter — decisions only in core")
 class JdbcArchitectureTest {
 
     static final JavaClasses MAIN = new ClassFileImporter()
             .withImportOption(new ImportOption.DoNotIncludeTests())
             .importPackages("io.github.ledgerrelay.jdbc");
 
-    /** testFixtures(Testcontainers를 쓰는 픽스처)는 이 패키지에만 있다. DoNotIncludeTests는 testFixtures를 거르지 못한다. */
+    /** testFixtures (fixtures that use Testcontainers) live only in this package. DoNotIncludeTests does not filter testFixtures. */
     static final String FIXTURES = "io.github.ledgerrelay.jdbc.testing..";
 
-    /** jdbc가 읽고 쓰는 도메인 값. 판단(상태 기계, 게이트, 전이표, 해시, 서비스)은 여기에 없다. */
+    /** Domain values that jdbc reads and writes. Decisions (state machine, gates, transition table, hash, services) are not here. */
     static final Set<String> DOMAIN_VALUES = Set.of(
             "io.github.ledgerrelay.core.domain.CommandRow",
             "io.github.ledgerrelay.core.domain.QueuedCommand",
             "io.github.ledgerrelay.core.domain.StoredState");
 
     @Test
-    @DisplayName("어댑터가 쓰는 core는 공개 API·포트·도메인 값뿐이다 — 판단 클래스가 새로 생겨도 SQL에 새지 않게")
+    @DisplayName("The adapter uses only the public API, ports and domain values of core — so new decision classes cannot leak into SQL")
     void theAdapterMakesNoDecisions() {
         // then
         classes().that().resideInAPackage("io.github.ledgerrelay.jdbc..").and().resideOutsideOfPackage(FIXTURES)
                 .should().onlyDependOnClassesThat(DescribedPredicate.describe(
-                        "core 밖, core 공개 API, core.spi, 도메인 값(" + DOMAIN_VALUES + ")",
+                        "outside core, core public API, core.spi, domain values (" + DOMAIN_VALUES + ")",
                         (JavaClass c) -> !c.getPackageName().startsWith("io.github.ledgerrelay.core")
                                 || c.getPackageName().equals("io.github.ledgerrelay.core")
                                 || c.getPackageName().startsWith("io.github.ledgerrelay.core.spi")
@@ -43,7 +43,7 @@ class JdbcArchitectureTest {
     }
 
     @Test
-    @DisplayName("어댑터는 JDK와 Spring JDBC·TX, core만 쓴다 — 드라이버·풀·JPA는 앱이 고른다")
+    @DisplayName("The adapter uses only the JDK, Spring JDBC/TX and core — the app chooses the driver, the pool and JPA")
     void theAdapterUsesOnlySpringJdbcAndTheJdk() {
         // then
         classes().that().resideInAPackage("io.github.ledgerrelay.jdbc..").and().resideOutsideOfPackage(FIXTURES)

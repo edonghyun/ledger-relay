@@ -24,10 +24,11 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 /**
- * 읽은 뒤 쓰기 전에 다른 워커가 끼어드는 경쟁(G5·G6). 메모리 저장소는 트랜잭션을 하나씩 돌리므로 계약 테스트로는 이 틈을
- * 만들 수 없다. 저장소 장식자로 최종 쓰기 직전에 다른 워커의 재claim을 끼워 넣는다.
+ * The race in which another worker cuts in after a read and before the write (G5, G6). The in-memory store runs one
+ * transaction at a time, so a contract test cannot open this gap. A store decorator injects another worker's re-claim
+ * just before the final write.
  */
-@DisplayName("결과를 쓰는 사이 다른 워커가 같은 명령을 다시 잡으면 — G5, G6")
+@DisplayName("When another worker claims the same command again while the result is being written — G5, G6")
 class CommandLifecycleRaceTest {
 
     static final Duration LEASE = Duration.ofSeconds(30);
@@ -50,11 +51,11 @@ class CommandLifecycleRaceTest {
 
     @Nested
     @Order(1)
-    @DisplayName("최종 결과를 쓰기 직전에 다른 워커가 토큰을 올렸으면")
+    @DisplayName("When another worker raised the token just before the final result is written")
     class TheTokenMovedBeforeTheFinalWrite {
 
         @Test
-        @DisplayName("쓰기는 0행으로 끝나고 핸들러는 실행되지 않는다 — 결과를 남기지 못한 워커가 후속 처리를 하지 않게")
+        @DisplayName("The write ends with 0 rows and the handler does not run — so a worker that could not record the result does no follow-up work")
         void aWriteThatLosesTheRaceIsFencedAndRunsNoHandler() {
             // given
             ClaimedCommand claimed = relay.claim(10, LEASE).claimed().get(0);
@@ -65,14 +66,15 @@ class CommandLifecycleRaceTest {
             WriteResult result = relay.complete(claimed, Created);
 
             // then
-            assertThat(result).as("늦은 워커의 쓰기 결과").isEqualTo(new WriteResult.Fenced());
-            assertThat(handler.completedFor("pay-1")).as("pay-1의 핸들러 실행").isEmpty();
+            assertThat(result).as("write result of the late worker").isEqualTo(new WriteResult.Fenced());
+            assertThat(handler.completedFor("pay-1")).as("handler runs for pay-1").isEmpty();
         }
     }
 
     /**
-     * 최종 상태로 가는 {@code compareAndSet} 직전에, 같은 행을 다른 워커가 다시 잡은 것처럼 토큰을 1 올려 둔다. 그 뒤 원래
-     * 쓰기를 그대로 전하므로 원래 쓰기는 토큰이 맞지 않아 실패해야 한다.
+     * Just before a {@code compareAndSet} to a final state, raises the token by 1 as if another worker had claimed the
+     * same row again. It then passes the original write through unchanged, so the original write must fail on the token
+     * mismatch.
      */
     private static final class RacingStore implements CommandStore {
 
@@ -95,7 +97,7 @@ class CommandLifecycleRaceTest {
                         Optional.empty(), 0);
                 if (!real.compareAndSet(new RowChange(change.rowId(), StoredState.CLAIMED, change.expectedToken(), now,
                         new RowChange.Stamp.LeaseFor(LEASE)))) {
-                    throw new IllegalStateException("given 준비 실패: 다른 워커의 재claim을 끼워 넣지 못했다");
+                    throw new IllegalStateException("given setup failed: could not inject another worker's re-claim");
                 }
             }
             return real.compareAndSet(change);

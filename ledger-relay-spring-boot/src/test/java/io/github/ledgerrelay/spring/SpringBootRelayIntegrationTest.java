@@ -27,8 +27,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-/** 실제 PostgreSQL과 TigerBeetle 위에서 자동 설정한 릴레이가 이체 하나를 끝까지 처리한다(3b 완료 증거). */
-@DisplayName("Spring Boot로 띄운 릴레이 — PG와 TB 위에서 이체 하나가 끝까지 간다")
+/** On real PostgreSQL and TigerBeetle, the auto-configured relay processes one transfer end to end. */
+@DisplayName("Relay started with Spring Boot — one transfer goes end to end on PG and TB")
 class SpringBootRelayIntegrationTest {
 
     static final PostgreSQLContainer PG = PostgresTestDatabase.container();
@@ -63,11 +63,11 @@ class SpringBootRelayIntegrationTest {
     }
 
     @Test
-    @DisplayName("앱 트랜잭션에서 접수한 이체가 워커를 거쳐 적용됨으로 끝나고, 앱을 끄는 데 lease보다 오래 걸리지 않는다")
+    @DisplayName("A transfer accepted in an app transaction ends as applied through the worker, and shutting the app down takes less than the lease")
     void aSubmittedTransferIsAppliedAndShutdownIsPrompt() {
         // given
-        Account payer = ledger.openAccount("구매자");
-        Account payee = ledger.openAccount("가맹점");
+        Account payer = ledger.openAccount("buyer");
+        Account payee = ledger.openAccount("merchant");
         RecordingHandler handler = new RecordingHandler();
         ApplicationContextRunner app = new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(LedgerRelayAutoConfiguration.class))
@@ -90,9 +90,9 @@ class SpringBootRelayIntegrationTest {
             Duration shutdown = Duration.ofNanos(System.nanoTime() - closing);
 
             // then
-            assertThat(outcomes).as("pay-1의 핸들러 결과").singleElement()
-                    .satisfies(outcome -> assertThat(outcome.state()).as("상태").isEqualTo(CommandStatus.State.APPLIED));
-            assertThat(shutdown).as("앱을 끄는 데 걸린 시간").isLessThan(LEASE);
+            assertThat(outcomes).as("handler outcomes for pay-1").singleElement()
+                    .satisfies(outcome -> assertThat(outcome.state()).as("state").isEqualTo(CommandStatus.State.APPLIED));
+            assertThat(shutdown).as("time taken to shut the app down").isLessThan(LEASE);
         });
     }
 
@@ -106,6 +106,6 @@ class SpringBootRelayIntegrationTest {
             }
             Thread.sleep(50);
         }
-        throw new AssertionError(commandId + "의 결과가 " + limit + " 안에 오지 않았다");
+        throw new AssertionError("No outcome for " + commandId + " arrived within " + limit);
     }
 }

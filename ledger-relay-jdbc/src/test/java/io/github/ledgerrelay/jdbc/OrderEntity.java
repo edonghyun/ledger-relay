@@ -4,7 +4,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
-/** 앱의 JPA 엔터티 대역: 주문 하나. */
+/** Stand-in for an app JPA entity: one order. */
 @Entity
 @Table(name = "orders")
 public class OrderEntity {

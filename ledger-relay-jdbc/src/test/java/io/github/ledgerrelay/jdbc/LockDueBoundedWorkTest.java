@@ -11,27 +11,29 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 /**
- * 한 번의 claim이 읽는 페이지는 "지금 보낼 수 있는 맨 앞" limit개에만 비례한다(F32). 막힌 키 뒤의 백로그, 맨 앞이
- * backoff 중인 키의 수, 보낼 수 있는 맨 앞의 수 어느 것에도 늘지 않는다. limit 128건을 잠그는 데 약 260페이지를 읽는다.
- * 옛 질의는 백로그 한 건에 약 4페이지를 읽었다.
+ * The pages one claim reads are proportional only to the limit of "heads sendable now" (F32). They do not grow with
+ * the backlog behind a blocked key, with the number of keys whose head is in backoff, or with the number of sendable
+ * heads. Locking a limit of 128 reads about 260 pages. The old query read about 4 pages per backlog row.
  */
-@DisplayName("claim 질의가 읽는 양 — 보낼 수 있는 맨 앞 limit개에만 비례한다 (F32)")
+@DisplayName("How much the claim query reads — proportional only to the limit of sendable heads (F32)")
 class LockDueBoundedWorkTest {
 
     static final int LIMIT = 128;
     static final long PAGE_BUDGET = 1_000;
     static final int MANY = 20_000;
     /**
-     * 회복 몰림 장면의 끝난 이력. 접수 순서로 고르면 플래너가 기본 키 순서로 이력을 걸러 내며 읽어 이 수에 비례한다.
-     * 2만이면 약 1,030페이지로 상한에 겨우 걸리므로 크게 둔다.
+     * Finished history in the recovery-surge scenario. If candidates are picked in acceptance order, the planner reads
+     * in primary key order filtering out history, so the cost is proportional to this number. With 20,000 it reads
+     * about 1,030 pages and barely hits the budget, so the number is set high.
      */
     static final int HISTORY = 50_000;
     static final int READY_KEYS = 100;
-    /** 키 하나의 맨 앞을 넘기는 문장의 상한: 다음 미완료를 인덱스에서 하나 찾고 그 행을 고친다. */
+    /** Budget for the statement that passes on the head of one key: find the next unfinished command in the index and update its row. */
     static final long ONE_KEY_BUDGET = 50;
     /**
-     * health 한 번이 대기를 세며 읽을 페이지의 상한. 세는 질의는 대기 인덱스에서 상한(1,000건)까지 읽고, visibility map이
-     * 없으면 행마다 힙을 확인해 약 2,000페이지를 읽는다. 대기 크기와는 무관하다.
+     * Page budget for one health call counting the backlog. The counting queries read the waiting index up to the cap
+     * (1,000 rows), and without a visibility map they check the heap for each row, reading about 2,000 pages. This
+     * does not depend on the backlog size.
      */
     static final long BACKLOG_BUDGET = 2_500;
     static final int OUTAGE_BACKLOG = 100_000;
@@ -45,13 +47,13 @@ class LockDueBoundedWorkTest {
 
     @Nested
     @Order(1)
-    @DisplayName("보낼 수 없는 명령이 많아도")
+    @DisplayName("Even with many commands that cannot go yet")
     class ManyCommandsThatCannotGoYet {
 
         @Test
-        @DisplayName("막힌 키 뒤의 대기 2만 건은 읽지 않는다")
+        @DisplayName("20,000 waiting commands behind a blocked key are not read")
         void aBacklogBehindABlockedKeyIsNotRead() {
-            // given: 키 hot의 맨 앞은 1시간 backoff 중이고, 그 뒤에 2만 건이 기다린다
+            // given: the head of key hot is in a 1-hour backoff, and 20,000 commands wait behind it
             inserted("'hot-' || g", "'hot'", "g", "now() + CASE WHEN g = 1 THEN interval '1 hour' ELSE interval '0' END",
                     1, MANY + 1);
             readyKeys(READY_KEYS);
@@ -62,7 +64,7 @@ class LockDueBoundedWorkTest {
         }
 
         @Test
-        @DisplayName("맨 앞이 backoff 중인 키 2만 개는 읽지 않는다")
+        @DisplayName("20,000 keys whose head is in backoff are not read")
         void headsWaitingForTheirRetryAreNotRead() {
             // given
             inserted("'wait-' || g", "'wait-' || g", "1", "now() + interval '1 hour'", 1, MANY);
@@ -76,13 +78,13 @@ class LockDueBoundedWorkTest {
 
     @Nested
     @Order(2)
-    @DisplayName("보낼 수 있는 맨 앞이 많으면")
+    @DisplayName("When there are many sendable heads")
     class ManyReadyHeads {
 
         @Test
-        @DisplayName("limit개를 잠그면 멈춘다 — 끝난 이력을 접수 순서로 훑거나 전부 정렬하지 않는다")
+        @DisplayName("It stops after locking limit rows — it neither scans finished history in acceptance order nor sorts everything")
         void manyReadyHeadsStopAtTheLimit() {
-            // given: TB가 회복된 직후처럼 보낼 수 있는 맨 앞 2만 개가 끝난 이력 5만 건 뒤에 있다
+            // given: as right after TB recovers, 20,000 sendable heads sit behind 50,000 rows of finished history
             finishedHistory(HISTORY);
             readyKeys(MANY);
             prepared();
@@ -94,13 +96,13 @@ class LockDueBoundedWorkTest {
 
     @Nested
     @Order(3)
-    @DisplayName("끝난 맨 앞이 많아도")
+    @DisplayName("Even with many finished heads")
     class ManyFinishedHeads {
 
         @Test
-        @DisplayName("넘기기는 limit개 키를 잠그면 멈춘다 — 끝난 이력을 훑지 않는다")
+        @DisplayName("Passing on stops after locking limit keys — it does not scan finished history")
         void passingOnStopsAtTheLimit() {
-            // given: TB가 회복된 직후처럼 방금 끝난 맨 앞 2만 개가 넘길 차례를 기다리고, 그 앞에 끝난 이력 5만 건이 있다
+            // given: as right after TB recovers, 20,000 just-finished heads wait to be passed on, with 50,000 rows of finished history before them
             finishedHistory(HISTORY);
             finishedHeads(MANY);
             storage.sql().sql("ANALYZE ledger_command").update();
@@ -111,9 +113,9 @@ class LockDueBoundedWorkTest {
         }
 
         @Test
-        @DisplayName("막힌 키의 맨 앞이 끝나 넘길 때 그 뒤 대기 2만 건은 읽지 않는다 — 다음 미완료 하나만 찾는다")
+        @DisplayName("Passing on a blocked key whose head finished does not read the 20,000 waiting behind it — it finds only the next unfinished one")
         void passingOnABlockedKeyDoesNotReadItsBacklog() {
-            // given: 키 hot의 맨 앞 hot-1이 방금 끝났고, 그 뒤에 2만 건이 기다린다
+            // given: hot-1, the head of key hot, has just finished, and 20,000 commands wait behind it
             inserted("'hot-' || g", "'hot'", "g", "now()", 1, MANY + 1);
             prepared();
             storage.sql().sql("UPDATE ledger_command SET state = 'APPLIED', completed_at = now() WHERE command_id = 'hot-1'")
@@ -128,13 +130,13 @@ class LockDueBoundedWorkTest {
 
     @Nested
     @Order(4)
-    @DisplayName("대기를 세면 — health")
+    @DisplayName("When counting the backlog — health")
     class CountingTheBacklog {
 
         @Test
-        @DisplayName("TB 장애로 대기가 10만 건 쌓여도 health 한 번이 읽는 양은 묶여 있다 — 장애 중에 health가 느려지지 않게")
+        @DisplayName("Even with 100,000 waiting commands from a TB outage, one health call reads a bounded amount — so health does not slow down during the outage")
         void countingAHugeBacklogReadsABoundedNumberOfPages() {
-            // given: 끝난 이력 5만 건 뒤에, 키 10만 개마다 대기 명령이 하나씩 있다(TB가 멈춘 동안 쌓인 접수)
+            // given: behind 50,000 rows of finished history, each of 100,000 keys has one waiting command (acceptances that piled up while TB was down)
             finishedHistory(HISTORY);
             inserted("'wait-' || g", "'wait-' || g", "1", "now()", 1, OUTAGE_BACKLOG);
             prepared();
@@ -142,18 +144,18 @@ class LockDueBoundedWorkTest {
             // then
             long pages = JdbcCommandStore.BACKLOG.stream().mapToLong(query -> pagesRead(plan(query, "cap",
                     JdbcCommandStore.BACKLOG_COUNT_CAP))).sum();
-            assertThat(pages).as("대기를 세는 데 읽은 페이지").isLessThanOrEqualTo(BACKLOG_BUDGET);
+            assertThat(pages).as("pages read to count the backlog").isLessThanOrEqualTo(BACKLOG_BUDGET);
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Vocabulary used only in this file ──────────────────────────────
 
-    /** 지금 보낼 수 있는 키 n개. 키마다 접수 명령 하나다. */
+    /** n keys sendable now. One accepted command per key. */
     private void readyKeys(int n) {
         inserted("'pay-' || g", "'order-' || g", "1", "now()", 1, n);
     }
 
-    /** 끝난 명령 n건. 키마다 하나다. */
+    /** n finished commands. One per key. */
     private void finishedHistory(int n) {
         storage.sql().sql("""
                 INSERT INTO ledger_command (command_id, transfer_id, ordering_key, seq, kind, debit_account_id,
@@ -165,7 +167,7 @@ class LockDueBoundedWorkTest {
                 """).param("n", n).update();
     }
 
-    /** 끝났는데 아직 맨 앞인 명령 n건과 그 키 행. 키마다 하나다. */
+    /** n commands that are finished but still the head, and their key rows. One per key. */
     private void finishedHeads(int n) {
         storage.sql().sql("""
                 INSERT INTO ledger_command (command_id, transfer_id, ordering_key, seq, kind, debit_account_id,
@@ -179,7 +181,7 @@ class LockDueBoundedWorkTest {
                 + "FROM generate_series(1, :n) g").param("n", n).update();
     }
 
-    /** 접수 상태의 행을 g = from..to로 직접 넣는다. 이체 ID는 이미 있는 가장 큰 값 뒤로 잇는다. */
+    /** Inserts accepted rows directly for g = from..to. Transfer ids continue after the largest existing one. */
     private void inserted(String commandId, String orderingKey, String seq, String nextAttemptAt, int from, int to) {
         storage.sql().sql("""
                 INSERT INTO ledger_command (command_id, transfer_id, ordering_key, seq, kind, debit_account_id,
@@ -191,7 +193,7 @@ class LockDueBoundedWorkTest {
                 """.formatted(commandId, orderingKey, seq, nextAttemptAt)).param("from", from).param("to", to).update();
     }
 
-    /** 직접 넣은 행의 맨 앞 표시를 정하고 통계를 갱신한다. */
+    /** Sets the head marks of the directly inserted rows and updates statistics. */
     private void prepared() {
         storage.rebuildHeads();
         storage.sql().sql("ANALYZE ledger_command").update();
@@ -211,14 +213,14 @@ class LockDueBoundedWorkTest {
                 .query(String.class).list().stream().reduce("", (a, b) -> a + b + "\n"));
     }
 
-    /** 실행 계획 맨 위 노드의 공유 버퍼 페이지(hit + read)가 상한 이하다. 맨 위 노드의 수는 그 아래 모두를 더한 값이다. */
+    /** The shared buffer pages (hit + read) of the plan's top node are within the budget. The top node's count includes everything below it. */
     private static void assertReadAtMostPages(long budget, String plan) {
-        assertThat(pagesRead(plan)).as("claim 한 번이 읽은 페이지 (실행 계획:%n%s)", plan).isLessThanOrEqualTo(budget);
+        assertThat(pagesRead(plan)).as("pages read by one claim (query plan:%n%s)", plan).isLessThanOrEqualTo(budget);
     }
 
     private static long pagesRead(String plan) {
         Matcher top = Pattern.compile("Buffers: shared(?: hit=(\\d+))?(?: read=(\\d+))?").matcher(plan);
-        assertThat(top.find()).as("실행 계획에 버퍼 수가 있다:%n%s", plan).isTrue();
+        assertThat(top.find()).as("query plan has buffer counts:%n%s", plan).isTrue();
         return (top.group(1) == null ? 0 : Long.parseLong(top.group(1)))
                 + (top.group(2) == null ? 0 : Long.parseLong(top.group(2)));
     }

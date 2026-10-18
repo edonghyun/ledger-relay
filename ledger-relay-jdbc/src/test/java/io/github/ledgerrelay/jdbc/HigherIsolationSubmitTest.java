@@ -25,10 +25,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * 앱 트랜잭션이 READ COMMITTED보다 높을 때의 동시 접수. 접수는 앱의 격리 수준을 따른다. 높은 수준에서는 기다림이
- * 직렬화 실패(SQLSTATE 40001)로 바뀌고 재시도는 앱이 한다. 어느 수준에서도 행이 둘 생기거나 순번이 꼬이지 않는다.
+ * Concurrent acceptance when the app transaction runs above READ COMMITTED. Acceptance follows the app's isolation
+ * level. At higher levels, waiting turns into a serialization failure (SQLSTATE 40001) and the app does the retry. At no
+ * level does a second row appear or the sequence numbers get mixed up.
  */
-@DisplayName("높은 격리 수준의 앱 트랜잭션에서 동시 접수")
+@DisplayName("Concurrent submits in app transactions at a high isolation level")
 class HigherIsolationSubmitTest {
 
     static final Duration BLOCKED = Duration.ofMillis(300);
@@ -57,14 +58,14 @@ class HigherIsolationSubmitTest {
 
     @Nested
     @Order(1)
-    @DisplayName("두 앱 트랜잭션이 같은 commandId를 겹쳐 접수하면")
+    @DisplayName("When two app transactions submit the same commandId at the same time")
     class SubmittingTheSameCommandTwice {
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(AppIsolation.class)
-        @DisplayName("늦은 쪽은 재시도할 수 있는 실패로 끝나고, 행은 먼저 커밋한 쪽 하나다")
+        @DisplayName("The later one ends in a retryable failure, and the only row is the one that committed first")
         void aConcurrentDuplicateEndsInOneRowOrARetryableFailure(AppIsolation isolation) {
-            // given: 첫 앱 트랜잭션이 pay-1을 접수하고 아직 커밋하지 않았다
+            // given: the first app transaction has submitted pay-1 and not committed yet
             Transactions app = appTransactions(isolation);
             try (OtherTransaction<CommandReceipt> first = OtherTransaction.start(app,
                     () -> relay.submit(transfer("pay-1", "order-1")));
@@ -84,14 +85,14 @@ class HigherIsolationSubmitTest {
 
     @Nested
     @Order(2)
-    @DisplayName("두 앱 트랜잭션이 같은 순서 키에 다른 명령을 겹쳐 접수하면")
+    @DisplayName("When two app transactions submit different commands on the same ordering key at the same time")
     class SubmittingOnOneKey {
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(AppIsolation.class)
-        @DisplayName("늦은 쪽은 재시도할 수 있는 실패로 끝나고, 재시도하면 다음 순번을 받는다 — 순번을 나눠 갖거나 뒤집지 않는다")
+        @DisplayName("The later one ends in a retryable failure and gets the next sequence number on retry — sequence numbers are never shared or inverted")
         void concurrentSubmitsOnOneKeyNeverShareOrInvertASequence(AppIsolation isolation) {
-            // given: 첫 앱 트랜잭션이 order-1에 pay-1을 접수하고 아직 커밋하지 않았다
+            // given: the first app transaction has submitted pay-1 on order-1 and not committed yet
             Transactions app = appTransactions(isolation);
             try (OtherTransaction<CommandReceipt> first = OtherTransaction.start(app,
                     () -> relay.submit(transfer("pay-1", "order-1")));
@@ -101,7 +102,7 @@ class HigherIsolationSubmitTest {
                 first.commit();
                 assertEndedInARetryableFailure(second);
 
-                // when: 앱이 새 트랜잭션에서 다시 접수한다
+                // when: the app submits again in a new transaction
                 app.inTransaction(() -> relay.submit(transfer("pay-2", "order-1")));
 
                 // then
@@ -112,21 +113,21 @@ class HigherIsolationSubmitTest {
 
     @Nested
     @Order(3)
-    @DisplayName("두 앱 트랜잭션이 같은 commandId를 다른 순서 키로 겹쳐 접수하면")
+    @DisplayName("When two app transactions submit the same commandId on different ordering keys at the same time")
     class SubmittingTheSameCommandOnAnotherKey {
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(AppIsolation.class)
-        @DisplayName("순번 단계에서 막히지 않아 중복 검사(ON CONFLICT)까지 가고, 늦은 쪽은 재시도할 수 있는 실패로 끝나며 행은 하나다")
+        @DisplayName("Nothing blocks at the sequence step, so both reach the duplicate check (ON CONFLICT); the later one ends in a retryable failure and there is one row")
         void aDuplicateOnAnotherKeyEndsInOneRowOrARetryableFailure(AppIsolation isolation) {
-            // given: 첫 앱 트랜잭션이 order-1에 pay-1을 접수하고 아직 커밋하지 않았다
+            // given: the first app transaction has submitted pay-1 on order-1 and not committed yet
             Transactions app = appTransactions(isolation);
             try (OtherTransaction<CommandReceipt> first = OtherTransaction.start(app,
                     () -> relay.submit(transfer("pay-1", "order-1")));
                  OtherTransaction<CommandReceipt> second = startAfter(first, app,
                          () -> relay.submit(transfer("pay-1", "order-2")))) {
 
-                // when: 둘째는 commandId 유일 인덱스에서 첫째의 커밋을 기다린다
+                // when: the second waits on the commandId unique index for the first to commit
                 second.assertStillWorkingAfter(BLOCKED);
                 first.commit();
 
@@ -143,23 +144,23 @@ class HigherIsolationSubmitTest {
                 .debit(1).credit(2).amount(500).ledger(1).code(1).build();
     }
 
-    /** 늦은 접수가 일하는 중에 또는 커밋할 때 직렬화 실패로 끝났다. 앱은 이 SQLSTATE를 보고 재시도한다. */
+    /** The later submit ended in a serialization failure, during its work or at commit. The app retries on this SQLSTATE. */
     private static void assertEndedInARetryableFailure(OtherTransaction<?> late) {
         Throwable failure = catchThrowable(() -> {
             late.awaitWork();
             late.commit();
         });
-        assertThat(sqlState(failure)).as("늦은 접수의 실패 SQLSTATE (실패: %s)", failure).isEqualTo(SERIALIZATION_FAILURE);
+        assertThat(sqlState(failure)).as("failure SQLSTATE of the later submit (failure: %s)", failure).isEqualTo(SERIALIZATION_FAILURE);
     }
 
-    /** 이 순서 키의 행을 순번 순서로 "commandId:seq"로 본다. */
+    /** Checks the rows of this ordering key in sequence order, as "commandId:seq". */
     private void assertRowsOfKey(String orderingKey, String... commandIdAndSeq) {
         assertThat(storage.sql().sql("SELECT command_id || ':' || seq FROM ledger_command WHERE ordering_key = :key ORDER BY seq")
                 .param("key", orderingKey).query(String.class).list())
-                .as("%s의 행(commandId:seq)", orderingKey).containsExactly(commandIdAndSeq);
+                .as("rows of %s (commandId:seq)", orderingKey).containsExactly(commandIdAndSeq);
     }
 
-    /** 앱이 연 트랜잭션: 그 격리 수준의 Spring 트랜잭션. 접수는 여기에 합류한다. */
+    /** A transaction opened by the app: a Spring transaction at that isolation level. The submit joins it. */
     private Transactions appTransactions(AppIsolation isolation) {
         TransactionTemplate template = new TransactionTemplate(storage.transactionManager());
         template.setIsolationLevel(isolation.level);

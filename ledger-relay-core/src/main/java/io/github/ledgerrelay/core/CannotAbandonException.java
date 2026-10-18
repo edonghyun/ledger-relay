@@ -1,13 +1,16 @@
 package io.github.ledgerrelay.core;
 
-/** 포기할 수 없는 명령이다. 이유는 {@link #reason()}. */
+/** The command cannot be abandoned. The reason is {@link #reason()}. */
 public class CannotAbandonException extends RuntimeException {
 
-    /** 포기할 수 없는 이유. */
+    /** Why the command cannot be abandoned. */
     public enum Reason {
-        /** 멈춘(HALTED) 명령이 아니다. */
+        /** The command is not halted (HALTED). */
         NOT_HALTED,
-        /** 이미 TB에 보낸 적이 있어 TB에서 확정됐을 수 있다(F27). TB에서 이체를 확인한 뒤 수동으로 정리한다. */
+        /**
+         * The command was already sent to TB, so TB may have applied it (F27). Check the transfer in TB, then clean up
+         * by hand.
+         */
         ALREADY_SUBMITTED
     }
 

@@ -5,7 +5,7 @@ import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
-/** {@code ledger-relay.*} 설정. */
+/** {@code ledger-relay.*} settings. */
 @ConfigurationProperties("ledger-relay")
 public record LedgerRelayProperties(
         @DefaultValue Tigerbeetle tigerbeetle,
@@ -13,16 +13,17 @@ public record LedgerRelayProperties(
         @DefaultValue Backoff backoff) {
 
     /**
-     * @param clusterId TB 클러스터 ID
-     * @param addresses TB 레플리카 주소들, 쉼표로 구분. 앱이 {@code com.tigerbeetle.Client} 빈을 주면 쓰지 않는다
+     * @param clusterId TB cluster id
+     * @param addresses TB replica addresses, comma-separated. Not used when the app provides a
+     *                  {@code com.tigerbeetle.Client} bean
      */
     public record Tigerbeetle(@DefaultValue("0") BigInteger clusterId, @DefaultValue("3000") String addresses) {
     }
 
     /**
-     * @param enabled     끄면 워커 없이 접수·조회만 한다
-     * @param concurrency 이 프로세스에서 바퀴를 도는 스레드 수
-     * @param idleDelay   잡은 명령이 없던 바퀴 뒤에 쉬는 시간
+     * @param enabled     when off, there is no worker; the process only accepts and queries commands
+     * @param concurrency number of threads in this process that run cycles
+     * @param idleDelay   pause after a cycle that claimed no commands
      */
     public record Worker(
             @DefaultValue("true") boolean enabled,

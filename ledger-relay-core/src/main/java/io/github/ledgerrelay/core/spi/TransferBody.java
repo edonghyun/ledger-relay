@@ -7,10 +7,11 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * TB 이체 본문. 접수 때 정해지고 바뀌지 않는다. 접수 때 검증했으므로 여기서는 다시 검증하지 않는다.
- * 검증 규칙이 나중에 강해져도 이미 접수된 명령이 막히지 않게 하기 위해서다.
+ * The TB transfer body. It is set at acceptance and never changes. It was validated at acceptance, so it is not
+ * validated again here. That way, commands already accepted are not blocked if the validation rules get stricter later.
  *
- * @param pendingTransferId post·void가 참조한 예약의 TB 이체 ID. 접수 때 참조 검사에서 정해진다. 그 밖에는 없다
+ * @param pendingTransferId the TB transfer id of the reservation the post or void refers to. Set by the reference
+ *                          check at acceptance. Absent otherwise
  */
 public record TransferBody(
         CommandKind kind,

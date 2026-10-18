@@ -6,14 +6,16 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 원장 명령 하나. 명령 1개에는 TB 이체 ID 1개만 대응한다.
+ * One ledger command. Each command maps to exactly one TB transfer id.
  *
- * <p>값은 정규화된 상태로 담는다. 생략한 선택값은 명시적 기본값이 된다. post·void는 계좌·ledger·code를
- * 예약에서 물려받으므로 0이다. 금액을 생략한 post는 {@link #AMOUNT_MAX}(전액 확정)다. 규칙을 어기면
- * {@link InvalidCommandException}을 던진다. 빌더를 거치지 않고 생성자를 직접 불러도 같은 검증을 받는다.
+ * <p>Values are stored normalized. An omitted optional value becomes an explicit default. post and void inherit the
+ * accounts, ledger and code from the reservation, so those are 0. A post with no amount is {@link #AMOUNT_MAX} (post
+ * the full amount). A rule violation throws {@link InvalidCommandException}. Calling the constructor directly, without
+ * the builder, runs the same checks.
  *
- * <p>전액 확정은 금액을 생략한다(AMOUNT_MAX). TB는 실제 확정 금액을 저장하며, 같은 본문으로 다시 보내면 {@code exists}다.
- * 해제도 같다. post·void의 user_data_64·32는 0이면 예약의 값을 따른다(TB 0.17.9, {@code ReservationSemanticsTest}).
+ * <p>A full post omits the amount (AMOUNT_MAX). TB stores the amount actually posted, and resending the same body
+ * returns {@code exists}. The same holds for void. For post and void, user_data_64 and user_data_32 take the
+ * reservation's value when they are 0 (TB 0.17.9, {@code ReservationSemanticsTest}).
  */
 public record LedgerCommand(
         String commandId,
@@ -30,46 +32,48 @@ public record LedgerCommand(
         int userData32) {
 
     public static final BigInteger UINT128_MAX = BigInteger.ONE.shiftLeft(128).subtract(BigInteger.ONE);
-    /** post에서 금액을 생략하면 이 값이 된다. TB는 이 값을 "예약 금액 전부"로 읽는다. */
+    /** A post with no amount gets this value. TB reads it as "the full reserved amount". */
     public static final BigInteger AMOUNT_MAX = UINT128_MAX;
     static final long UINT32_MAX = 0xFFFF_FFFFL;
     static final int UINT16_MAX = 0xFFFF;
-    /** ID 문자열의 UTF-8 길이 상한. PG b-tree 인덱스 항목 한계(약 2.7KB)보다 넉넉히 작다(F30). */
+    /**
+     * Upper limit on the UTF-8 length of an id string. Well below the PG b-tree index entry limit (about 2.7 KB) (F30).
+     */
     public static final int MAX_ID_BYTES = 512;
 
     public LedgerCommand {
         Objects.requireNonNull(kind, "kind");
-        require(debitAccountId != null, "debitAccountId가 필요합니다");
-        require(creditAccountId != null, "creditAccountId가 필요합니다");
-        require(commandId != null && !commandId.isBlank(), "commandId가 필요합니다");
-        require(orderingKey != null && !orderingKey.isBlank(), "orderingKey가 필요합니다");
+        require(debitAccountId != null, "debitAccountId is required");
+        require(creditAccountId != null, "creditAccountId is required");
+        require(commandId != null && !commandId.isBlank(), "commandId is required");
+        require(orderingKey != null && !orderingKey.isBlank(), "orderingKey is required");
         requireWellFormed("commandId", commandId);
         requireWellFormed("orderingKey", orderingKey);
         if (reservationCommandId != null) {
             requireWellFormed("reservationCommandId", reservationCommandId);
         }
-        require(amount != null, "amount가 필요합니다");
-        require(amount.signum() >= 0 && amount.compareTo(UINT128_MAX) <= 0, "amount는 0 이상 2^128-1 이하여야 합니다");
-        require(timeoutSeconds >= 0 && timeoutSeconds <= UINT32_MAX, "timeoutSeconds는 0 이상 2^32-1 이하여야 합니다");
-        require(kind == CommandKind.RESERVE || timeoutSeconds == 0, "timeoutSeconds는 reserve 전용입니다");
+        require(amount != null, "amount is required");
+        require(amount.signum() >= 0 && amount.compareTo(UINT128_MAX) <= 0, "amount must be between 0 and 2^128-1");
+        require(timeoutSeconds >= 0 && timeoutSeconds <= UINT32_MAX, "timeoutSeconds must be between 0 and 2^32-1");
+        require(kind == CommandKind.RESERVE || timeoutSeconds == 0, "timeoutSeconds is only for reserve");
         if (kind.referencesReservation()) {
             require(reservationCommandId != null && !reservationCommandId.isBlank(),
-                    "post·void에는 reservation이 필요합니다");
-            require(!reservationCommandId.equals(commandId), "post·void는 자기 자신을 reservation으로 참조할 수 없습니다");
+                    "post and void require a reservation");
+            require(!reservationCommandId.equals(commandId), "post and void cannot refer to themselves as the reservation");
             require(debitAccountId.signum() == 0 && creditAccountId.signum() == 0 && ledger == 0 && code == 0,
-                    "post·void는 예약의 계좌·ledger·code를 따르므로 debit, credit, ledger, code를 지정하지 않습니다");
-            require(kind != CommandKind.VOID || amount.signum() == 0, "void는 amount를 받지 않습니다");
-            // TB는 0원 post를 "0원 확정 + 나머지 해제"로 처리한다. 그 결과는 void와 같으므로 void를 쓰게 한다.
+                    "post and void take the accounts, ledger and code from the reservation, so do not set debit, credit, ledger or code");
+            require(kind != CommandKind.VOID || amount.signum() == 0, "void does not take an amount");
+            // TB handles a post of 0 as "post 0 and void the rest". The result equals a void, so callers must use void.
             require(kind != CommandKind.POST || amount.signum() > 0,
-                    "post의 amount는 0일 수 없습니다. 전액 확정은 amount를 생략하고, 묶인 돈을 풀려면 void를 씁니다");
+                    "post amount cannot be 0. To post the full amount, omit amount; to release the held money, use void");
         } else {
-            require(reservationCommandId == null, "reservation은 post·void 전용입니다");
+            require(reservationCommandId == null, "reservation is only for post and void");
             requireAccountId("debitAccountId", debitAccountId);
             requireAccountId("creditAccountId", creditAccountId);
             require(!debitAccountId.equals(creditAccountId),
-                    "debitAccountId와 creditAccountId는 같은 계좌일 수 없습니다");
-            require(ledger >= 1 && ledger <= UINT32_MAX, "ledger는 1 이상 2^32-1 이하여야 합니다");
-            require(code >= 1 && code <= UINT16_MAX, "code는 1 이상 65535 이하여야 합니다");
+                    "debitAccountId and creditAccountId cannot be the same account");
+            require(ledger >= 1 && ledger <= UINT32_MAX, "ledger must be between 1 and 2^32-1");
+            require(code >= 1 && code <= UINT16_MAX, "code must be between 1 and 65535");
         }
     }
 
@@ -94,17 +98,18 @@ public record LedgerCommand(
     }
 
     private static void requireAccountId(String field, BigInteger id) {
-        require(id.signum() != 0, field + "가 필요합니다");
-        require(id.signum() > 0 && id.compareTo(UINT128_MAX) < 0, field + "는 1 이상 2^128-2 이하여야 합니다");
+        require(id.signum() != 0, field + " is required");
+        require(id.signum() > 0 && id.compareTo(UINT128_MAX) < 0, field + " must be between 1 and 2^128-2");
     }
 
     /**
-     * PG {@code text}는 U+0000을 받지 않아 접수가 SQL 오류로 앱 트랜잭션을 깬다. 짝 없는 서로게이트는 UTF-8로 바꿀 때
-     * '?'가 되어 다른 값과 해시가 같아진다(docs/failure-modes.md F20).
+     * PG {@code text} rejects U+0000, so acceptance fails with an SQL error that breaks the app transaction. A lone
+     * surrogate becomes '?' when encoded to UTF-8, so its hash equals that of a different value
+     * (docs/failure-modes.md F20).
      */
     private static void requireWellFormed(String field, String value) {
-        require(isWellFormed(value), field + "에 U+0000이나 짝 없는 서로게이트를 쓸 수 없습니다");
-        require(fitsTheIndex(value), field + "는 UTF-8 " + MAX_ID_BYTES + "바이트 이하여야 합니다");
+        require(isWellFormed(value), field + " cannot contain U+0000 or a lone surrogate");
+        require(fitsTheIndex(value), field + " must be at most " + MAX_ID_BYTES + " bytes in UTF-8");
     }
 
     private static boolean fitsTheIndex(String value) {
@@ -112,8 +117,10 @@ public record LedgerCommand(
     }
 
     /**
-     * 이 문자열이 commandId로 접수될 수 있는가(공백 아님, U+0000·짝 없는 서로게이트 없음, UTF-8 512바이트 이하). 아니면 그 id로 접수된 명령은 있을 수 없다. 서비스는 조회·포기 전에 이것으로
-     * 걸러 DB에 보내지 않는다. PG에서 U+0000은 앱 트랜잭션을 깨고, 짝 없는 서로게이트는 '?'로 바뀌어 다른 명령과 맞는다(F20).
+     * Whether this string can be accepted as a commandId (not blank, no U+0000 or lone surrogate, at most 512 bytes in
+     * UTF-8). If not, no command can have been accepted under that id. Services filter with this before a query or an
+     * abandon and do not send such ids to the DB. In PG, U+0000 breaks the app transaction, and a lone surrogate turns
+     * into '?' and matches a different command (F20).
      */
     public static boolean isAcceptableId(String commandId) {
         return commandId != null && !commandId.isBlank() && isWellFormed(commandId) && fitsTheIndex(commandId);
@@ -176,7 +183,10 @@ public record LedgerCommand(
                     ledger, code, timeoutSeconds, reservation, userData64, userData32);
         }
 
-        /** 생략한 금액: post는 전액 확정, void는 0, 이체·예약은 그대로 null이라 생성자가 거부한다. */
+        /**
+         * An omitted amount: post gets the full amount, void gets 0, and transfer and reserve stay null so the
+         * constructor rejects them.
+         */
         private BigInteger normalizedAmount() {
             if (amount != null) {
                 return amount;

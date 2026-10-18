@@ -8,13 +8,14 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 저장된 명령 행. lease_expires_at, next_attempt_at, first_submitted_at은 저장소가 claim 후보를 고를 때만
- * 쓰므로 싣지 않는다.
+ * A stored command row. lease_expires_at, next_attempt_at and first_submitted_at are used only by the store to pick
+ * claim candidates, so they are not carried.
  *
- * @param row         상태 기계가 보는 부분
- * @param completedAt              끝나기 전에는 없다
- * @param acceptedInThisTransaction 이 행을 지금 부른 쪽의 트랜잭션이 넣었는가. 커밋된 뒤 다시 읽으면 false
- * @param halt                     멈춘(HALTED) 행에만 있다
+ * @param row         the part the state machine sees
+ * @param completedAt              empty until the command ends
+ * @param acceptedInThisTransaction whether the caller's current transaction inserted this row. False when read again
+ *                                  after commit
+ * @param halt                     present only on halted (HALTED) rows
  */
 public record CommandRecord(
         long rowId,

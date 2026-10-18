@@ -10,10 +10,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 결제, 출고, 취소. 각각 한 트랜잭션에서 주문을 고치고 원장 명령을 접수한다. 접수는 PG에 행을 넣을 뿐 TB를 기다리지 않는다.
- * TB에는 워커가 보낸다. 그래서 TB가 끊겨도 요청은 바로 끝난다.
+ * Pay, ship and cancel. Each one updates the order and submits a ledger command in one transaction. Submitting only
+ * inserts a row into PG and never waits for TB; the worker sends the command to TB. So requests finish immediately even
+ * when TB is unreachable.
  *
- * <p>출고와 취소는 주문 행을 먼저 잠그고 고친 뒤 접수한다. 핸들러도 같은 순서로 잡으므로 둘이 교착하지 않는다(F33).
+ * <p>Ship and cancel lock and update the order row first and then submit. The outcome handler takes locks in the same
+ * order, so the two never deadlock (F33).
  */
 @Service
 public class OrderService {
@@ -26,16 +28,19 @@ public class OrderService {
         this.relay = relay;
     }
 
-    /** 결제 = 예약(승인). 같은 멱등 키로 다시 오면 처음 주문을 그대로 돌려준다. 새 주문도 새 명령도 만들지 않는다. */
+    /**
+     * Pay = reserve (authorize). A repeated request with the same idempotency key returns the original order and
+     * creates neither a new order nor a new command.
+     */
     @Transactional
     public Checkout checkout(String idempotencyKey, long buyerId, String productCode) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
-            throw new IllegalArgumentException("Idempotency-Key가 필요합니다");
+            throw new IllegalArgumentException("The Idempotency-Key header is required");
         }
         Product product = Catalog.find(productCode)
-                .orElseThrow(() -> new IllegalArgumentException("없는 상품입니다: " + productCode));
+                .orElseThrow(() -> new IllegalArgumentException("Unknown product: " + productCode));
         if (!Accounts.isBuyer(buyerId)) {
-            throw new IllegalArgumentException("없는 구매자입니다: " + buyerId);
+            throw new IllegalArgumentException("Unknown buyer: " + buyerId);
         }
         var inserted = orders.insertIfAbsent(idempotencyKey, buyerId, product.code(), product.priceSatang());
         if (inserted.isEmpty()) {
@@ -54,37 +59,38 @@ public class OrderService {
         return new Checkout(order, true);
     }
 
-    /** 출고 = 확정(매입). 예약이 적용되어 결제 승인된 주문만 출고한다. */
+    /** Ship = post (capture). Only an order whose reservation was applied (authorized) can be shipped. */
     @Transactional
     public ShopOrder ship(long orderId) {
         ShopOrder order = orders.lock(orderId).orElseThrow(() -> new OrderNotFoundException(orderId));
         if (order.state() != OrderState.AUTHORIZED) {
-            throw new OrderConflictException("결제 승인된 주문만 출고할 수 있습니다. 지금은 " + order.state().label() + "입니다");
+            throw new OrderConflictException("Only an authorized order can be shipped. Current state: " + order.state().label());
         }
         orders.changeState(orderId, OrderState.SHIP_REQUESTED, null);
         String post = ShopOrder.commandId(orderId, "post");
         orders.recordCommand(orderId, post, CommandKind.POST);
-        // 금액을 생략하면 예약 금액 전부를 확정한다
+        // Without an amount, the full reserved amount is posted
         relay.submit(LedgerCommand.post(post).orderingKey(order.orderingKey())
                 .reservation(ShopOrder.commandId(orderId, "reserve")).build());
         return orders.find(orderId).orElseThrow();
     }
 
     /**
-     * 취소 = 해제. 확정을 접수하기 전이면 된다. 예약이 아직 적용 전이어도 된다. 해제는 같은 키에서 예약 뒤 순번이라 예약이 끝난 뒤에
-     * 나간다. 출고를 요청한 뒤에는 거부한다(환불은 비목표).
+     * Cancel = void. Allowed until a post is accepted, even if the reservation has not been applied yet. The void has a
+     * later seq than the reservation on the same key, so it goes out after the reservation finishes. Rejected once
+     * shipping was requested (refunds are a non-goal).
      */
     @Transactional
     public ShopOrder cancel(long orderId) {
         ShopOrder order = orders.lock(orderId).orElseThrow(() -> new OrderNotFoundException(orderId));
         if (order.state() != OrderState.ACCEPTED && order.state() != OrderState.AUTHORIZED) {
-            throw new OrderConflictException("출고 전 주문만 취소할 수 있습니다. 지금은 " + order.state().label() + "입니다");
+            throw new OrderConflictException("Only an order that has not shipped can be cancelled. Current state: " + order.state().label());
         }
         release(order);
         return orders.find(orderId).orElseThrow();
     }
 
-    /** 주문을 취소 요청으로 고치고 해제를 접수한다. 부르는 쪽이 주문 행을 이미 잠갔다. */
+    /** Changes the order to cancelling and submits a void. The caller has already locked the order row. */
     void release(ShopOrder lockedOrder) {
         orders.changeState(lockedOrder.id(), OrderState.CANCEL_REQUESTED, null);
         String voidId = ShopOrder.commandId(lockedOrder.id(), "void");
@@ -93,10 +99,13 @@ public class OrderService {
                 .reservation(reservationOf(lockedOrder)).build());
     }
 
-    /** 주문의 예약 명령. 보통은 order-<id>-reserve이고, 데모가 직접 넣은 주문도 같은 규칙을 따른다. */
+    /**
+     * The reservation command of the order. Normally order-&lt;id&gt;-reserve; orders the demo writes directly follow
+     * the same rule.
+     */
     private String reservationOf(ShopOrder order) {
         return orders.commandsOf(order.id()).stream().filter(command -> command.kind() == CommandKind.RESERVE)
                 .map(OrderCommand::commandId).findFirst()
-                .orElseThrow(() -> new IllegalStateException("주문 " + order.id() + "에 예약 명령이 없습니다"));
+                .orElseThrow(() -> new IllegalStateException("Order " + order.id() + " has no reservation command"));
     }
 }

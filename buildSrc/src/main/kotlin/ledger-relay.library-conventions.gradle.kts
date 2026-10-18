@@ -1,5 +1,6 @@
-// 라이브러리 모듈(core, jdbc, tigerbeetle, spring-boot)의 설정. 아직 원격 저장소에 배포하지 않는다.
-// ./gradlew publishToMavenLocal 로 ~/.m2에 올려 다른 프로젝트에서 io.github.ledgerrelay:<모듈>:0.1.0-SNAPSHOT 으로 쓴다
+// Settings for the library modules (core, jdbc, tigerbeetle, spring-boot). Not published to a remote repository yet.
+// ./gradlew publishToMavenLocal puts them in ~/.m2, and other projects use them as
+// io.github.ledgerrelay:<module>:0.1.0-SNAPSHOT
 plugins {
     id("ledger-relay.java-conventions")
     `java-library`

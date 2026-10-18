@@ -1,15 +1,17 @@
-# ledger-relay 샘플 쇼핑몰 데모. 준비물은 Docker뿐이다.
+# ledger-relay sample shop demo. You only need Docker.
 #   docker compose up --build   →   http://localhost:8090
-# 끄기: docker compose down   (데모는 매번 빈 DB와 빈 원장에서 시작한다)
-# 멈췄다 다시 켜면(Ctrl-C 뒤 up, stop/start) 둘 다 그대로 이어진다. PG와 TB는 늘 함께 남고 함께 사라진다.
-# 한쪽만 이름 붙은 볼륨에 두면 down 뒤 원장만 남아 화면에 거짓 중복 이체가 보인다(docs/failure-modes.md F44)
+# Shut down: docker compose down   (the demo starts from an empty DB and an empty ledger each time)
+# Stopping and starting again (up after Ctrl-C, stop/start) continues both as they were. PG and TB always stay
+# together and go away together.
+# Putting only one of them in a named volume leaves only the ledger after down, and the screen shows false
+# duplicate transfers (docs/failure-modes.md F44)
 #
-#   브라우저 → shop-a(화면·API·워커) ┐
-#              shop-b(워커)          ┴→ PostgreSQL
-#                                     → Toxiproxy(장면 2의 끊기 스위치) → TigerBeetle
+#   browser → shop-a (UI, API, worker) ┐
+#             shop-b (worker)          ┴→ PostgreSQL
+#                                      → Toxiproxy (cut-off switch of scene 2) → TigerBeetle
 #
-# PG·TB·Toxiproxy는 호스트 포트를 열지 않는다. TB 포트를 열지 않으면 기동 직후 panic(docs/failure-modes.md F26)의
-# 원인 경로도 없다.
+# PG, TB and Toxiproxy open no host ports. With the TB port closed, the cause of the panic right after startup
+# (docs/failure-modes.md F26) has no path either.
 
 x-shop: &shop
   image: ledger-relay-shop:local
@@ -20,7 +22,8 @@ x-shop: &shop
       condition: service_started
     tigerbeetle:
       condition: service_started
-  # TB Java 클라이언트도 io_uring을 쓴다. 기본 seccomp 프로필에서는 Client를 만들다 죽는다(docs/failure-modes.md F41)
+  # The TB Java client uses io_uring too. With the default seccomp profile it dies while creating the Client
+  # (docs/failure-modes.md F41)
   security_opt:
     - seccomp=unconfined
   mem_limit: 640m
@@ -52,7 +55,7 @@ services:
 
   tigerbeetle:
     image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9
-    # TB는 io_uring을 쓴다. Docker 기본 seccomp 프로필에서는 뜨지 않는다
+    # TB uses io_uring. It does not start with Docker's default seccomp profile
     security_opt:
       - seccomp=unconfined
     entrypoint: ["/bin/sh", "-c"]
@@ -70,7 +73,8 @@ services:
     volumes:
       - ./examples/shop/compose/toxiproxy.json:/config/toxiproxy.json:ro
 
-  # 이미지는 shop-a만 빌드한다. 둘 다 같은 이름으로 빌드하면 동시에 끝난 쪽이 "already exists"로 실패한다(F42)
+  # Only shop-a builds the image. If both build under the same name, the one that finishes at the same moment
+  # fails with "already exists" (F42)
   shop-a:
     <<: *shop
     build:

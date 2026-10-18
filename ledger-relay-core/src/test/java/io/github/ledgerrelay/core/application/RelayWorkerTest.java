@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("워커 한 바퀴 — 제출과 전이")
+@DisplayName("One worker cycle — submission and transitions")
 class RelayWorkerTest {
 
     static final Duration BACKOFF_MAX = Duration.ofSeconds(1);
@@ -60,11 +60,11 @@ class RelayWorkerTest {
 
     @Nested
     @Order(1)
-    @DisplayName("접수된 이체가 있을 때 한 바퀴 돌면")
+    @DisplayName("When a cycle runs with accepted transfers")
     class WithAcceptedTransfers {
 
         @Test
-        @DisplayName("TB에 보내고 결과대로 적용됨으로 끝내며, 핸들러가 한 번 실행된다")
+        @DisplayName("It sends them to TB, ends them applied as TB answered, and runs the handler once")
         void aTransferIsSubmittedAndApplied() {
             // given
             accepted(transfer("pay-1", "order-1"));
@@ -74,12 +74,12 @@ class RelayWorkerTest {
 
             // then
             assertState("pay-1", State.APPLIED);
-            assertThat(handler.completedFor("pay-1")).as("pay-1의 핸들러 실행").hasSize(1);
-            assertThat(report).as("한 바퀴의 리포트").isEqualTo(new CycleReport(1, 1, 1, 0));
+            assertThat(handler.completedFor("pay-1")).as("handler runs for pay-1").hasSize(1);
+            assertThat(report).as("cycle report").isEqualTo(new CycleReport(1, 1, 1, 0));
         }
 
         @Test
-        @DisplayName("다른 키의 명령들은 TB 요청 하나에 접수 순서대로 담긴다")
+        @DisplayName("Commands of different keys go into one TB request in acceptance order")
         void allSubmissionsGoInOneRequestInClaimOrder() {
             // given
             BigInteger first = accepted(transfer("pay-1", "order-1")).transferId();
@@ -94,7 +94,7 @@ class RelayWorkerTest {
         }
 
         @Test
-        @DisplayName("TB가 잔액 부족으로 거절하면 거절됨으로 끝나고 그 코드가 남는다")
+        @DisplayName("When TB rejects for insufficient funds, the command ends rejected and keeps that code")
         void aRejectionEndsTheCommandRejected() {
             // given
             fake.answer(accepted(transfer("pay-1", "order-1")).transferId(), ExceedsCredits);
@@ -105,11 +105,11 @@ class RelayWorkerTest {
             // then
             assertState("pay-1", State.REJECTED);
             assertThat(relay.status("pay-1").orElseThrow().rejection().orElseThrow().tbCode())
-                    .as("pay-1의 거절 코드").isEqualTo(ExceedsCredits);
+                    .as("rejection code of pay-1").isEqualTo(ExceedsCredits);
         }
 
         @Test
-        @DisplayName("같은 키의 명령은 맨 앞 하나만 요청에 담기고, 그것이 끝난 다음 바퀴에 뒤 명령이 간다 (G4)")
+        @DisplayName("Of the commands on one key only the head goes into a request, and the next one goes in the cycle after it ends (G4)")
         void onlyTheHeadOfAKeyGoesInARequest() {
             // given
             BigInteger first = accepted(transfer("pay-1", "order-1")).transferId();
@@ -124,7 +124,7 @@ class RelayWorkerTest {
         }
 
         @Test
-        @DisplayName("보낸 이체의 user_data_128에는 그 명령의 행 id가 실린다 — TB에서 PG를 역참조한다")
+        @DisplayName("The sent transfer carries the command's row id in user_data_128 — TB refers back to PG")
         void theSubmissionCarriesTheRowIdAsUserData128() {
             // given
             accepted(transfer("pay-1", "order-1"));
@@ -134,20 +134,20 @@ class RelayWorkerTest {
             worker.runOnce();
 
             // then
-            assertThat(fake.requests().get(0).get(0).userData128()).as("보낸 이체의 user_data_128")
+            assertThat(fake.requests().get(0).get(0).userData128()).as("user_data_128 of the sent transfer")
                     .isEqualTo(BigInteger.valueOf(rowId));
         }
     }
 
     @Nested
     @Order(2)
-    @DisplayName("TB에 보내지 않고 끝나는 명령이 있으면")
+    @DisplayName("When some commands end without being sent to TB")
     class WithoutARequest {
 
         @Test
-        @DisplayName("거절로 끝난 예약을 참조한 확정은 TB 요청 없이 건너뜀으로 끝난다")
+        @DisplayName("A post that refers to a rejected reservation ends skipped without a TB request")
         void aPostOfARejectedReservationIsSkippedWithoutARequest() {
-            // given: hold-1이 잔액 부족으로 거절되었다
+            // given: hold-1 was rejected for insufficient funds
             fake.answer(accepted(reserve("hold-1", "order-1")).transferId(), ExceedsCredits);
             worker.runOnce();
             accepted(LedgerCommand.post("capture-1").orderingKey("order-1").reservation("hold-1").build());
@@ -157,13 +157,13 @@ class RelayWorkerTest {
 
             // then
             assertState("capture-1", State.SKIPPED);
-            assertThat(fake.requests()).as("TB 요청(hold-1 하나뿐이어야 한다)").hasSize(1);
+            assertThat(fake.requests()).as("TB requests (only the one for hold-1)").hasSize(1);
         }
 
         @Test
-        @DisplayName("핸들러가 실패해 결과를 아는 명령은 TB 요청 없이 그 결과로 끝난다")
+        @DisplayName("A command whose result is known because the handler failed ends with that result without a TB request")
         void aKnownResultCompletesWithoutARequest() {
-            // given: 첫 바퀴에서 TB는 기록했지만 핸들러가 실패했다
+            // given: in the first cycle TB recorded it but the handler failed
             handler.failNextCalls(1);
             accepted(transfer("pay-1", "order-1"));
             worker.runOnce();
@@ -174,13 +174,14 @@ class RelayWorkerTest {
 
             // then
             assertState("pay-1", State.APPLIED);
-            assertThat(fake.requests()).as("TB 요청(첫 바퀴 하나뿐이어야 한다)").hasSize(1);
+            assertThat(fake.requests()).as("TB requests (only the one from the first cycle)").hasSize(1);
         }
 
         @Test
-        @DisplayName("예약보다 앞 순번의 확정은 멈춘 명령으로 한 번 알리고, 다음 바퀴에는 다시 알리지 않는다")
+        @DisplayName("A post sequenced before its reservation is reported once as halted, and not reported again in the next cycle")
         void aHaltedPostIsReportedOnce() {
-            // given: 접수 검사를 지나칠 수 없는 순서라 저장소에 직접 넣는다(LedgerRelayContract와 같은 값)
+            // given: this order cannot get past the acceptance checks, so the rows go straight into the store (same
+            // values as LedgerRelayContract)
             insertedPastTheChecks(new NewCommand("hold-1", "order-1", 2, Optional.empty(), BigInteger.valueOf(102),
                     "hash-of-hold-1", new TransferBody(CommandKind.RESERVE, BigInteger.ONE, BigInteger.TWO,
                             BigInteger.valueOf(500), 1, 1, 0, Optional.empty(), 0, 0)));
@@ -193,14 +194,14 @@ class RelayWorkerTest {
             worker.runOnce();
 
             // then
-            assertThat(events.events()).as("워커 이벤트").containsOnlyOnce("halted:capture-1");
-            assertThat(fake.requests()).as("TB 요청").isEmpty();
+            assertThat(events.events()).as("worker events").containsOnlyOnce("halted:capture-1");
+            assertThat(fake.requests()).as("TB requests").isEmpty();
         }
     }
 
     @Nested
     @Order(3)
-    @DisplayName("TB가 submit-timeout 안에 답하지 않으면")
+    @DisplayName("When TB does not answer within submit-timeout")
     class WhenTheLedgerDoesNotAnswer {
 
         @BeforeEach
@@ -209,7 +210,7 @@ class RelayWorkerTest {
         }
 
         @Test
-        @DisplayName("명령을 되돌려 나중에 다시 보내게 하고, 조회는 처리 중으로 남는다")
+        @DisplayName("The commands are released to be sent again later, and the query still shows them in progress")
         void theCommandsAreReleasedForALaterRetry() {
             // given
             accepted(transfer("pay-1", "order-1"));
@@ -218,15 +219,15 @@ class RelayWorkerTest {
             CycleReport report = worker.runOnce();
 
             // then
-            assertThat(report.released()).as("되돌린 명령 수").isEqualTo(1);
+            assertThat(report.released()).as("released commands").isEqualTo(1);
             assertState("pay-1", State.IN_PROGRESS);
-            assertThat(events.events()).as("워커 이벤트").contains("submitTimedOut:1");
+            assertThat(events.events()).as("worker events").contains("submitTimedOut:1");
         }
 
         @Test
-        @DisplayName("보낸 이체의 슬롯은 요청이 실제로 끝날 때까지 돌아오지 않는다 — TB 클라이언트 안에 요청이 남아 있다")
+        @DisplayName("The slots of sent transfers do not come back until the request actually ends — the request is still inside the TB client")
         void aTimedOutRequestKeepsItsSlotsUntilItEnds() {
-            // given: 슬롯 4, batch 4인 워커에 다른 키의 이체 둘
+            // given: a worker with 4 slots and batch 4, and two transfers on different keys
             InFlightLimit four = new InFlightLimit(4);
             RelayWorker small = new RelayWorker(relay, fake, four,
                     new WorkerSettings(4, 4, Duration.ofSeconds(30), Duration.ofMillis(200), Duration.ofMillis(100)),
@@ -234,17 +235,17 @@ class RelayWorkerTest {
             accepted(transfer("pay-1", "order-1"));
             accepted(transfer("pay-2", "order-2"));
             small.runOnce();
-            assertThat(four.available()).as("timeout 직후 남은 슬롯").isEqualTo(2);
+            assertThat(four.available()).as("remaining slots right after the timeout").isEqualTo(2);
 
             // when
             fake.releaseHeldReplies();
 
             // then
-            assertThat(four.available()).as("요청이 끝난 뒤 남은 슬롯").isEqualTo(4);
+            assertThat(four.available()).as("remaining slots after the request ended").isEqualTo(4);
         }
 
         @Test
-        @DisplayName("timeout 뒤에 늦게 온 응답은 아무것도 쓰지 않는다 — 핸들러도 실행되지 않는다")
+        @DisplayName("A reply that arrives late after the timeout writes nothing — the handler does not run either")
         void aLateReplyAfterTheTimeoutWritesNothing() {
             // given
             accepted(transfer("pay-1", "order-1"));
@@ -254,15 +255,15 @@ class RelayWorkerTest {
             fake.releaseHeldReplies();
 
             // then
-            assertThat(handler.completedFor("pay-1")).as("pay-1의 핸들러 실행").isEmpty();
+            assertThat(handler.completedFor("pay-1")).as("handler runs for pay-1").isEmpty();
             assertState("pay-1", State.IN_PROGRESS);
-            assertThat(events.events()).as("늦은 응답에 대한 쓰기 시도(있다면 0행으로 막혔을 것)").doesNotContain("fenced:pay-1");
+            assertThat(events.events()).as("write attempt for the late reply (it would have been fenced with 0 rows)").doesNotContain("fenced:pay-1");
         }
 
         @Test
-        @DisplayName("backoff 뒤 다시 보낼 때도 같은 이체 ID로 보내고, 그 결과로 끝난다")
+        @DisplayName("The resend after backoff uses the same transfer id, and the command ends with that result")
         void theRetryUsesTheSameTransferId() {
-            // given: 첫 요청이 timeout으로 되돌려졌고, 이제 TB가 답한다
+            // given: the first request was released on timeout, and now TB answers
             BigInteger transferId = accepted(transfer("pay-1", "order-1")).transferId();
             worker.runOnce();
             fake.releaseHeldReplies();
@@ -279,27 +280,27 @@ class RelayWorkerTest {
 
     @Nested
     @Order(4)
-    @DisplayName("TB 요청이 예외로 끝나거나 결과 개수가 틀리면")
+    @DisplayName("When the TB request ends with an exception or the result count is wrong")
     class WhenTheRequestFailsOrTheReplyIsMalformed {
 
         @Test
-        @DisplayName("예외로 끝나면 명령을 되돌리고, 슬롯은 모두 돌아온다")
+        @DisplayName("When it ends with an exception, the commands are released and every slot comes back")
         void aFailedRequestReleasesItsCommands() {
             // given
-            fake.failNext(new IllegalStateException("연결이 끊겼다"));
+            fake.failNext(new IllegalStateException("the connection dropped"));
             accepted(transfer("pay-1", "order-1"));
 
             // when
             CycleReport report = worker.runOnce();
 
             // then
-            assertThat(report.released()).as("되돌린 명령 수").isEqualTo(1);
-            assertThat(events.events()).as("워커 이벤트").contains("submitFailed:1");
-            assertThat(slots.available()).as("남은 슬롯").isEqualTo(SETTINGS.maxInFlight());
+            assertThat(report.released()).as("released commands").isEqualTo(1);
+            assertThat(events.events()).as("worker events").contains("submitFailed:1");
+            assertThat(slots.available()).as("remaining slots").isEqualTo(SETTINGS.maxInFlight());
         }
 
         @Test
-        @DisplayName("결과 개수가 요청과 다르면 아무것도 쓰지 않고 모두 되돌린다 — 순서로 짝지으므로 남의 결과로 끝나지 않게")
+        @DisplayName("When the result count differs from the request, nothing is written and all are released — results are paired by position, so no command ends with another's result")
         void aReplyWithTheWrongCountWritesNothing() {
             // given
             fake.replyWithCount(1);
@@ -310,14 +311,14 @@ class RelayWorkerTest {
             worker.runOnce();
 
             // then
-            assertThat(handler.completedFor("pay-1")).as("pay-1의 핸들러 실행").isEmpty();
+            assertThat(handler.completedFor("pay-1")).as("handler runs for pay-1").isEmpty();
             assertState("pay-1", State.IN_PROGRESS);
             assertState("pay-2", State.IN_PROGRESS);
-            assertThat(events.events()).as("워커 이벤트").contains("malformedReply:2:1");
+            assertThat(events.events()).as("worker events").contains("malformedReply:2:1");
         }
 
         @Test
-        @DisplayName("결과 개수가 틀린 응답이면 보낸 명령을 모두 되돌린다 — 처리 중으로 방치하지 않는다")
+        @DisplayName("A reply with the wrong result count releases every sent command — none is left in progress")
         void aMalformedReplyReleasesEveryCommand() {
             // given
             fake.replyWithCount(1);
@@ -328,11 +329,11 @@ class RelayWorkerTest {
             CycleReport report = worker.runOnce();
 
             // then
-            assertThat(report.released()).as("되돌린 명령 수").isEqualTo(2);
+            assertThat(report.released()).as("released commands").isEqualTo(2);
         }
 
         @Test
-        @DisplayName("결과가 요청보다 많아도 아무것도 쓰지 않는다")
+        @DisplayName("Nothing is written when there are more results than requests either")
         void aReplyWithTooManyResultsWritesNothing() {
             // given
             fake.replyWithCount(3);
@@ -343,48 +344,48 @@ class RelayWorkerTest {
             worker.runOnce();
 
             // then
-            assertThat(handler.completedFor("pay-1")).as("pay-1의 핸들러 실행").isEmpty();
-            assertThat(events.events()).as("워커 이벤트").contains("malformedReply:2:3");
+            assertThat(handler.completedFor("pay-1")).as("handler runs for pay-1").isEmpty();
+            assertThat(events.events()).as("worker events").contains("malformedReply:2:3");
         }
 
         @Test
-        @DisplayName("요청을 보내는 자리에서 바로 던지면 되돌리고, 슬롯은 모두 돌아온다")
+        @DisplayName("When sending the request throws on the spot, the commands are released and every slot comes back")
         void aSynchronousSubmitFailureReleasesAndReturnsSlots() {
             // given
-            fake.throwOnNextSubmit(new IllegalStateException("배치를 채우다 실패했다"));
+            fake.throwOnNextSubmit(new IllegalStateException("failed while filling the batch"));
             accepted(transfer("pay-1", "order-1"));
 
             // when
             CycleReport report = worker.runOnce();
 
             // then
-            assertThat(report.released()).as("되돌린 명령 수").isEqualTo(1);
-            assertThat(slots.available()).as("남은 슬롯").isEqualTo(1024);
-            assertThat(events.events()).as("워커 이벤트").contains("submitFailed:1");
+            assertThat(report.released()).as("released commands").isEqualTo(1);
+            assertThat(slots.available()).as("remaining slots").isEqualTo(1024);
+            assertThat(events.events()).as("worker events").contains("submitFailed:1");
         }
 
         @Test
-        @DisplayName("TB 클라이언트를 더 쓸 수 없다는 실패는 일시적 실패와 따로 알린다 — 운영자가 재시작이 필요함을 알게")
+        @DisplayName("A failure saying the TB client can no longer be used is reported apart from transient failures — so the operator knows a restart is needed")
         void anUnavailableLedgerIsReportedDistinctly() {
             // given
-            fake.failNext(new LedgerUnavailableException("클라이언트가 닫혔다", new IllegalStateException()));
+            fake.failNext(new LedgerUnavailableException("the client was closed", new IllegalStateException()));
             accepted(transfer("pay-1", "order-1"));
 
             // when
             worker.runOnce();
 
             // then
-            assertThat(events.events()).as("워커 이벤트").contains("ledgerUnavailable").doesNotContain("submitFailed:1");
+            assertThat(events.events()).as("worker events").contains("ledgerUnavailable").doesNotContain("submitFailed:1");
         }
     }
 
     @Nested
     @Order(7)
-    @DisplayName("결과를 쓰다가 0행이거나 핸들러가 실패하면")
+    @DisplayName("When writing a result hits 0 rows or the handler fails")
     class WhenAResultWriteDoesNotLand {
 
         @Test
-        @DisplayName("핸들러가 실패하면 그 명령을 알리고, 완료로 세지 않는다")
+        @DisplayName("When the handler fails, the command is reported and not counted as completed")
         void aHandlerFailureIsReported() {
             // given
             handler.failNextCalls(1);
@@ -394,14 +395,14 @@ class RelayWorkerTest {
             CycleReport report = worker.runOnce();
 
             // then
-            assertThat(events.events()).as("워커 이벤트").contains("handlerFailed:pay-1");
-            assertThat(report.completed()).as("완료로 센 명령 수").isZero();
+            assertThat(events.events()).as("worker events").contains("handlerFailed:pay-1");
+            assertThat(report.completed()).as("commands counted as completed").isZero();
         }
 
         @Test
-        @DisplayName("응답을 기다리는 사이 다른 워커가 잡아 갔으면 0행으로 알리고, 완료로 세지 않는다")
+        @DisplayName("When another worker took the command while the reply was awaited, the 0-row write is reported and not counted as completed")
         void aFencedWriteIsReported() {
-            // given: TB에 보내는 사이 lease가 끝나 다른 워커가 같은 명령을 잡았다
+            // given: while it was being sent to TB, the lease ran out and another worker claimed the same command
             accepted(transfer("pay-1", "order-1"));
             LedgerClient overtakingLedger = new LedgerClient() {
                 @Override
@@ -424,20 +425,20 @@ class RelayWorkerTest {
             CycleReport report = overtaken.runOnce();
 
             // then
-            assertThat(events.events()).as("워커 이벤트").contains("fenced:pay-1");
-            assertThat(report.completed()).as("완료로 센 명령 수").isZero();
+            assertThat(events.events()).as("worker events").contains("fenced:pay-1");
+            assertThat(report.completed()).as("commands counted as completed").isZero();
         }
     }
 
     @Nested
     @Order(5)
-    @DisplayName("in-flight 슬롯이 모자라면")
+    @DisplayName("When in-flight slots run out")
     class WhenSlotsRunOut {
 
         @Test
-        @DisplayName("claim하지 않고 쉰다 — 명령은 접수됨 그대로이고 lease도 잡히지 않는다 (배압)")
+        @DisplayName("It rests without claiming — the command stays accepted and no lease is taken (backpressure)")
         void noSlotsMeansNoClaim() {
-            // given: 다른 쪽이 슬롯을 모두 쥐었다
+            // given: another side holds every slot
             slots.tryTake(SETTINGS.maxInFlight(), Duration.ZERO);
             accepted(transfer("pay-1", "order-1"));
 
@@ -445,15 +446,15 @@ class RelayWorkerTest {
             CycleReport report = worker.runOnce();
 
             // then
-            assertThat(report).as("한 바퀴의 리포트").isEqualTo(CycleReport.IDLE);
+            assertThat(report).as("cycle report").isEqualTo(CycleReport.IDLE);
             assertState("pay-1", State.ACCEPTED);
             assertThat(storage.transactions().inTransaction(() -> storage.store().find("pay-1")).orElseThrow()
-                    .row().leaseToken()).as("pay-1의 lease 토큰").isZero();
-            assertThat(events.events()).as("워커 이벤트").contains("noSlots");
+                    .row().leaseToken()).as("lease token of pay-1").isZero();
+            assertThat(events.events()).as("worker events").contains("noSlots");
         }
 
         @Test
-        @DisplayName("보내지 않은 몫의 슬롯은 바로 돌아온다 — 명령 하나면 batch 128 중 127이 돌아온다")
+        @DisplayName("Slots for the unsent part come back at once — with one command, 127 of the 128 batch slots come back")
         void unusedSlotsAreGivenBackAtOnce() {
             // given
             fake.holdReplies();
@@ -463,19 +464,20 @@ class RelayWorkerTest {
             worker.runOnce();
 
             // then
-            assertThat(slots.available()).as("붙잡힌 요청 하나가 쥔 뒤 남은 슬롯").isEqualTo(SETTINGS.maxInFlight() - 1);
+            assertThat(slots.available()).as("remaining slots while one held request keeps its slot").isEqualTo(SETTINGS.maxInFlight() - 1);
         }
     }
 
     @Nested
     @Order(6)
-    @DisplayName("결과를 쓰는 중에 저장소가 한 명령에서 실패하면")
+    @DisplayName("When the store fails on one command while results are written")
     class WhenAWriteFails {
 
         @Test
-        @DisplayName("그 명령만 알리고 나머지 명령의 결과는 그대로 쓴다 — 받은 거절 사유가 IdAlreadyFailed로 덮이지 않게")
+        @DisplayName("Only that command is reported and the other results are still written — so a rejection reason already received is not overwritten by IdAlreadyFailed")
         void theOtherResultsOfTheBatchAreStillWritten() {
-            // given: pay-1의 결과를 쓸 때 저장소가 한 번 실패한다(제출 기록 때의 조회는 지나간다)
+            // given: the store fails once when the result of pay-1 is written (the lookup while recording the
+            // submission goes through)
             FlakyStore flaky = new FlakyStore(storage.store(), "pay-1", 1);
             CommandLifecycle onFlaky = new CommandLifecycle(storage.keys(), flaky, storage.transactions(), new SequentialTransferIds(),
                     handler, new Backoff(Duration.ofMillis(200), BACKOFF_MAX));
@@ -490,15 +492,15 @@ class RelayWorkerTest {
 
             // then
             assertThat(onFlaky.status("pay-2").orElseThrow().rejection().orElseThrow().tbCode())
-                    .as("pay-2의 거절 코드").isEqualTo(ExceedsCredits);
-            assertThat(events.events()).as("워커 이벤트").contains("writeFailed:pay-1");
-            assertThat(fake.requests().get(0)).as("TB에 간 요청(실패가 결과 쓰기에서 났다)").hasSize(2);
+                    .as("rejection code of pay-2").isEqualTo(ExceedsCredits);
+            assertThat(events.events()).as("worker events").contains("writeFailed:pay-1");
+            assertThat(fake.requests().get(0)).as("request sent to TB (the failure happened while writing the result)").hasSize(2);
         }
 
         @Test
-        @DisplayName("제출 기록이 실패한 명령은 TB에 보내지 않는다 — 기록하지 못한 제출이 TB에 남지 않게")
+        @DisplayName("A command whose submission could not be recorded is not sent to TB — so no unrecorded submission is left in TB")
         void aCommandWhoseSubmissionWasNotRecordedIsNotSent() {
-            // given: pay-1의 제출을 기록할 때 저장소가 한 번 실패한다
+            // given: the store fails once when the submission of pay-1 is recorded
             FlakyStore flaky = new FlakyStore(storage.store(), "pay-1", 0);
             CommandLifecycle onFlaky = new CommandLifecycle(storage.keys(), flaky, storage.transactions(), new SequentialTransferIds(),
                     handler, new Backoff(Duration.ofMillis(200), BACKOFF_MAX));
@@ -510,21 +512,22 @@ class RelayWorkerTest {
             flakyWorker.runOnce();
 
             // then
-            assertThat(fake.requests()).as("TB 요청").isEmpty();
-            assertThat(events.events()).as("워커 이벤트").contains("writeFailed:pay-1");
+            assertThat(fake.requests()).as("TB requests").isEmpty();
+            assertThat(events.events()).as("worker events").contains("writeFailed:pay-1");
         }
     }
 
     @Nested
     @Order(10)
-    @DisplayName("핸들러가 던지고 그 기록마저 실패하면")
+    @DisplayName("When the handler throws and recording that failure fails too")
     class WhenTheHandlerFailureCannotBeRecorded {
 
         @Test
-        @DisplayName("저장소 예외에 핸들러 예외가 함께 실린다 — 운영자가 처음 원인을 잃지 않게")
+        @DisplayName("The store exception carries the handler exception — so the operator does not lose the original cause")
         void theHandlersFailureSurvivesAFailedRecord() {
-            // given: 핸들러가 한 번 던지고, 그 실패를 기록하는 조회에서 저장소가 한 번 실패한다
-            //        (pay-1 조회: 제출 기록 1, 결과 쓰기 2, 핸들러에 줄 상태 3, 실패 기록 4)
+            // given: the handler throws once, and the store fails once on the lookup that records that failure
+            //        (lookups of pay-1: 1 recording the submission, 2 writing the result, 3 the status for the handler,
+            //        4 recording the failure)
             FlakyStore flaky = new FlakyStore(storage.store(), "pay-1", 3);
             CommandLifecycle onFlaky = new CommandLifecycle(storage.keys(), flaky, storage.transactions(),
                     new SequentialTransferIds(), handler, new Backoff(Duration.ofMillis(200), BACKOFF_MAX));
@@ -538,17 +541,17 @@ class RelayWorkerTest {
 
             // then
             RuntimeException recorded = events.writeFailure("pay-1");
-            assertThat(recorded).as("알린 쓰기 실패").hasMessage("DB 연결이 잠깐 끊겼다");
-            assertThat(recorded.getSuppressed()).as("함께 실린 예외")
+            assertThat(recorded).as("reported write failure").hasMessage("the DB connection dropped briefly");
+            assertThat(recorded.getSuppressed()).as("attached exceptions")
                     .anySatisfy(e -> assertThat(e).isInstanceOf(RecordingHandler.HandlerFailure.class));
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ──────────────────────────────────────────
 
     /**
-     * {@link #arm()} 뒤에 이 commandId를 skip번 조회한 다음의 조회 한 번에서 던지는 저장소. 나머지는 그대로 전한다. 접수가 하는
-     * 조회는 세지 않도록 접수를 마친 뒤 켠다.
+     * A store that, after {@link #arm()}, skips this commandId's lookups skip times and then throws on the next one.
+     * Everything else passes through. Arm it after acceptance so the lookups that acceptance makes are not counted.
      */
     private static final class FlakyStore implements CommandStore {
 
@@ -578,7 +581,7 @@ class RelayWorkerTest {
         public Optional<CommandRecord> find(String id) {
             if (armed && id.equals(commandId) && !failed && skip-- <= 0) {
                 failed = true;
-                throw new IllegalStateException("DB 연결이 잠깐 끊겼다");
+                throw new IllegalStateException("the DB connection dropped briefly");
             }
             return real.find(id);
         }
@@ -615,29 +618,29 @@ class RelayWorkerTest {
 
     @Nested
     @Order(8)
-    @DisplayName("설정과 슬롯이 어긋나면")
+    @DisplayName("When the slots disagree with the settings")
     class WhenSlotsDisagreeWithSettings {
 
         @Test
-        @DisplayName("워커를 만들 수 없다 — 설정의 max-in-flight가 실제 상한이 아닌 채로 돌지 않게")
+        @DisplayName("The worker cannot be built — so it does not run with a max-in-flight setting that is not the real limit")
         void aWorkerRefusesSlotsThatDisagreeWithMaxInFlight() {
             // when
             Throwable refused = org.assertj.core.api.Assertions.catchThrowable(
                     () -> new RelayWorker(relay, fake, new InFlightLimit(512), SETTINGS, events));
 
             // then
-            assertThat(refused).as("거부").isInstanceOf(IllegalArgumentException.class)
+            assertThat(refused).as("refusal").isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("512").hasMessageContaining("1024");
         }
     }
 
     @Nested
     @Order(9)
-    @DisplayName("TB 클라이언트가 future 대신 null을 주면")
+    @DisplayName("When the TB client returns null instead of a future")
     class WhenTheClientReturnsNull {
 
         @Test
-        @DisplayName("요청 실패로 보고 명령을 되돌리며, 슬롯은 모두 돌아온다")
+        @DisplayName("It is treated as a failed request, the commands are released, and every slot comes back")
         void aNullReplyGivesTheSlotsBackAndReleasesTheBatch() {
             // given
             fake.replyWithNull();
@@ -647,15 +650,15 @@ class RelayWorkerTest {
             CycleReport report = worker.runOnce();
 
             // then
-            assertThat(report.released()).as("되돌린 명령 수").isEqualTo(1);
-            assertThat(slots.available()).as("남은 슬롯").isEqualTo(1024);
-            assertThat(events.events()).as("워커 이벤트").contains("submitFailed:1");
+            assertThat(report.released()).as("released commands").isEqualTo(1);
+            assertThat(slots.available()).as("remaining slots").isEqualTo(1024);
+            assertThat(events.events()).as("worker events").contains("submitFailed:1");
         }
     }
 
     private void insertedPastTheChecks(NewCommand row) {
         if (storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(row)).isPresent()) {
-            throw new IllegalStateException("given 준비 실패: " + row.commandId() + "가 이미 있었다");
+            throw new IllegalStateException("given setup failed: " + row.commandId() + " already existed");
         }
     }
 
@@ -670,15 +673,15 @@ class RelayWorkerTest {
     }
 
     private void assertState(String commandId, State expected) {
-        assertThat(relay.status(commandId).orElseThrow().state()).as("%s의 조회 상태", commandId).isEqualTo(expected);
+        assertThat(relay.status(commandId).orElseThrow().state()).as("query state of %s", commandId).isEqualTo(expected);
     }
 
-    /** TB가 받은 요청마다 그 안의 이체 ID를 순서대로 본다. */
+    /** Looks at the transfer ids inside each request TB received, in order. */
     @SafeVarargs
     private void assertRequests(List<BigInteger>... expected) {
         List<List<BigInteger>> actual = fake.requests().stream()
                 .map(request -> request.stream().map(Submission::transferId).toList())
                 .toList();
-        assertThat(actual).as("TB가 받은 요청(이체 ID)").containsExactly(expected);
+        assertThat(actual).as("requests TB received (transfer ids)").containsExactly(expected);
     }
 }

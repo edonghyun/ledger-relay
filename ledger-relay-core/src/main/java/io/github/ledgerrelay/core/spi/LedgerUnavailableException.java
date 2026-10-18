@@ -1,9 +1,10 @@
 package io.github.ledgerrelay.core.spi;
 
 /**
- * TB 클라이언트를 더 쓸 수 없다(닫힘, 세션 축출, 클라이언트·서버 버전 불일치). 다시 보내도 회복되지 않는다. 어댑터가 자기
- * 클라이언트의 예외를 이것으로 감싸 알린다. 워커는 일시적 실패와 따로 알리고({@link WorkerEvents#ledgerUnavailable}) 명령은
- * 되돌린다. 멈출지는 부르는 쪽(spring-boot 모듈의 루프와 health)이 정한다.
+ * The TB client can no longer be used (closed, session evicted, client and server version mismatch). Resending does
+ * not recover. An adapter wraps its own client's exception in this one to report it. The worker reports it separately
+ * from transient failures ({@link WorkerEvents#ledgerUnavailable}) and puts the commands back. Whether to stop is up to
+ * the caller (the loop and health in the spring-boot module).
  */
 public final class LedgerUnavailableException extends RuntimeException {
 

@@ -21,15 +21,16 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * {@code ledger_command} 행과 core 기록 사이의 변환. 이름은 컬럼 이름과 같다. 부호 없는 값은 TB와 같은 숫자로 저장한다
- *: u64는 {@code Long.toUnsignedString}, u32는 {@code Integer.toUnsignedLong}. 열거값은 Java 상수 이름이다.
+ * Conversion between {@code ledger_command} rows and core records. Names match the column names. Unsigned values are
+ * stored as the same numbers TB uses: u64 through {@code Long.toUnsignedString}, u32 through
+ * {@code Integer.toUnsignedLong}. Enum values are stored as Java constant names.
  */
 final class CommandRows {
 
     private CommandRows() {
     }
 
-    /** {@code JdbcCommandStore.COLUMNS}와 {@code accepted_in_this_transaction}을 고른 한 행을 읽는다. */
+    /** Reads one row that selects {@code JdbcCommandStore.COLUMNS} and {@code accepted_in_this_transaction}. */
     static CommandRecord read(ResultSet rs) throws SQLException {
         TransferBody body = new TransferBody(
                 CommandKind.valueOf(rs.getString("kind")),
@@ -69,7 +70,7 @@ final class CommandRows {
                 halt);
     }
 
-    /** {@code INSERT}의 이름 붙은 인자. */
+    /** Named parameters of the {@code INSERT}. */
     static Map<String, Object> parameters(NewCommand command) {
         TransferBody body = command.body();
         Map<String, Object> p = new HashMap<>();

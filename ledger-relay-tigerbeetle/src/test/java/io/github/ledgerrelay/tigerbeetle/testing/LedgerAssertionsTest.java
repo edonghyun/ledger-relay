@@ -21,16 +21,16 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("결과 확인 어휘 — docs/testing.md §5")
+@DisplayName("Result-checking vocabulary — docs/testing.md §5")
 class LedgerAssertionsTest {
 
     @Nested
     @Order(1)
-    @DisplayName("결과 코드를 확인하는 assert는")
+    @DisplayName("An assert that checks a result code")
     class ResultAssertions {
 
         @Test
-        @DisplayName("기대한 결과면 조용히 통과한다")
+        @DisplayName("Passes quietly on the expected result")
         void passesOnTheExpectedResult() {
             assertCreated(Created);
             assertAlreadyRecorded(Exists);
@@ -41,44 +41,44 @@ class LedgerAssertionsTest {
         }
 
         @Test
-        @DisplayName("다른 결과면 기대한 뜻과 TB 코드, 실제 코드를 함께 담아 실패한다")
+        @DisplayName("Fails on another result, naming the expected meaning, the TB code and the actual code")
         void failsWithMeaningAndCodes() {
             assertThatThrownBy(() -> assertAlreadyRecorded(Created))
                     .isInstanceOf(AssertionError.class)
-                    .hasMessageContaining("이미 기록된 것으로 인정되기(Exists)")
-                    .hasMessageContaining("실제 결과는 Created");
+                    .hasMessageContaining("recognized as already recorded (Exists)")
+                    .hasMessageContaining("the actual result is Created");
         }
 
         @Test
-        @DisplayName("거부 사유를 확인할 때 사유가 다르면 실패한다")
+        @DisplayName("When checking a rejection reason, fails if the reason differs")
         void rejectedForChecksTheReason() {
             assertThatThrownBy(() -> assertRejectedFor(ExceedsDebits, ExceedsCredits))
                     .isInstanceOf(AssertionError.class)
                     .hasMessageContaining("ExceedsCredits")
-                    .hasMessageContaining("실제 결과는 ExceedsDebits");
+                    .hasMessageContaining("the actual result is ExceedsDebits");
         }
     }
 
     @Nested
     @Order(2)
-    @DisplayName("내용 충돌을 확인하는 assertContentConflict는")
+    @DisplayName("assertContentConflict, which checks a content conflict")
     class ContentConflict {
 
         @Test
-        @DisplayName("다른 필드의 충돌이면 기대한 필드와 실제 코드를 담아 실패한다")
+        @DisplayName("Fails on a conflict on another field, naming the expected field and the actual code")
         void failsOnAConflictOnAnotherField() {
             assertThatThrownBy(() -> assertContentConflict(ExistsWithDifferentAmount, ExistsWithDifferentCreditAccountId))
                     .isInstanceOf(AssertionError.class)
-                    .hasMessageContaining("같은 ID인데 내용이 달라 충돌로 거부되기(ExistsWithDifferentCreditAccountId)")
-                    .hasMessageContaining("실제 결과는 ExistsWithDifferentAmount");
+                    .hasMessageContaining("a rejection as a conflict because the content differs for the same id (ExistsWithDifferentCreditAccountId)")
+                    .hasMessageContaining("the actual result is ExistsWithDifferentAmount");
         }
 
         @Test
-        @DisplayName("기대값으로 내용 충돌이 아닌 코드를 넘기면 잘못 쓴 것으로 보고 멈춘다")
+        @DisplayName("Passing a code that is not a content conflict as the expectation is treated as misuse and stops")
         void refusesANonConflictCodeAsExpectation() {
             assertThatThrownBy(() -> assertContentConflict(Exists, Exists))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Exists는 내용 충돌 코드(ExistsWithDifferent…)가 아닙니다");
+                    .hasMessageContaining("Exists is not a content conflict code (ExistsWithDifferent…)");
         }
     }
 }

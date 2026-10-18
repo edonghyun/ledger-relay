@@ -3,24 +3,27 @@ package io.github.ledgerrelay.core;
 import java.util.Optional;
 
 /**
- * ledger-relay의 들어오는 포트. 앱이 쓰는 것은 이 인터페이스뿐이다.
- * Spring 모듈이 구현을 조립해 빈으로 내놓는다.
+ * The incoming port of ledger-relay. This interface is all the app uses.
+ * The Spring module assembles the implementation and exposes it as a bean.
  */
 public interface LedgerRelay {
 
     /**
-     * 명령을 접수한다. 앱 트랜잭션 안에서 부른다(G1). 앱 트랜잭션이 롤백되면 접수도 사라진다.
-     * 같은 명령을 다시 접수하면 처음 접수증을 그대로 돌려받는다.
+     * Accepts a command. Call it inside the app transaction (G1). If the app transaction rolls back, the acceptance is
+     * gone too. Submitting the same command again returns the first receipt unchanged.
      *
-     * @throws CommandConflictException     같은 commandId로 다른 내용이 이미 접수됨(G7)
-     * @throws ReservationNotFoundException post·void의 참조가 같은 키에 이미 커밋된 reserve 명령이 아님. 같은 앱
-     *                                      트랜잭션에서 접수한 예약도 여기에 든다
-     * @throws InvalidCommandException      U+0000·짝 없는 서로게이트가 들었거나 512바이트를 넘는 ID 등 명령을 만들 수 없음
-     * @throws RuntimeException             트랜잭션 밖에서 불렀다(G1). 타입은 트랜잭션 어댑터가 정한다: jdbc 어댑터는 Spring의
-     *                                      {@code IllegalTransactionStateException}, 메모리 저장소는 {@code IllegalStateException}
+     * @throws CommandConflictException     different content is already accepted under the same commandId (G7)
+     * @throws ReservationNotFoundException the post or void does not refer to a reserve command already committed under
+     *                                      the same key. A reservation accepted in the same app transaction also
+     *                                      counts here
+     * @throws InvalidCommandException      the command cannot be built, for example an id that contains U+0000 or a
+     *                                      lone surrogate, or is longer than 512 bytes
+     * @throws RuntimeException             called outside a transaction (G1). The transaction adapter decides the type:
+     *                                      Spring's {@code IllegalTransactionStateException} for the jdbc adapter,
+     *                                      {@code IllegalStateException} for the in-memory store
      */
     CommandReceipt submit(LedgerCommand command);
 
-    /** 명령의 지금 상태. 접수한 적 없으면 비어 있다. */
+    /** The current state of the command. Empty if it was never accepted. */
     Optional<CommandStatus> status(String commandId);
 }

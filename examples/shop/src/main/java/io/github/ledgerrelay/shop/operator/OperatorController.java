@@ -22,12 +22,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 화면의 Operator 탭. 라이브러리의 운영자 포트를 HTTP로 연다. 판단은 라이브러리가 한다. */
+/** The Operator tab of the UI. Exposes the library's operator port over HTTP. The library makes every decision. */
 @RestController
 @RequestMapping("/api/operator")
 class OperatorController {
 
-    /** 한 번에 보는 대사 페이지. 라이브러리의 상한(1000)과 같다. */
+    /** Reconciliation page size. Equal to the library limit (1000). */
     static final int PAGE = 1000;
 
     record HaltedView(long position, String commandId, String orderingKey, long seq, String kind, String reason,
@@ -60,7 +60,10 @@ class OperatorController {
         return Map.of("outcome", outcome.name());
     }
 
-    /** 처음부터 끝까지 대사하고 어긋난 명령의 목록을 돌려준다. 화면 아래 정합성 칸은 같은 대사의 숫자만 1초마다 보인다. */
+    /**
+     * Reconciles from the first command to the last and returns the commands that do not match. The Consistency panel
+     * at the bottom of the UI shows only the totals of the same reconciliation, every second.
+     */
     @PostMapping("/reconcile")
     ReconcileView reconcile() {
         long after = 0;

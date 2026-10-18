@@ -3,18 +3,21 @@ package io.github.ledgerrelay.core.application;
 import java.util.List;
 
 /**
- * claim 한 번의 결과.
+ * The result of one claim.
  *
- * @param halted 게이트가 멈춘(HALT) 명령의 commandId. 행은 HALTED로 바뀌어 다시 후보가 되지 않으므로 한 번만 실린다.
- *               워커가 알린다(docs/failure-modes.md F9)
- * @param problems 판단이 예외를 던진 후보와 그 이유(F29). 멈춤으로 세운 후보는 {@code halted}에도 실린다
+ * @param halted the commandIds of commands the gate halted (HALT). The row becomes HALTED and is never a candidate
+ *               again, so each appears only once. The worker reports them (docs/failure-modes.md F9)
+ * @param problems candidates whose decision threw, with the cause (F29). A candidate that was parked as halted also
+ *                 appears in {@code halted}
  */
 public record ClaimBatch(List<ClaimedCommand> claimed, List<String> halted, List<Problem> problems) {
 
     /**
-     * 판단이 예외를 던진 후보(F29). 행의 데이터가 규칙과 어긋났거나 저장소가 후보가 아닌 행을 냈다.
+     * A candidate whose decision threw (F29). The row data broke the rules, or the store returned a row that is not a
+     * candidate.
      *
-     * @param halted 그 행을 멈춤(HALTED)으로 세웠다. false면 멈추게도 못 해 이번 claim에서 건너뛰었다(다음 claim에 또 나온다)
+     * @param halted the row was parked as halted (HALTED). If false, even halting failed, so this claim passed over it
+     *               (it shows up again in the next claim)
      */
     public record Problem(String commandId, RuntimeException cause, boolean halted) {
     }

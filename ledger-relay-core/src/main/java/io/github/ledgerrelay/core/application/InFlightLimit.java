@@ -5,8 +5,9 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 프로세스에서 동시에 TB에 가 있는 이체 수의 상한. 워커들이 하나를 나눠 쓴다. 슬롯은 이체 하나에 하나다.
- * 보낸 요청의 슬롯은 그 요청이 실제로 끝날 때 돌아온다. TB가 멈추면 슬롯이 돌아오지 않아 claim이 멈춘다. 이것이 배압이다.
+ * The cap on the number of transfers in flight to TB at once in the process. Workers share one instance. One slot per
+ * transfer. The slots of a sent request come back when that request actually finishes. If TB stalls, slots do not come
+ * back and claiming stops. This is the backpressure.
  */
 public final class InFlightLimit {
 
@@ -15,13 +16,13 @@ public final class InFlightLimit {
 
     public InFlightLimit(int slots) {
         if (slots < 1) {
-            throw new IllegalArgumentException("in-flight 슬롯은 1개 이상이어야 합니다: " + slots);
+            throw new IllegalArgumentException("in-flight slots must be at least 1: " + slots);
         }
         this.slots = new Semaphore(slots, true);
         this.capacity = slots;
     }
 
-    /** n개를 한꺼번에 잡는다. 기다림 상한 안에 다 못 잡으면 하나도 잡지 않고 false다. */
+    /** Takes n slots at once. If it cannot take them all within the wait limit, it takes none and returns false. */
     public boolean tryTake(int n, Duration wait) {
         try {
             return slots.tryAcquire(n, wait.toNanos(), TimeUnit.NANOSECONDS);
@@ -37,7 +38,7 @@ public final class InFlightLimit {
         }
     }
 
-    /** 만들 때 정한 슬롯 수. */
+    /** The slot count set at construction. */
     public int capacity() {
         return capacity;
     }

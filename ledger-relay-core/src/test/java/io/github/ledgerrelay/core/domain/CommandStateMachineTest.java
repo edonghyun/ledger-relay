@@ -30,17 +30,17 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
-@DisplayName("토큰을 다루는 상태 기계 — G5")
+@DisplayName("State machine that handles the token — G5")
 class CommandStateMachineTest {
 
     @Nested
     @Order(1)
-    @DisplayName("claim하면")
+    @DisplayName("When a command is claimed")
     class Claiming {
 
-        @ParameterizedTest(name = "게이트 {0}")
+        @ParameterizedTest(name = "gate {0}")
         @EnumSource(value = GateDecision.class, names = {"OPEN", "SKIP"})
-        @DisplayName("게이트가 열렸거나 건너뛸 대상이면 처리 중이 되고 토큰이 1 오른다")
+        @DisplayName("When the gate is open or the command is to be skipped, it becomes in progress and the token goes up by 1")
         void anOpenOrSkippingGateClaims(GateDecision gate) {
             // when
             StepResult result = CommandStateMachine.apply(CommandRow.accepted(), new Step.Claim(gate, false));
@@ -50,19 +50,19 @@ class CommandStateMachineTest {
                     INCREMENT_LEASE_TOKEN);
         }
 
-        @ParameterizedTest(name = "게이트 {0}")
+        @ParameterizedTest(name = "gate {0}")
         @EnumSource(value = GateDecision.class, names = "CLOSED")
-        @DisplayName("게이트가 닫혔으면 아무 일도 없다")
+        @DisplayName("When the gate is closed, nothing happens")
         void aClosedGateLeavesTheRow(GateDecision gate) {
             // when
             StepResult result = CommandStateMachine.apply(CommandRow.accepted(), new Step.Claim(gate, false));
 
             // then
-            assertThat(result).as("게이트 %s에서 claim한 결과", gate).isEqualTo(new StepResult.Unchanged());
+            assertThat(result).as("result of claiming at gate %s", gate).isEqualTo(new StepResult.Unchanged());
         }
 
         @Test
-        @DisplayName("게이트가 멈췄으면 멈춤이 되고 토큰이 1 오른다 — TB에는 보내지 않는다")
+        @DisplayName("When the gate halts, the command becomes halted and the token goes up by 1 — nothing is sent to TB")
         void aHaltedGateHaltsTheCommand() {
             // when
             StepResult result = CommandStateMachine.apply(CommandRow.accepted(), new Step.Claim(GateDecision.HALT, false));
@@ -73,7 +73,7 @@ class CommandStateMachineTest {
         }
 
         @Test
-        @DisplayName("lease가 끝난 처리 중 명령은 다시 claim되고, 토큰이 올라 앞 워커의 쓰기를 막는다")
+        @DisplayName("An in-progress command whose lease ran out is claimed again, and the raised token fences the previous worker's writes")
         void anExpiredLeaseIsClaimedAgain() {
             // given
             CommandRow heldByWorker3 = new CommandRow(StoredState.CLAIMED, 3, 1, Optional.empty(), Optional.empty(), 0);
@@ -87,7 +87,7 @@ class CommandStateMachineTest {
         }
 
         @Test
-        @DisplayName("lease가 살아 있는 처리 중 명령을 claim하면 버그로 거부된다")
+        @DisplayName("Claiming an in-progress command with a live lease is refused as a bug")
         void claimingALiveLeaseIsABug() {
             // given
             CommandRow held = new CommandRow(StoredState.CLAIMED, 3, 0, Optional.empty(), Optional.empty(), 0);
@@ -101,7 +101,7 @@ class CommandStateMachineTest {
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(value = StoredState.class, names = {"APPLIED", "REJECTED", "CONFLICT", "SKIPPED", "HALTED"})
-        @DisplayName("끝났거나 멈춘 명령을 claim하면 버그로 거부된다")
+        @DisplayName("Claiming a finished or halted command is refused as a bug")
         void claimingAFinishedCommandIsABug(StoredState finished) {
             // given
             CommandRow done = rowIn(finished, 2, 1);
@@ -116,14 +116,14 @@ class CommandStateMachineTest {
 
     @Nested
     @Order(2)
-    @DisplayName("현재 토큰으로 쓰면")
+    @DisplayName("When writing with the current token")
     class WritingWithTheCurrentToken {
 
         static final CommandRow HELD_WITH_TOKEN_5 =
                 new CommandRow(StoredState.CLAIMED, 5, 0, Optional.empty(), Optional.empty(), 0);
 
         @Test
-        @DisplayName("제출을 기록하면 처리 중 그대로이고 제출 횟수가 1 오른다")
+        @DisplayName("Recording a submission keeps it in progress and raises the submit count by 1")
         void recordingASubmissionCountsIt() {
             // when
             StepResult result = CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.MarkSubmitted(5));
@@ -135,7 +135,7 @@ class CommandStateMachineTest {
         }
 
         @Test
-        @DisplayName("성공(Created)으로 끝내면 적용됨이 되고, 결과 코드가 남고, 핸들러가 실행된다")
+        @DisplayName("Completing with success (Created) makes it applied, keeps the result code, and runs the handler")
         void completingWithSuccessApplies() {
             // when
             StepResult result = CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.Complete(5, Created));
@@ -147,7 +147,7 @@ class CommandStateMachineTest {
         }
 
         @Test
-        @DisplayName("잔액 부족(ExceedsCredits)으로 끝내면 거절됨이 된다")
+        @DisplayName("Completing with insufficient funds (ExceedsCredits) makes it rejected")
         void completingWithABusinessRejectionRejects() {
             // when
             StepResult result = CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.Complete(5, ExceedsCredits));
@@ -159,7 +159,7 @@ class CommandStateMachineTest {
         }
 
         @Test
-        @DisplayName("내용 충돌로 끝내면 충돌이 된다")
+        @DisplayName("Completing with a content conflict makes it a conflict")
         void completingWithAConflictConflicts() {
             // when
             StepResult result = CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.Complete(5, ExistsWithDifferentAmount));
@@ -171,7 +171,7 @@ class CommandStateMachineTest {
         }
 
         @Test
-        @DisplayName("건너뛰면 건너뜀이 되고, 결과 코드 없이 '예약 미적용' 사유로 핸들러가 실행된다")
+        @DisplayName("Skipping makes it skipped and runs the handler with reason 'reservation not applied' and no result code")
         void skippingSkips() {
             // when
             StepResult result = CommandStateMachine.apply(HELD_WITH_TOKEN_5, new Step.Skip(5));
@@ -184,7 +184,7 @@ class CommandStateMachineTest {
         }
 
         @Test
-        @DisplayName("응답이 없어 되돌리면 접수 상태로 돌아가 backoff를 기다리고, 토큰과 제출 횟수는 그대로다")
+        @DisplayName("Releasing for lack of a reply returns it to accepted to wait for backoff, and the token and submit count stay the same")
         void releasingReturnsToTheQueue() {
             // given
             CommandRow submittedOnce = new CommandRow(StoredState.CLAIMED, 5, 1, Optional.empty(), Optional.empty(), 0);
@@ -199,7 +199,7 @@ class CommandStateMachineTest {
         }
 
         @Test
-        @DisplayName("핸들러가 실패하면 접수 상태로 돌아가고, 받은 TB 결과를 남기고, 실패를 센다")
+        @DisplayName("When the handler fails, it returns to accepted, keeps the TB result it received, and counts the failure")
         void aHandlerFailureKeepsTheResult() {
             // given
             CommandRow failedTwice = new CommandRow(StoredState.CLAIMED, 5, 1, Optional.empty(), Optional.empty(), 2);
@@ -216,14 +216,14 @@ class CommandStateMachineTest {
 
     @Nested
     @Order(3)
-    @DisplayName("이미 아는 TB 결과가 있으면")
+    @DisplayName("When a TB result is already known")
     class WithAKnownResult {
 
         static final CommandRow HELD_KNOWING_EXCEEDS_CREDITS =
                 new CommandRow(StoredState.CLAIMED, 6, 1, Optional.of(ExceedsCredits), Optional.empty(), 1);
 
         @Test
-        @DisplayName("그 결과로 끝내면 거절됨이 되고 핸들러가 다시 실행된다 — TB에는 다시 보내지 않는다")
+        @DisplayName("Completing with that result makes it rejected and runs the handler again — nothing is sent to TB again")
         void completesWithTheKnownResult() {
             // when
             StepResult result = CommandStateMachine.apply(HELD_KNOWING_EXCEEDS_CREDITS, new Step.Complete(6, ExceedsCredits));
@@ -235,7 +235,7 @@ class CommandStateMachineTest {
         }
 
         @Test
-        @DisplayName("TB 제출을 기록하면 버그로 거부된다 — 다시 보내면 원래 사유가 IdAlreadyFailed로 덮인다")
+        @DisplayName("Recording a TB submission is refused as a bug — sending again would overwrite the original reason with IdAlreadyFailed")
         void submittingAgainIsABug() {
             // when
             ThrowingCallable writing = () -> CommandStateMachine.apply(HELD_KNOWING_EXCEEDS_CREDITS, new Step.MarkSubmitted(6));
@@ -245,7 +245,7 @@ class CommandStateMachineTest {
         }
 
         @Test
-        @DisplayName("다른 코드로 끝내면 버그로 거부된다")
+        @DisplayName("Completing with a different code is refused as a bug")
         void completingWithAnotherCodeIsABug() {
             // when
             ThrowingCallable writing = () -> CommandStateMachine.apply(HELD_KNOWING_EXCEEDS_CREDITS, new Step.Complete(6, IdAlreadyFailed));
@@ -257,7 +257,7 @@ class CommandStateMachineTest {
 
     @Nested
     @Order(4)
-    @DisplayName("오래된 토큰이거나 처리 중이 아닌 행에 쓰면 — G5")
+    @DisplayName("When writing with an old token or to a row that is not in progress — G5")
     class FencedWrites {
 
         static List<Step.Write> everyWriteWithToken(long token) {
@@ -275,7 +275,7 @@ class CommandStateMachineTest {
 
         @ParameterizedTest(name = "{0}")
         @MethodSource("writesWithTheOldToken4")
-        @DisplayName("토큰 5로 다시 claim된 행에 토큰 4로 쓰면 0행이다")
+        @DisplayName("Writing with token 4 to a row claimed again with token 5 hits 0 rows")
         void anOldTokenIsFenced(Step.Write lateWrite) {
             // given
             CommandRow reclaimed = new CommandRow(StoredState.CLAIMED, 5, 1, Optional.empty(), Optional.empty(), 0);
@@ -289,7 +289,7 @@ class CommandStateMachineTest {
 
         @ParameterizedTest(name = "{0}")
         @MethodSource("writesWithToken5")
-        @DisplayName("되돌려진 행에 같은 토큰으로 써도 0행이다 — 토큰만이 아니라 처리 중 상태도 본다")
+        @DisplayName("Writing with the same token to a released row also hits 0 rows — the check covers the in-progress state, not only the token")
         void aReleasedRowIsFencedEvenWithTheSameToken(Step.Write lateWrite) {
             // given
             CommandRow released = new CommandRow(StoredState.PENDING, 5, 1, Optional.empty(), Optional.empty(), 0);
@@ -303,7 +303,7 @@ class CommandStateMachineTest {
 
         @ParameterizedTest(name = "{0}")
         @MethodSource("writesWithToken5")
-        @DisplayName("끝난 행에 쓰면 0행이다 — 최종 상태는 바뀌지 않는다")
+        @DisplayName("Writing to a finished row hits 0 rows — a final state does not change")
         void aFinishedRowIsFenced(Step.Write lateWrite) {
             // given
             CommandRow applied = new CommandRow(StoredState.APPLIED, 5, 1, Optional.empty(), Optional.of(Created), 0);
@@ -318,14 +318,14 @@ class CommandStateMachineTest {
 
     @Nested
     @Order(5)
-    @DisplayName("멈춘 명령을 운영자가 포기하면 — HALT")
+    @DisplayName("When the operator abandons a halted command — HALT")
     class AbandoningAHaltedCommand {
 
         static final CommandRow HALTED_WITH_TOKEN_1 =
                 new CommandRow(StoredState.HALTED, 1, 0, Optional.empty(), Optional.empty(), 0);
 
         @Test
-        @DisplayName("건너뜀이 되고, '운영자 포기' 사유로 핸들러가 실행된다 — 토큰과 제출 횟수는 그대로다")
+        @DisplayName("It becomes skipped and the handler runs with reason 'abandoned by operator' — the token and submit count stay the same")
         void abandoningSkipsIt() {
             // when
             StepResult result = CommandStateMachine.apply(HALTED_WITH_TOKEN_1, new Step.Abandon());
@@ -339,7 +339,7 @@ class CommandStateMachineTest {
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(value = StoredState.class, names = {"PENDING", "CLAIMED", "APPLIED", "SKIPPED"})
-        @DisplayName("멈추지 않은 명령을 포기하면 버그로 거부된다 — 서비스가 먼저 막는다")
+        @DisplayName("Abandoning a command that is not halted is refused as a bug — the service stops it first")
         void abandoningAnythingElseIsABug(StoredState notHalted) {
             // given
             CommandRow row = rowIn(notHalted, 1, 0);
@@ -354,12 +354,12 @@ class CommandStateMachineTest {
 
     @Nested
     @Order(6)
-    @DisplayName("전이표와 견주면")
+    @DisplayName("Compared with the transition table")
     class AgainstTheTable {
 
         @ParameterizedTest(name = "{0}")
         @MethodSource("io.github.ledgerrelay.core.domain.CommandStateMachineTest$FencedWrites#writesWithToken5")
-        @DisplayName("현재 토큰으로 쓴 결과의 상태와 효과는 전이표의 CLAIMED 줄과 같다 — 상태 기계가 표를 우회하지 않게")
+        @DisplayName("The state and effects of a write with the current token match the CLAIMED row of the table — so the state machine does not bypass the table")
         void followsTheClaimedRowOfTheTable(Step.Write write) {
             // given
             CommandRow held = new CommandRow(StoredState.CLAIMED, 5, 0, Optional.empty(), Optional.empty(), 0);
@@ -378,17 +378,19 @@ class CommandStateMachineTest {
             // then
             assertThat(result).isInstanceOf(StepResult.Moved.class);
             StepResult.Moved moved = (StepResult.Moved) result;
-            assertThat(moved.row().state()).as("%s 뒤의 상태", write).isEqualTo(tabled.to());
-            assertThat(moved.effects()).as("%s의 효과", write).isEqualTo(tabled.effects());
+            assertThat(moved.row().state()).as("state after %s", write).isEqualTo(tabled.to());
+            assertThat(moved.effects()).as("effects of %s", write).isEqualTo(tabled.effects());
         }
 
         /**
-         * 빈 가지 17: 표의 "불가"와 "해당없음"은 처리가 다른가. 둘 다 닿으면 버그로 거부되지만, 해당없음 칸은 상태 기계의 입력으로는
-         * 닿을 수조차 없다. 사건을 만드는 코드(claim의 상태별 사건, 처리 중 행에만 반영되는 쓰기)가 그 칸을 피한다.
-         * 불가 칸에 닿으면 버그로 거부되는 것은 claim하면 장의 두 테스트가 확인한다.
+         * Uncovered branch 17: do the table's "impossible" and "not applicable" cells behave differently? Reaching
+         * either is refused as a bug, but a not-applicable cell cannot even be reached by the state machine's inputs.
+         * The code that builds events (the per-state event of claim, and writes that apply only to in-progress rows)
+         * avoids those cells. The two tests in the "When a command is claimed" section check that reaching an
+         * impossible cell is refused as a bug.
          */
         @Test
-        @DisplayName("어떤 상태에 어떤 입력을 줘도 '해당없음' 칸에는 닿지 않는다 — 해당없음은 처리가 아니라 설명이다")
+        @DisplayName("No input in any state reaches a 'not applicable' cell — not applicable is an explanation, not a behavior")
         void noInputReachesANotApplicableCell() {
             for (StoredState state : StoredState.values()) {
                 for (Step step : everyInputWithToken(3)) {
@@ -400,7 +402,7 @@ class CommandStateMachineTest {
 
                     // then
                     assertThat(refused == null ? "" : refused.getMessage())
-                            .as("%s 상태에 %s를 주면", state, step).doesNotContain("NOT_APPLICABLE");
+                            .as("state %s given %s", state, step).doesNotContain("NOT_APPLICABLE");
                 }
             }
         }
@@ -421,9 +423,12 @@ class CommandStateMachineTest {
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ──────────────────────────────────────────
 
-    /** 그 상태의 행. 건너뜀이면 '예약 미적용' 이유를 단다(이유 없는 건너뜀 행은 만들어지지 않는다). */
+    /**
+     * A row in that state. A skipped row gets the reason 'reservation not applied' (a skipped row without a reason
+     * cannot be built).
+     */
     private static CommandRow rowIn(StoredState state, long token, long submitCount) {
         Optional<SkipReason> why = state == StoredState.SKIPPED
                 ? Optional.of(SkipReason.RESERVATION_NOT_APPLIED)
@@ -433,17 +438,17 @@ class CommandStateMachineTest {
 
     private static void assertMoved(StepResult actual, CommandRow expectedRow, Transition.Effect... expectedEffects) {
         assertThat(actual)
-                .as("행이 바뀌기를 기대했다")
+                .as("expected the row to change")
                 .isEqualTo(new StepResult.Moved(expectedRow, Set.of(expectedEffects)));
     }
 
     private static void assertFenced(StepResult actual) {
-        assertThat(actual).as("쓰기가 0행으로 막히기를 기대했다").isEqualTo(new StepResult.Fenced());
+        assertThat(actual).as("expected the write to be fenced with 0 rows").isEqualTo(new StepResult.Fenced());
     }
 
     private static void assertBug(ThrowingCallable step) {
-        assertThatThrownBy(step).as("버그로 거부되기를 기대했다")
+        assertThatThrownBy(step).as("expected refusal as a bug")
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("버그");
+                .hasMessageContaining("Bug");
     }
 }

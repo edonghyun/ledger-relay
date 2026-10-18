@@ -2,39 +2,46 @@ package io.github.ledgerrelay.core.domain;
 
 import io.github.ledgerrelay.core.ResultCategory;
 
-/** 전이표의 사건. claim은 게이트 결정에 따라 열림·닫힘으로 나뉘고, 건너뜀은 claim 뒤의 사건이다. */
+/**
+ * Events of the transition table. A claim splits into open and closed by the gate decision; a skip is an event after
+ * the claim.
+ */
 public enum CommandEvent {
-    /** claim: 게이트가 열렸다. */
+    /** claim: the gate is open. */
     CLAIM_WITH_GATE_OPEN,
-    /** claim: 같은 키의 앞 명령이 미완료라 게이트가 닫혔다. */
+    /** claim: the gate is closed because an earlier command of the same key is unfinished. */
     CLAIM_WITH_GATE_CLOSED,
-    /** claim: 정상 경로에서 나올 수 없는 입력이라 게이트가 멈췄다(HALT). */
+    /** claim: the gate halted (HALT) because the input cannot occur on the normal path. */
     CLAIM_WITH_GATE_HALTED,
     /**
-     * TB에 보내기 직전에 제출을 기록한다(submit_count += 1, 처음이면 first_submitted_at). 보내기 전에 남기므로
-     * 응답이 유실돼도 "보낸 적이 있다"가 남는다(처리 중). known_result가 있으면 보내지 않으므로 이 사건도 없다.
+     * Records the submission right before sending to TB (submit_count += 1, and first_submitted_at the first time).
+     * It is recorded before the send, so "it was sent" survives even if the response is lost (in progress). With a
+     * known_result nothing is sent, so this event does not occur either.
      */
     SUBMITTING,
-    /** claim한 post·void의 참조 예약이 APPLIED가 아닌 최종 상태로 끝났다. TB에 보내지 않고 건너뛴다. */
+    /**
+     * The reservation referenced by a claimed post or void ended in a final state other than APPLIED. Skip without
+     * sending to TB.
+     */
     RESERVATION_NOT_APPLIED,
-    /** TB 성공(created, exists). */
+    /** TB success (created, exists). */
     TB_APPLIED,
-    /** TB 확정 실패(업무 거절, 이전 실패, 잘못된 요청). */
+    /** A definite TB failure (business rejection, prior failure, invalid request). */
     TB_REJECTED,
-    /** TB 내용 충돌(exists_with_different_*)과 v1 해당 없음 코드. */
+    /** A TB content conflict (exists_with_different_*) and codes not applicable to v1. */
     TB_CONFLICT,
-    /** submit-timeout 안에 응답이 없거나 예외가 났다. */
+    /** No response within submit-timeout, or an exception. */
     NO_REPLY_OR_ERROR,
-    /** 결과 반영 핸들러가 예외를 던졌다. */
+    /** The outcome handler threw an exception. */
     HANDLER_FAILED,
-    /** lease가 만료된 명령을 다른 워커가 다시 claim한다. */
+    /** Another worker claims again a command whose lease expired. */
     LEASE_EXPIRED,
-    /** 이미 넘어간 lease 토큰으로 쓰려 한다(늦은 워커). */
+    /** A write with a lease token that has already moved on (a late worker). */
     STALE_TOKEN_WRITE,
-    /** 운영자가 멈춘 명령을 포기한다. TB에 보내지 않고 건너뜀으로 끝낸다. */
+    /** An operator abandons a halted command. It ends as skipped without being sent to TB. */
     ABANDONED_BY_OPERATOR;
 
-    /** TB 결과 분류를 전이표의 TB 사건으로 바꾼다. */
+    /** Maps a TB result category to the TB event of the transition table. */
     public static CommandEvent of(ResultCategory category) {
         return switch (category) {
             case APPLIED -> TB_APPLIED;

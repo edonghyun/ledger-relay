@@ -28,7 +28,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("운영자 포트 — 멈춘 명령 목록과 포기 (O5)")
+@DisplayName("Operator port — listing and abandoning halted commands (O5)")
 class RelayOperatorTest {
 
     static final Duration LEASE = Duration.ofSeconds(30);
@@ -52,28 +52,28 @@ class RelayOperatorTest {
 
     @Nested
     @Order(1)
-    @DisplayName("멈춘 명령을 보면")
+    @DisplayName("When the halted commands are listed")
     class Listing {
 
         @Test
-        @DisplayName("명령마다 키·순번·종류·이유·시각이 보인다")
+        @DisplayName("Each command shows its key, sequence number, kind, reason and time")
         void listsHaltedCommandsWithReason() {
             // when
             List<HaltedCommand> halted = operator.haltedCommands(0, 10);
 
             // then
-            assertThat(halted).as("멈춘 명령").singleElement().satisfies(command -> {
+            assertThat(halted).as("halted commands").singleElement().satisfies(command -> {
                 assertThat(command.commandId()).as("commandId").isEqualTo("capture-1");
-                assertThat(command.orderingKey()).as("순서 키").isEqualTo("order-1");
-                assertThat(command.seq()).as("순번").isEqualTo(1);
-                assertThat(command.kind()).as("종류").isEqualTo(CommandKind.POST);
-                assertThat(command.reason()).as("이유").isEqualTo(HaltReason.RESERVATION_NOT_EARLIER);
-                assertThat(command.haltedAt()).as("멈춘 시각").isEqualTo(storage.clock().get());
+                assertThat(command.orderingKey()).as("ordering key").isEqualTo("order-1");
+                assertThat(command.seq()).as("sequence number").isEqualTo(1);
+                assertThat(command.kind()).as("kind").isEqualTo(CommandKind.POST);
+                assertThat(command.reason()).as("reason").isEqualTo(HaltReason.RESERVATION_NOT_EARLIER);
+                assertThat(command.haltedAt()).as("halted at").isEqualTo(storage.clock().get());
             });
         }
 
         @Test
-        @DisplayName("한 번에 1개 미만이나 1000개 넘게 달라고 하면 거부된다")
+        @DisplayName("Asking for fewer than 1 or more than 1000 at a time is refused")
         void aLimitOutsideTheRangeIsRefused() {
             assertThatThrownBy(() -> operator.haltedCommands(0, 0)).as("limit 0").isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> operator.haltedCommands(0, 1001)).as("limit 1001")
@@ -83,25 +83,25 @@ class RelayOperatorTest {
 
     @Nested
     @Order(2)
-    @DisplayName("포기하면")
+    @DisplayName("When a command is abandoned")
     class Abandoning {
 
         @Test
-        @DisplayName("핸들러가 '운영자 포기'를 받고 포기됨으로 답하며, 목록에서 빠진다")
+        @DisplayName("The handler receives 'abandoned by operator', the answer is abandoned, and it leaves the list")
         void abandoningRunsTheHandler() {
             // when
             AbandonOutcome outcome = operator.abandonHalted("capture-1");
 
             // then
-            assertThat(outcome).as("포기 결과").isEqualTo(AbandonOutcome.ABANDONED);
-            assertThat(handler.completedFor("capture-1")).as("핸들러가 받은 결과").singleElement()
-                    .satisfies(status -> assertThat(status.skipReason()).as("건너뛴 이유")
+            assertThat(outcome).as("abandon outcome").isEqualTo(AbandonOutcome.ABANDONED);
+            assertThat(handler.completedFor("capture-1")).as("result the handler received").singleElement()
+                    .satisfies(status -> assertThat(status.skipReason()).as("skip reason")
                             .contains(SkipReason.ABANDONED_BY_OPERATOR));
-            assertThat(operator.haltedCommands(0, 10)).as("멈춘 명령").isEmpty();
+            assertThat(operator.haltedCommands(0, 10)).as("halted commands").isEmpty();
         }
 
         @Test
-        @DisplayName("핸들러가 실패하면 핸들러 실패로 답하고, 멈춘 그대로 목록에 남는다")
+        @DisplayName("When the handler fails, the answer is handler failed, and the command stays halted in the list")
         void aFailingHandlerLeavesItHalted() {
             // given
             handler.failNextCalls(1);
@@ -110,37 +110,37 @@ class RelayOperatorTest {
             AbandonOutcome outcome = operator.abandonHalted("capture-1");
 
             // then
-            assertThat(outcome).as("포기 결과").isEqualTo(AbandonOutcome.HANDLER_FAILED);
-            assertThat(operator.haltedCommands(0, 10)).as("멈춘 명령").extracting(HaltedCommand::commandId)
+            assertThat(outcome).as("abandon outcome").isEqualTo(AbandonOutcome.HANDLER_FAILED);
+            assertThat(operator.haltedCommands(0, 10)).as("halted commands").extracting(HaltedCommand::commandId)
                     .containsExactly("capture-1");
         }
 
         @Test
-        @DisplayName("접수한 적 없는 명령이면 명령 없음으로 거부된다")
+        @DisplayName("A command that was never accepted is refused as not found")
         void abandoningAnUnknownCommandIsRefused() {
-            assertThatThrownBy(() -> operator.abandonHalted("never-accepted")).as("거부")
+            assertThatThrownBy(() -> operator.abandonHalted("never-accepted")).as("refusal")
                     .isInstanceOf(CommandNotFoundException.class);
         }
 
         @Test
-        @DisplayName("멈추지 않은 명령이면 '멈추지 않음'으로 거부된다")
+        @DisplayName("A command that is not halted is refused as 'not halted'")
         void abandoningACommandThatIsNotHaltedIsRefused() {
             // given
             storage.transactions().inTransaction(() -> relay.submit(LedgerCommand.transfer("pay-9").orderingKey("order-9")
                     .debit(1).credit(2).amount(500).ledger(1).code(1).build()));
 
             // then
-            assertThatThrownBy(() -> operator.abandonHalted("pay-9")).as("거부")
+            assertThatThrownBy(() -> operator.abandonHalted("pay-9")).as("refusal")
                     .isInstanceOfSatisfying(CannotAbandonException.class, refused -> assertThat(refused.reason())
-                            .as("거부 이유").isEqualTo(CannotAbandonException.Reason.NOT_HALTED));
+                            .as("refusal reason").isEqualTo(CannotAbandonException.Reason.NOT_HALTED));
         }
     }
 
-    // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+    // ── Helpers used only in this file ──────────────────────────────────────────
 
     private void insertedPastTheChecks(NewCommand row) {
         if (storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(row)).isPresent()) {
-            throw new IllegalStateException("given 준비 실패: " + row.commandId() + "가 이미 있었다");
+            throw new IllegalStateException("given setup failed: " + row.commandId() + " already existed");
         }
     }
 

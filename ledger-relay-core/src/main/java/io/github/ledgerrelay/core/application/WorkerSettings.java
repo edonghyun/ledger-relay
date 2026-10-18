@@ -4,44 +4,48 @@ import java.time.Duration;
 import java.util.Objects;
 
 /**
- * 워커 한 바퀴의 설정({@code worker.*}). 기본값은 spring-boot 모듈의 설정({@code LedgerRelayProperties})이 갖는다.
+ * Settings for one worker cycle ({@code worker.*}). The defaults live in the spring-boot module's settings
+ * ({@code LedgerRelayProperties}).
  *
- * @param batchSize     한 바퀴에 claim할 최대 명령 수이자 한 TB 요청의 최대 이체 수
- * @param maxInFlight   프로세스 전체에서 동시에 TB에 가 있을 수 있는 이체 수
- * @param lease         claim한 명령을 쥐는 시간. submitTimeout의 두 배 이상이어야 하고, 한 바퀴의 결과 쓰기(명령마다
- *                      핸들러 포함 트랜잭션 하나)까지 덮도록 batchSize에 맞춰 잡는다
- * @param submitTimeout TB 응답을 기다리는 상한. 지나면 되돌린다
- * @param pollTimeout   in-flight 슬롯을 기다리는 상한. 못 잡으면 그 바퀴는 claim하지 않는다
+ * @param batchSize     the maximum number of commands to claim per cycle, and the maximum transfers per TB request
+ * @param maxInFlight   the number of transfers that may be in flight to TB at once across the whole process
+ * @param lease         how long a claimed command is held. It must be at least twice submitTimeout, and should be sized
+ *                      to batchSize so it also covers writing the results of one cycle (one transaction per command,
+ *                      handler included)
+ * @param submitTimeout the upper limit on waiting for a TB response. After it, the commands are put back
+ * @param pollTimeout   the upper limit on waiting for in-flight slots. If none are taken, that cycle does not claim
  */
 public record WorkerSettings(int batchSize, int maxInFlight, Duration lease, Duration submitTimeout,
         Duration pollTimeout) {
 
-    /** TB 요청 하나에 담을 수 있는 최대 이벤트 수(TB 0.17, 1MiB 메시지). */
+    /** The maximum number of events in one TB request (TB 0.17, 1 MiB message). */
     public static final int TB_MAX_BATCH = 8189;
 
     public WorkerSettings {
         if (batchSize < 1 || batchSize > TB_MAX_BATCH) {
-            throw new IllegalArgumentException("batchSize는 1 이상 " + TB_MAX_BATCH + " 이하여야 합니다: " + batchSize);
+            throw new IllegalArgumentException("batchSize must be between 1 and " + TB_MAX_BATCH + ": " + batchSize);
         }
         if (maxInFlight < batchSize) {
-            throw new IllegalArgumentException("maxInFlight(" + maxInFlight + ")는 batchSize(" + batchSize
-                    + ")보다 작을 수 없습니다. 그러면 워커가 슬롯을 영원히 잡지 못합니다");
+            throw new IllegalArgumentException("maxInFlight (" + maxInFlight + ") cannot be smaller than batchSize (" + batchSize
+                    + "). Otherwise the worker can never take its slots");
         }
         requirePositive("lease", lease);
         requirePositive("submitTimeout", submitTimeout);
         requirePositive("pollTimeout", pollTimeout);
-        // lease는 claim에서 시작해 제출 기록, 응답 기다림, 명령마다의 결과 쓰기를 모두 덮어야 한다. 짧으면 기다리는 동안
-        // 다른 워커가 같은 명령을 다시 잡아 보내고, TB가 기억하는 거절은 IdAlreadyFailed로 덮인다
+        // The lease starts at the claim and must cover recording the submission, waiting for the response and writing
+        // each
+        // command's result. If it is short, another worker claims and sends the same command during the wait, and the
+        // rejection TB remembers is masked by IdAlreadyFailed
         if (lease.compareTo(submitTimeout.multipliedBy(2)) < 0) {
-            throw new IllegalArgumentException("lease(" + lease + ")는 submitTimeout(" + submitTimeout
-                    + ")의 두 배 이상이어야 합니다. 응답을 기다리고 결과를 쓰는 동안 lease가 끝나면 안 됩니다");
+            throw new IllegalArgumentException("lease (" + lease + ") must be at least twice submitTimeout (" + submitTimeout
+                    + "). The lease must not expire while waiting for the response and writing the result");
         }
     }
 
     private static void requirePositive(String field, Duration value) {
         Objects.requireNonNull(value, field);
         if (value.isZero() || value.isNegative()) {
-            throw new IllegalArgumentException(field + "는 0보다 길어야 합니다: " + value);
+            throw new IllegalArgumentException(field + " must be longer than 0: " + value);
         }
     }
 }

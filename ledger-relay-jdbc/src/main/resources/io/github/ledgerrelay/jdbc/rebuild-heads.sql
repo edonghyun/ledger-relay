@@ -1,8 +1,10 @@
--- 맨 앞 표시(is_head)와 키 행을 행에서 다시 계산한다.
--- 워커를 멈추고 DB를 직접 고친 뒤(행 삭제, 상태 수정) 한 트랜잭션에서 실행한다(psql -1). 잠금은 커밋까지 유지된다.
--- 맨 앞은 min(seq)로 고른다. NOT EXISTS로 고르면 백로그가 긴 키에서 제곱으로 느려진다.
--- 키 행을 잡는 접수와 claim의 넘기기를 이 잠금이 막는다. 없으면 계산하는 동안 커밋된 접수가 스스로 맨 앞이 되어, 이 스크립트가
--- 같은 키에 맨 앞을 하나 더 켜다 유일 인덱스(ledger_command_one_head)에 걸린다.
+-- Recomputes the head marks (is_head) and the key rows from the command rows.
+-- Run it in one transaction (psql -1) after stopping the workers and fixing the DB by hand (deleting rows, changing
+-- states). The lock is held until commit.
+-- The head is picked with min(seq). Picking it with NOT EXISTS gets quadratically slower on keys with a long backlog.
+-- This lock blocks acceptance and the claim's pass-on, which both lock key rows. Without it, an acceptance committed
+-- during the computation makes itself the head, and this script then sets a second head on the same key and fails on
+-- the unique index (ledger_command_one_head).
 LOCK TABLE ledger_ordering_key IN EXCLUSIVE MODE;
 UPDATE ledger_command SET is_head = false WHERE is_head;
 UPDATE ledger_command c SET is_head = true

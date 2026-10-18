@@ -12,8 +12,8 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
- * 앱과 TB 사이의 Toxiproxy를 끊고 잇는다. 앱은 TB에 이 프록시로만 붙는다. Docker 소켓을 앱에 주지 않고 장애를
- * 낸다. 끊으면 이미 열린 연결도 닫힌다.
+ * Cuts and restores the Toxiproxy between the app and TB. The app reaches TB only through this proxy, so the failure is
+ * caused without giving the app the Docker socket. Cutting also closes connections that are already open.
  */
 @Component
 @Profile("demo")
@@ -31,7 +31,7 @@ class LedgerLink {
     boolean connected() {
         var matcher = ENABLED.matcher(send(HttpRequest.newBuilder(proxy).GET()));
         if (!matcher.find()) {
-            throw new IllegalStateException("Toxiproxy 응답에 enabled가 없습니다");
+            throw new IllegalStateException("The Toxiproxy response has no enabled field");
         }
         return Boolean.parseBoolean(matcher.group(1));
     }
@@ -46,14 +46,14 @@ class LedgerLink {
             HttpResponse<String> response = http.send(request.timeout(Duration.ofSeconds(2)).build(),
                     HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) {
-                throw new IllegalStateException("Toxiproxy가 " + response.statusCode() + "로 답했습니다: " + response.body());
+                throw new IllegalStateException("Toxiproxy answered " + response.statusCode() + ": " + response.body());
             }
             return response.body();
         } catch (IOException e) {
-            throw new IllegalStateException("Toxiproxy에 닿지 못했습니다: " + proxy, e);
+            throw new IllegalStateException("Could not reach Toxiproxy: " + proxy, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Toxiproxy 요청이 중단됐습니다", e);
+            throw new IllegalStateException("Interrupted during the Toxiproxy request", e);
         }
     }
 }

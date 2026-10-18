@@ -19,18 +19,18 @@ class ProxiedTigerBeetleCleanupTest {
     }
 
     @Test
-    @DisplayName("자원 정리: Toxiproxy 기동이 실패하면 이미 띄운 TB 컨테이너를 정리하고 원래 예외를 그대로 전한다")
+    @DisplayName("Cleanup: when Toxiproxy fails to start, the TB container already started is stopped and the original exception is passed on unchanged")
     void stopsTigerBeetleWhenToxiproxyFailsToStart() {
         int before = runningTigerBeetleContainers();
 
         assertThatThrownBy(() -> ProxiedTigerBeetle.start(network -> new ToxiproxyContainer("ghcr.io/shopify/toxiproxy:2.13.0") {
                     @Override
                     public void start() {
-                        throw new IllegalStateException("toxiproxy 기동 실패(테스트)");
+                        throw new IllegalStateException("toxiproxy failed to start (test)");
                     }
                 }))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("toxiproxy 기동 실패(테스트)");
+                .hasMessage("toxiproxy failed to start (test)");
 
         assertThat(runningTigerBeetleContainers()).isEqualTo(before);
     }

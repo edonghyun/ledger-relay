@@ -5,8 +5,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
 /**
- * 화면의 타일과 단계 칸 숫자. 라이브러리의 명령 표를 직접 센다. 데모 크기에서는 질의 하나로 충분하다. 운영 지표는 나중에
- * Micrometer로 바꿀 자리다(docs/development.md).
+ * Numbers for the tiles and pipeline stages of the UI. Counts the library's command table directly; at demo size one
+ * query is enough. This is where production metrics would later move to Micrometer (docs/development.md).
  */
 @Component
 class CommandStats {
@@ -24,7 +24,7 @@ class CommandStats {
             + "count(*) FILTER (WHERE state = 'CLAIMED') AS claimed, "
             + "count(*) FILTER (WHERE state = 'APPLIED') AS applied, "
             + "count(*) FILTER (WHERE state = 'HALTED') AS halted FROM ledger_command";
-    /** 최근에 끝난 1,000건의 접수→완료 시간 p99(밀리초). */
+    /** p99 of accept → completion time over the last 1,000 completed commands, in milliseconds. */
     private static final String P99 = "SELECT round(1000 * percentile_cont(0.99) WITHIN GROUP (ORDER BY took)) FROM ("
             + "SELECT extract(epoch FROM completed_at - accepted_at) AS took FROM ledger_command "
             + "WHERE completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 1000) recent";
@@ -41,7 +41,10 @@ class CommandStats {
                 row.getLong("pending"), row.getLong("claimed"), row.getLong("applied"), row.getLong("halted"), p99)).single();
     }
 
-    /** TB에 보냈지만 결과를 아직 쓰지 못한 확정. 그 사이 TB 잔액이 PG의 결제 완료 합보다 앞설 수 있다. */
+    /**
+     * Posts sent to TB whose result is not written yet. Meanwhile the TB balance can run ahead of the PG sum of paid
+     * orders.
+     */
     long capturesInFlight() {
         return sql.sql("SELECT count(*) FROM ledger_command WHERE kind = 'POST' AND state = 'CLAIMED'")
                 .query(Long.class).single();

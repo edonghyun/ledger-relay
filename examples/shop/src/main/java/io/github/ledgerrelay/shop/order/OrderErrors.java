@@ -7,7 +7,7 @@ import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-/** 거부 이유를 HTTP 상태와 {@code {"error": "..."}}로 돌려준다. */
+/** Returns the reason for a rejection as an HTTP status and {@code {"error": "..."}}. */
 @RestControllerAdvice
 class OrderErrors {
 

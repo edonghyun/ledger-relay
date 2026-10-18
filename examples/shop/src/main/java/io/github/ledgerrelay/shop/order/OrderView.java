@@ -2,7 +2,7 @@ package io.github.ledgerrelay.shop.order;
 
 import java.time.Instant;
 
-/** 화면과 API가 보는 주문. {@code halted}는 주문의 명령 중 하나가 멈췄다는 표시다. */
+/** The order as the UI and the API see it. {@code halted} marks that one of the order's commands is halted. */
 public record OrderView(long id, long buyerId, String product, long amountSatang, String state, String chip, String label,
         String failureReason, boolean halted, Instant createdAt) {
 

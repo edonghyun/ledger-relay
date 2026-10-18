@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("Toxiproxy 뒤의 TigerBeetle")
+@DisplayName("TigerBeetle behind Toxiproxy")
 class ProxiedTigerBeetleTest {
 
     static ProxiedTigerBeetle tb;
@@ -44,8 +44,8 @@ class ProxiedTigerBeetleTest {
     void givenTwoAccountsBehindTheProxy() {
         tb.assertAlive();
         ledger = new TigerBeetleTestLedger(tb.newClient());
-        payer = ledger.openAccount("구매자");
-        payee = ledger.openAccount("가맹점");
+        payer = ledger.openAccount("buyer");
+        payee = ledger.openAccount("merchant");
     }
 
     @AfterEach
@@ -55,7 +55,7 @@ class ProxiedTigerBeetleTest {
     }
 
     @Test
-    @DisplayName("연결이 정상이면 프록시를 거친 이체도 새로 기록된다")
+    @DisplayName("With a healthy connection, a transfer through the proxy is newly recorded")
     void transferThroughProxy() {
         // when
         CreateTransferStatus result = ledger.submit(transfer(7).from(payer).to(payee));
@@ -66,7 +66,7 @@ class ProxiedTigerBeetleTest {
 
     @Nested
     @Order(1)
-    @DisplayName("연결이 끊긴 동안 보낸 이체는 (TB 클라이언트에는 timeout이 없다)")
+    @DisplayName("A transfer sent while the connection is cut (the TB client has no timeout)")
     class SentWhileDisconnected {
 
         PendingTransfer pending;
@@ -78,12 +78,12 @@ class ProxiedTigerBeetleTest {
         }
 
         @Test
-        @DisplayName("오류 없이 대기하다가, 연결이 복구되면 정확히 한 번 기록된다")
+        @DisplayName("Waits without an error, and is recorded exactly once after the connection is restored")
         void waitsThenIsRecordedOnceAfterRestore() throws Exception {
-            // then: 끊긴 동안에는 응답도 오류도 없다
+            // then: while cut, there is neither a reply nor an error
             assertStillWaitingAfter(pending, Duration.ofSeconds(3));
 
-            // when: 연결을 복구하면
+            // when: the connection is restored
             tb.restoreConnection();
 
             // then

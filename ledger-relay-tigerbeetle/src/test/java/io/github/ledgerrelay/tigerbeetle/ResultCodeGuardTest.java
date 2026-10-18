@@ -11,11 +11,11 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("미분류 가드 — TB 클라이언트의 결과 코드와 core가 분류하는 코드는 정확히 같다")
+@DisplayName("Unclassified-code guard — the TB client's result codes and the codes core classifies are exactly the same")
 class ResultCodeGuardTest {
 
     @Test
-    @DisplayName("TB 클라이언트에 있는 결과 코드는 모두 core가 분류한다 — TB를 올려 새 코드가 생기면 여기서 멈춘다")
+    @DisplayName("Every result code in the TB client is classified by core — a TB upgrade that adds a code stops here")
     void everyTigerBeetleCodeIsClassified() {
         // when
         Set<String> unclassified = minus(namesOf(CreateTransferStatus.values()), namesOf(LedgerResultCode.values()));
@@ -25,7 +25,7 @@ class ResultCodeGuardTest {
     }
 
     @Test
-    @DisplayName("core가 분류하는 코드는 모두 TB 클라이언트에 있다 — TB에서 사라진 코드가 분류표에 남지 않게")
+    @DisplayName("Every code core classifies exists in the TB client — so a code removed from TB does not stay in the classification table")
     void everyClassifiedCodeExistsInTigerBeetle() {
         // when
         Set<String> stale = minus(namesOf(LedgerResultCode.values()), namesOf(CreateTransferStatus.values()));
@@ -46,14 +46,15 @@ class ResultCodeGuardTest {
 
     private static void assertEveryTigerBeetleCodeClassified(Set<String> unclassified) {
         assertThat(unclassified)
-                .as("TB에 core가 분류하지 않는 결과 코드가 있다 — 분류표, LedgerResultCode, "
-                        + "ResultClassificationTest.CLASSIFICATION_TABLE에 추가할 것")
+                .as("TB has result codes that core does not classify — add them to the classification table, "
+                        + "LedgerResultCode and ResultClassificationTest.CLASSIFICATION_TABLE")
                 .isEmpty();
     }
 
     private static void assertNoStaleCode(Set<String> stale) {
         assertThat(stale)
-                .as("TB에서 사라진 결과 코드가 core에 남아 있다 — LedgerResultCode와 분류표에서 지울 것")
+                .as("core still has result codes that TB removed — delete them from LedgerResultCode and the "
+                        + "classification table")
                 .isEmpty();
     }
 }

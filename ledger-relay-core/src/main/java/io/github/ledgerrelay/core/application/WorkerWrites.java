@@ -21,10 +21,11 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * 잡은 명령에 대한 워커의 쓰기와, 최종 상태로 바꾼 같은 트랜잭션에서의 핸들러 실행(G6). 명령 행만 다루고 순서 키 행은
- * 잡지 않는다. 그래서 키 포트({@link io.github.ledgerrelay.core.spi.OrderingKeys})를 받지 않는다: 앱은 주문 행을 쥔 채
- * 접수하며 키 행을 기다릴 수 있으므로, 여기서 키 행을 쥔 채 핸들러가 주문 행을 기다리면 교착한다.
- * {@code ArchitectureTest}가 이 경계를 지킨다.
+ * The worker's writes for claimed commands, and running the handler in the same transaction that moves the command to
+ * its final state (G6). It touches only command rows and never locks ordering key rows. That is why it does not take
+ * the key port ({@link io.github.ledgerrelay.core.spi.OrderingKeys}): the app accepts while holding its order rows and
+ * may wait for a key row, so if this class held a key row while the handler waited for an order row, they would
+ * deadlock. {@code ArchitectureTest} enforces this boundary.
  */
 final class WorkerWrites {
 
@@ -40,31 +41,34 @@ final class WorkerWrites {
         this.backoff = backoff;
     }
 
-    /** TB에 보내기 직전에 제출을 기록한다. */
+    /** Records the submission right before sending to TB. */
     WriteResult markSubmitted(ClaimedCommand claimed) {
         requireOutsideTransaction(transactions);
         return transactions.inTransaction(() -> write(claimed, new Step.MarkSubmitted(claimed.leaseToken())));
     }
 
-    /** TB 결과로 끝내고, 같은 트랜잭션에서 핸들러를 실행한다. */
+    /** Ends the command with the TB result and runs the handler in the same transaction. */
     WriteResult complete(ClaimedCommand claimed, LedgerResultCode code) {
         requireOutsideTransaction(transactions);
         return finish(claimed, new Step.Complete(claimed.leaseToken(), code), Optional.of(code));
     }
 
-    /** 참조한 예약이 적용되지 않아 건너뛰고, 같은 트랜잭션에서 핸들러를 실행한다. */
+    /** Skips because the referenced reservation was not applied, and runs the handler in the same transaction. */
     WriteResult skip(ClaimedCommand claimed) {
         requireOutsideTransaction(transactions);
         return finish(claimed, new Step.Skip(claimed.leaseToken()), Optional.empty());
     }
 
-    /** 응답이 없거나 예외가 나서 되돌린다. */
+    /** Puts the command back after no response or an exception. */
     WriteResult release(ClaimedCommand claimed) {
         requireOutsideTransaction(transactions);
         return transactions.inTransaction(() -> write(claimed, new Step.Release(claimed.leaseToken())));
     }
 
-    /** 운영자가 멈춘(HALTED) 명령을 포기한다. 규칙은 {@link CommandLifecycle#abandonHalted}에 적었다. */
+    /**
+     * An operator abandons a halted (HALTED) command. The rules are described on {@link
+     * CommandLifecycle#abandonHalted}.
+     */
     WriteResult abandonHalted(String commandId) {
         requireOutsideTransaction(transactions);
         if (!LedgerCommand.isAcceptableId(commandId)) {
@@ -76,19 +80,22 @@ final class WorkerWrites {
                         .orElseThrow(() -> new CommandNotFoundException(commandId));
                 if (current.row().state() != StoredState.HALTED) {
                     throw new CannotAbandonException(commandId, CannotAbandonException.Reason.NOT_HALTED,
-                            "멈춘(HALTED) 명령만 포기할 수 있습니다: " + commandId + "는 " + current.row().state());
+                            "Only a halted (HALTED) command can be abandoned: " + commandId + " is " + current.row().state());
                 }
-                // 포기는 "TB에 한 번도 가지 않았다"는 뜻이다(SkipReason.ABANDONED_BY_OPERATOR). 보낸 적이 있으면 TB에서
-                // 이미 확정됐을 수 있어, 포기하면 돈은 움직였는데 PG와 핸들러는 적용 안 됨으로 남는다(F27)
+                // Abandoning means "it never went to TB" (SkipReason.ABANDONED_BY_OPERATOR). If it was sent, TB may
+                // already
+                // have applied it, and abandoning would leave PG and the handler at "not applied" while money moved
+                // (F27)
                 if (current.row().submitCount() > 0 || current.row().knownResult().isPresent()) {
                     throw new CannotAbandonException(commandId, CannotAbandonException.Reason.ALREADY_SUBMITTED,
-                            "이미 TB에 보낸 적이 있어 포기할 수 없습니다: " + commandId + ". TB에서 이체를 확인한 뒤 수동으로 정리하세요");
+                            "Cannot abandon a command that was already sent to TB: " + commandId + ". Check the transfer in TB, then clean up by hand");
                 }
                 StepResult.Moved moved = (StepResult.Moved) CommandStateMachine.apply(current.row(), new Step.Abandon());
                 return land(current, StoredState.HALTED, current.row().leaseToken(), moved);
             });
         } catch (HandlerFailedSignal failed) {
-            // 롤백되어 멈춘 그대로다. 받은 TB 결과가 없으므로 따로 기록할 것도 없다
+            // Rolled back, so the command stays halted. There is no received TB result, so there is nothing else to
+            // record
             if (failed.getCause() instanceof Error error) {
                 throw error;
             }
@@ -97,8 +104,8 @@ final class WorkerWrites {
     }
 
     /**
-     * 최종 쓰기. 핸들러가 던지면 그 트랜잭션은 롤백되어 결과 쓰기도 없던 일이 된다(G6). 그다음 새 트랜잭션에서
-     * 받은 결과를 남기고 backoff 뒤 다시 잡히게 한다.
+     * The final write. If the handler throws, that transaction rolls back and writing the result is undone too (G6).
+     * Then a new transaction records the received result so the command is claimed again after the backoff.
      */
     private WriteResult finish(ClaimedCommand claimed, Step.Write step, Optional<LedgerResultCode> result) {
         try {
@@ -107,12 +114,14 @@ final class WorkerWrites {
             try {
                 transactions.inTransaction(() -> write(claimed, new Step.HandlerFailed(claimed.leaseToken(), result)));
             } catch (RuntimeException | Error recordFailed) {
-                // 기록마저 실패하면 이 예외가 워커로 간다. 처음 원인인 핸들러 예외를 함께 실어 잃지 않는다
+                // If even the record fails, this exception goes to the worker. Attach the handler exception, the
+                // original cause, so it is not lost
                 recordFailed.addSuppressed(failed.getCause());
                 throw recordFailed;
             }
-            // Error(메모리 부족 등)는 삼키지 않는다. 그래도 받은 결과는 위에서 남겼으므로, 다시 TB에 보내
-            // 원래 사유를 IdAlreadyFailed로 잃지 않는다
+            // Do not swallow an Error (out of memory and so on). The received result was still recorded above, so a
+            // resend to
+            // TB does not lose the original reason to IdAlreadyFailed
             if (failed.getCause() instanceof Error error) {
                 throw error;
             }
@@ -120,7 +129,10 @@ final class WorkerWrites {
         }
     }
 
-    /** 읽고, 상태 기계로 다음 행을 계산하고, 상태와 토큰이 맞을 때만 쓴다. 최종 상태면 핸들러를 실행한다. */
+    /**
+     * Reads, computes the next row with the state machine, and writes only if state and token match. Runs the handler
+     * on a final state.
+     */
     private WriteResult write(ClaimedCommand claimed, Step.Write step) {
         Optional<CommandRecord> found = store.find(claimed.commandId())
                 .filter(current -> current.rowId() == claimed.rowId());
@@ -135,8 +147,9 @@ final class WorkerWrites {
     }
 
     /**
-     * 상태 기계가 계산한 행을 조건부로 쓰고, 최종 상태면 같은 트랜잭션에서 핸들러를 실행한다. 상태 기계가 이미
-     * 막았지만, 읽은 뒤 다른 워커가 바꿨을 수 있으므로 저장소에서 한 번 더 막는다.
+     * Conditionally writes the row the state machine computed, and on a final state runs the handler in the same
+     * transaction. The state machine already guards this, but another worker may have changed the row after the read,
+     * so the store guards it once more.
      */
     private WriteResult land(CommandRecord current, StoredState expectedState, long expectedToken,
             StepResult.Moved moved) {
@@ -146,7 +159,7 @@ final class WorkerWrites {
             return new WriteResult.Fenced();
         }
         if (moved.effects().contains(Transition.Effect.RUN_HANDLER)) {
-            // 방금 쓴 행을 다시 읽어 완료 시각까지 담는다
+            // Read the row just written again so the outcome includes the completion time
             CommandStatus outcome = statusOf(store.find(current.commandId()).orElseThrow());
             try {
                 handler.onCompleted(outcome);
@@ -157,7 +170,7 @@ final class WorkerWrites {
         return new WriteResult.Written();
     }
 
-    /** 전이가 함께 바꿀 시각 컬럼. */
+    /** The timestamp column the transition updates along with it. */
     private RowChange.Stamp stampFor(StepResult.Moved moved) {
         CommandRow next = moved.row();
         Set<Transition.Effect> effects = moved.effects();
@@ -173,21 +186,22 @@ final class WorkerWrites {
         if (effects.contains(Transition.Effect.RECORD_SUBMISSION)) {
             return new RowChange.Stamp.FirstSubmission();
         }
-        throw new IllegalStateException("버그: 시각 컬럼을 정할 수 없는 전이다: " + moved);
+        throw new IllegalStateException("Bug: no timestamp column can be chosen for this transition: " + moved);
     }
 
     /**
-     * 워커 단계는 단계마다 자기 트랜잭션을 연다. 바깥 트랜잭션에 합류하면 핸들러 실패의 롤백이 바깥에 묻혀,
-     * 결과만 커밋되고 핸들러 효과는 없는 상태가 될 수 있다(G6).
+     * Each worker step opens its own transaction. If it joined an outer transaction, the rollback from a handler
+     * failure
+     * would be buried in the outer one, and the result could commit without the handler's effects (G6).
      */
     static void requireOutsideTransaction(Transactions transactions) {
         if (transactions.isActive()) {
-            throw new IllegalStateException("버그: 워커 단계(claim, markSubmitted, complete, skip, release)와 abandonHalted는 "
-                    + "트랜잭션 밖에서 부른다. 바깥 트랜잭션에 합류하면 핸들러 실패가 롤백되지 않는다(G6)");
+            throw new IllegalStateException("Bug: call the worker steps (claim, markSubmitted, complete, skip, release) and abandonHalted "
+                    + "outside a transaction. Joining an outer transaction means a handler failure is not rolled back (G6)");
         }
     }
 
-    /** 저장된 행을 앱이 보는 조회 결과로 바꾼다. */
+    /** Turns a stored row into the query result the app sees. */
     static CommandStatus statusOf(CommandRecord record) {
         CommandRow row = record.row();
         Optional<Rejection> rejection = row.state() == StoredState.REJECTED || row.state() == StoredState.CONFLICT
@@ -198,7 +212,9 @@ final class WorkerWrites {
                 record.transferId(), row.submitCount(), record.acceptedAt(), record.completedAt());
     }
 
-    /** 핸들러가 던졌다는 신호. 트랜잭션 밖으로 나가 롤백을 일으킨 뒤 {@link #finish}가 받는다. */
+    /**
+     * Signals that the handler threw. It leaves the transaction to cause the rollback, then {@link #finish} catches it.
+     */
     private static final class HandlerFailedSignal extends RuntimeException {
 
         HandlerFailedSignal(Throwable handlerError) {

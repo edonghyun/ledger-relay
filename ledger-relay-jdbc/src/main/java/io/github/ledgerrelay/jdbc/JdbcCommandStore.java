@@ -17,9 +17,9 @@ import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * PostgreSQL 명령 저장소. SQL 네 묶음(넣기, 찾기, 잠그고 읽기, 조건부 쓰기)이며 판단하지 않는다.
- * 순서 키 행은 잡지 않는다. 그 SQL은 {@link JdbcOrderingKeys}에 있다.
- * {@link JdbcClient}는 Spring이 묶어 둔 트랜잭션 커넥션을 쓰므로 앱 트랜잭션에 합류한다(G1).
+ * PostgreSQL command store. Four groups of SQL (insert, find, lock and read, conditional write); it makes no decisions.
+ * It does not lock ordering key rows. That SQL is in {@link JdbcOrderingKeys}.
+ * {@link JdbcClient} uses the transaction connection that Spring has bound, so it joins the app transaction (G1).
  */
 public final class JdbcCommandStore implements CommandStore {
 
@@ -30,8 +30,9 @@ public final class JdbcCommandStore implements CommandStore {
     }
 
     /**
-     * 읽는 컬럼. {@code SELECT c.*}를 쓰지 않는다. 운영 중 {@code ADD COLUMN} 마이그레이션 뒤 서버 준비 문장이
-     * "cached plan must not change result type"(0A000)으로 실패하고, 앱 트랜잭션 안이면 그 트랜잭션 전체가 중단된다(F31).
+     * Columns to read. {@code SELECT c.*} is not used: after an {@code ADD COLUMN} migration in production, server-side
+     * prepared statements fail with "cached plan must not change result type" (0A000), and inside an app transaction
+     * the whole transaction is aborted (F31).
      */
     private static final String COLUMNS = """
             c.id, c.command_id, c.transfer_id, c.ordering_key, c.seq, c.kind, c.reservation_command_id,
@@ -40,14 +41,15 @@ public final class JdbcCommandStore implements CommandStore {
             c.submit_count, c.known_result, c.result_code, c.handler_failures, c.skip_reason, c.accepted_at,
             c.completed_at, c.halt_reason, c.halted_at""";
 
-    /** 이 행을 지금 트랜잭션이 넣었는가. 아직 쓰기를 하지 않은 트랜잭션은 ID가 없으므로 false다. */
+    /** Whether the current transaction inserted this row. A transaction that has not written yet has no ID: false. */
     private static final String ACCEPTED_HERE =
             "coalesce(c.accepted_xact = pg_current_xact_id_if_assigned(), false) AS accepted_in_this_transaction";
 
     /**
-     * 넣는다. 같은 commandId가 이미 있으면 {@code ON CONFLICT DO NOTHING}으로 넘기고 있던 행을 읽는다.
-     * 유일성 위반 예외를 잡는 방식은 PostgreSQL 트랜잭션 전체를 중단시켜 앱 트랜잭션을 깨뜨린다(G7).
-     * 넣었으면 그 키의 맨 앞을 다시 정한다. 키 행은 잡지 않는다: 접수는 이미 순번을 받으며 키 행을 잡았다.
+     * Inserts. If the same commandId already exists, {@code ON CONFLICT DO NOTHING} skips the insert and the existing
+     * row is read. Catching a unique violation exception instead would abort the whole PostgreSQL transaction and break
+     * the app transaction (G7). After an insert it settles the head of the key again. It does not lock the key row:
+     * acceptance already locked it when it took the sequence number.
      */
     @Override
     public Optional<CommandRecord> insertIfAbsent(NewCommand command) {
@@ -70,8 +72,9 @@ public final class JdbcCommandStore implements CommandStore {
     }
 
     /**
-     * 순번을 거치지 않고 넣은 행(저장소 계약의 준비)이면 키 행을 만든다. 맨 앞을 넘기는 claim이 이 행을 잡기 때문이다.
-     * 이미 있으면 아무것도 하지 않으며, 다른 트랜잭션이 쥔 행이어도 기다리지 않는다({@code DO NOTHING}은 잠그지 않는다).
+     * Creates the key row for a row inserted without taking a sequence number (setup in store contract tests), because
+     * the claim that passes on the head locks this row. If it exists, nothing happens, and it does not wait even if
+     * another transaction holds the row ({@code DO NOTHING} does not lock).
      */
     private void ensureKeyRow(String orderingKey, long seq) {
         sql.sql("""
@@ -81,9 +84,10 @@ public final class JdbcCommandStore implements CommandStore {
     }
 
     /**
-     * 맨 앞을 다시 정한다: 가장 앞 순번의 미완료가 아닌 표시를 끄고, 그 미완료를 켠다. 끄기를 먼저 해야 키당 하나뿐인 유일
-     * 인덱스({@code ledger_command_one_head})에 걸리지 않는다. 다른 트랜잭션이 결과를 쓰는 중인 맨 앞은 아직 미완료로
-     * 보이므로 건드리지 않고(기다리지 않고), 그 끝난 맨 앞은 다음 claim이 넘긴다.
+     * Settles the head again: clears the mark that is not on the unfinished command with the lowest sequence number,
+     * then sets it on that command. Clearing first keeps the one-per-key unique index
+     * ({@code ledger_command_one_head}) from rejecting the update. A head whose result another transaction is writing
+     * still looks unfinished, so it is left alone (without waiting), and the next claim passes on that finished head.
      */
     private void settleHead(String orderingKey) {
         sql.sql(CLEAR_STALE_HEAD).param("key", orderingKey).update();
@@ -98,8 +102,9 @@ public final class JdbcCommandStore implements CommandStore {
             """;
 
     /**
-     * 맨 앞이 없을 때만 켠다. READ COMMITTED에서는 끄기 문장 뒤에 같은 키의 완료가 커밋될 수 있다. 그 끝난 맨 앞은 표시를
-     * 쥔 채 남으므로, 이 조건이 없으면 맨 앞이 둘이 되어 유일 인덱스가 접수를 깬다. 남은 끝난 맨 앞은 다음 claim이 넘긴다.
+     * Sets the mark only when the key has no head. Under READ COMMITTED a completion on the same key can commit after
+     * the clearing statement. That finished head keeps its mark, so without this condition the key would have two
+     * heads and the unique index would break acceptance. The next claim passes on the remaining finished head.
      */
     static final String MARK_FIRST_UNFINISHED = """
                 UPDATE ledger_command SET is_head = true
@@ -117,14 +122,15 @@ public final class JdbcCommandStore implements CommandStore {
                 .optional();
     }
 
-    /** 쌓인 일을 센다(health). 미완료 인덱스({@code ledger_command_unfinished})의 행만 읽는다. */
-    /** 대기를 셀 때 이 수까지만 센다(health). 넘으면 "이 이상"으로 알린다. 정확한 수는 지표가 맡는다. */
+    /** Counts the backlog (health). Reads only rows of the unfinished index ({@code ledger_command_unfinished}). */
+    /** Health counts the backlog up to this cap and reports "this many or more" above it. Metrics count exactly. */
     static final int BACKLOG_COUNT_CAP = 1_000;
 
     /**
-     * health가 쌓인 일을 세는 질의 셋. 장애로 대기가 커질수록 health가 느려지지 않게 읽는 양을 묶는다: 개수는 상한까지만
-     * 세고, 가장 오래된 대기는 {@code ledger_command_waiting}(대기·처리 중 명령의 id 인덱스)의 첫 항목에서 읽는다. 실행 계획
-     * 테스트가 본다.
+     * The three queries health uses to count the backlog. They bound the amount read, so health does not slow down as
+     * the backlog grows during an outage: counts stop at the cap, and the oldest waiting command is read from the first
+     * entry of {@code ledger_command_waiting} (the id index of pending and in-flight commands). A query plan test
+     * checks them.
      */
     static final List<String> BACKLOG = List.of(
             "SELECT count(*) FROM (SELECT 1 FROM ledger_command WHERE state IN ('PENDING','CLAIMED') ORDER BY id"
@@ -142,7 +148,7 @@ public final class JdbcCommandStore implements CommandStore {
                 unfinished >= BACKLOG_COUNT_CAP || halted >= BACKLOG_COUNT_CAP);
     }
 
-    /** 최종 상태로 끝난 명령을 행 순서로 읽는다(대사). 기본 키 순서로 읽으며 최종 상태가 아닌 행은 걸러 낸다. */
+    /** Reads finished commands in row order (reconciliation). Reads in primary key order and skips non-final rows. */
     @Override
     public List<CommandRecord> findFinished(long afterRowId, int limit) {
         return sql.sql("SELECT " + COLUMNS + ", " + ACCEPTED_HERE + " FROM ledger_command c"
@@ -152,7 +158,7 @@ public final class JdbcCommandStore implements CommandStore {
                 .query((rs, rowNum) -> CommandRows.read(rs)).list();
     }
 
-    /** 멈춘 명령을 행 순서로 읽는다. {@code ledger_command_halted} 인덱스만 읽는다. */
+    /** Reads halted commands in row order. Reads only the {@code ledger_command_halted} index. */
     @Override
     public List<CommandRecord> findHalted(long afterRowId, int limit) {
         return sql.sql("SELECT " + COLUMNS + ", " + ACCEPTED_HERE
@@ -162,9 +168,10 @@ public final class JdbcCommandStore implements CommandStore {
     }
 
     /**
-     * {@link #lockDue}의 질의. 실행 계획 테스트가 같은 질의를 본다. 맨 앞 표시와 보낼 시각 인덱스({@code ledger_command_ready})로
-     * 지금 보낼 수 있는 맨 앞만 시각 순서로 읽는다. 마지막 조건은 lease가 끝나는 바로 그 시각의 처리 중
-     * 명령을 아직 후보로 보지 않는다({@code ready_at <= now()}만으로는 그 시각이 들어온다).
+     * The query of {@link #lockDue}. A query plan test checks the same query. Using the head mark and the send-time
+     * index ({@code ledger_command_ready}), it reads only heads that can be sent now, in time order. The last condition
+     * keeps an in-flight command out of the candidates at the exact instant its lease ends
+     * ({@code ready_at <= now()} alone would include that instant).
      */
     static final String LOCK_DUE = """
                 SELECT %s, %s,
@@ -179,9 +186,10 @@ public final class JdbcCommandStore implements CommandStore {
             """.formatted(COLUMNS, ACCEPTED_HERE);
 
     /**
-     * claim 후보를 잠그고 읽는다. 후보 행만 {@code FOR UPDATE OF c SKIP LOCKED}로 잠근다. 맨 앞 판정은 표시
-     * ({@code is_head})로 하므로 다른 워커가 잡은 맨 앞을 건너뛰어도 그 뒤 명령은 후보가 아니다(G4). 참조 예약은 잠그지 않고
-     * 읽는다. 예약까지 잠그면 예약을 쓰는 중인 확정이 후보에서 빠진다(F10).
+     * Locks and reads claim candidates. Only candidate rows are locked, with {@code FOR UPDATE OF c SKIP LOCKED}. The
+     * head is decided by the mark ({@code is_head}), so when a head locked by another worker is skipped, the command
+     * behind it is still not a candidate (G4). The referenced reservation is read without a lock. Locking the
+     * reservation too would drop a post that is writing the reservation from the candidates (F10).
      */
     @Override
     public List<DueCommand> lockDue(int limit) {
@@ -192,9 +200,9 @@ public final class JdbcCommandStore implements CommandStore {
     }
 
     /**
-     * 상태와 토큰이 기대와 같을 때만 바꾼다(G5). 시각은 PG {@code now()} 하나로 찍는다. 최종 상태로 바꿔도 맨 앞
-     * 표시는 그대로 둔다. 다음 claim이 넘긴다: 여기서 넘기려면 키 행을 잡아야 하고, 이 트랜잭션은 이어서
-     * 핸들러를 부른다.
+     * Changes the row only when state and token match the expected values (G5). Times come from the single PG
+     * {@code now()}. Moving to a final state keeps the head mark. The next claim passes it on: passing it on here would
+     * need the key row lock, and this transaction goes on to call the handler.
      */
     @Override
     public boolean compareAndSet(RowChange change) {
@@ -239,7 +247,7 @@ public final class JdbcCommandStore implements CommandStore {
         };
     }
 
-    /** 소수 초. 시각을 바꾸지 않는 표시에는 쓰이지 않는 0을 넘긴다. */
+    /** Fractional seconds. Stamps that do not change a time get an unused 0. */
     private static double stampSeconds(RowChange.Stamp stamp) {
         return switch (stamp) {
             case RowChange.Stamp.LeaseFor lease -> lease.lease().toNanos() / 1e9;

@@ -6,8 +6,8 @@ import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.stereotype.Component;
 
 /**
- * 스키마와 원장 계좌를 준비한다. 빈을 모두 만든 뒤, 워커 루프({@code SmartLifecycle})가 시작하기 전에 돈다. 그래서 워커는 표가
- * 없는 DB를 보지 않는다.
+ * Prepares the schema and the ledger accounts. Runs after all beans are created and before the worker loop
+ * ({@code SmartLifecycle}) starts, so the worker never sees a DB without its tables.
  */
 @Component
 class ShopBootstrap implements SmartInitializingSingleton {

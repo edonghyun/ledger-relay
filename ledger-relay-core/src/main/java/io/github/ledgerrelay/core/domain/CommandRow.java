@@ -6,11 +6,11 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 명령 행에서 상태 기계가 보는 부분. 시각 컬럼(lease_expires_at, next_attempt_at, completed_at)은
- * 저장소가 PG의 now()로 다룬다. 상태 기계는 시계를 모른다.
+ * The part of a command row that the state machine sees. The store handles the timestamp columns (lease_expires_at,
+ * next_attempt_at, completed_at) with PG's now(). The state machine knows no clock.
  *
- * @param knownResult 핸들러가 실패해 다음 claim으로 넘긴 TB 결과
- * @param resultCode  명령을 끝낸 TB 결과. 건너뜀으로 끝났으면 없다
+ * @param knownResult the TB result passed on to the next claim because the handler failed
+ * @param resultCode  the TB result that ended the command. Empty if it ended as skipped
  */
 public record CommandRow(
         StoredState state,
@@ -28,17 +28,17 @@ public record CommandRow(
         Objects.requireNonNull(skipReason, "skipReason");
         if (skipReason.isPresent() != (state == StoredState.SKIPPED)) {
             throw new IllegalArgumentException(
-                    "skipReason은 SKIPPED일 때만, 그리고 그때는 반드시 있어야 합니다: state=" + state + ", skipReason=" + skipReason);
+                    "skipReason must be present exactly when state is SKIPPED: state=" + state + ", skipReason=" + skipReason);
         }
     }
 
-    /** 건너뜀으로 끝나지 않은 행. 건너뜀(SKIPPED)에 쓰면 이유가 없어 만들어지지 않는다. */
+    /** A row that did not end as skipped. Used for SKIPPED it fails, because there is no reason. */
     public CommandRow(StoredState state, long leaseToken, long submitCount, Optional<LedgerResultCode> knownResult,
             Optional<LedgerResultCode> resultCode, int handlerFailures) {
         this(state, leaseToken, submitCount, knownResult, resultCode, handlerFailures, Optional.empty());
     }
 
-    /** 막 접수된 행. */
+    /** A row just accepted. */
     public static CommandRow accepted() {
         return new CommandRow(StoredState.PENDING, 0, 0, Optional.empty(), Optional.empty(), 0);
     }

@@ -35,11 +35,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
- * ledger-relay 자동 설정. 앱은 {@code DataSource}, {@code PlatformTransactionManager}, {@link LedgerOutcomeHandler}
- * 빈을 준다. 모든 빈은 앱이 같은 타입을 주면 만들지 않는다.
+ * ledger-relay auto-configuration. The app provides {@code DataSource}, {@code PlatformTransactionManager} and
+ * {@link LedgerOutcomeHandler} beans. No bean is created when the app already provides one of the same type.
  *
- * <p>저장소 셋(트랜잭션, 순서 키, 명령)에는 트랜잭션 매니저가 쥔 것과 같은 {@code DataSource} 객체를 준다. 다르면 접수가 앱
- * 트랜잭션에 묶이지 않는다(F18).
+ * <p>The three stores (transactions, ordering keys, commands) receive the same {@code DataSource} object that the
+ * transaction manager holds. If it differs, acceptance is not bound to the app's transaction (F18).
  */
 @AutoConfiguration(afterName = {
         "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",
@@ -92,7 +92,7 @@ public class LedgerRelayAutoConfiguration {
         return new Backoff(properties.backoff().initial(), properties.backoff().max());
     }
 
-    /** 워커를 끄더라도 만든다. 어긋난 설정은 워커가 돌다 깨지기 전에 기동에서 드러나야 한다. */
+    /** Created even when the worker is off. Bad settings must surface at startup, not break the worker later. */
     @Bean
     @ConditionalOnMissingBean
     WorkerSettings ledgerRelayWorkerSettings(LedgerRelayProperties properties) {
@@ -107,8 +107,8 @@ public class LedgerRelayAutoConfiguration {
             TransferIdGenerator transferIds, ObjectProvider<LedgerOutcomeHandler> handlers, Backoff backoff) {
         LedgerOutcomeHandler handler = handlers.getIfAvailable();
         if (handler == null) {
-            throw new IllegalStateException("ledger-relay: LedgerOutcomeHandler 빈이 필요합니다. 명령이 끝났을 때 앱의 "
-                    + "데이터에 결과를 반영하는 핸들러를 빈으로 등록하세요");
+            throw new IllegalStateException("ledger-relay: a LedgerOutcomeHandler bean is required. Register as a bean "
+                    + "the handler that applies the result to the app's data when a command finishes");
         }
         return new CommandLifecycle(keys, store, transactions, transferIds, handler, backoff);
     }
@@ -126,7 +126,7 @@ public class LedgerRelayAutoConfiguration {
         return new LoggingWorkerEvents();
     }
 
-    /** 앱이 health(actuator)를 쓸 때만 켜진다. */
+    /** Turns on only when the app uses health (actuator). */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "org.springframework.boot.health.contributor.HealthIndicator")
     static class HealthContributor {
@@ -139,7 +139,7 @@ public class LedgerRelayAutoConfiguration {
         }
     }
 
-    /** 워커: 같은 maxInFlight에서 슬롯을 만들어 설정과 실제 상한이 어긋날 수 없다. */
+    /** Workers: the slots are created from the same maxInFlight, so the setting and the actual limit cannot diverge. */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnProperty(prefix = "ledger-relay.worker", name = "enabled", havingValue = "true", matchIfMissing = true)
     static class Workers {

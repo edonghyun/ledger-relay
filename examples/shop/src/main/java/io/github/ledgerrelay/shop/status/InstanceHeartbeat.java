@@ -7,11 +7,14 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-/** 이 인스턴스가 살아 있다는 표시와 TB에 보낸 명령 수를 1초마다 DB에 남긴다. 화면을 서빙하지 않는 인스턴스도 보이게 한다. */
+/**
+ * Every second, records in the DB that this instance is alive and how many commands it sent to TB. This makes instances
+ * that do not serve the UI visible too.
+ */
 @Component
 class InstanceHeartbeat {
 
-    /** 이보다 오래 소식이 없으면 목록에서 뺀다. */
+    /** An instance silent for longer than this is dropped from the list. */
     static final int ALIVE_SECONDS = 5;
 
     record Instance(String name, long submitted) {

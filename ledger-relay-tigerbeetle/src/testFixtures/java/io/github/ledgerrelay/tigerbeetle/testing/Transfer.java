@@ -6,19 +6,19 @@ import com.tigerbeetle.UInt128;
 import java.math.BigInteger;
 
 /**
- * 이체 한 건. {@code transfer(500).from(payer).to(payee)}로 만들면 새 ID가 발급된다.
- * {@code reservation(500).from(payer).to(payee)}는 금액을 보류만 하는 예약이고, {@link #postOf(Transfer)}·
- * {@link #voidOf(Transfer)}는 그 예약을 확정·해제하는 이체다.
- * {@link #withAmount(long)}처럼 {@code with…}로 시작하는 말은 같은 ID에 그 필드만 바꾼 것이고,
- * {@link #withNewId()}는 같은 내용에 새 ID를 붙인 것이다.
+ * One transfer. {@code transfer(500).from(payer).to(payee)} issues a new id.
+ * {@code reservation(500).from(payer).to(payee)} is a reservation that only holds the amount, and
+ * {@link #postOf(Transfer)} and {@link #voidOf(Transfer)} are the transfers that post or void that reservation.
+ * Methods starting with {@code with…}, such as {@link #withAmount(long)}, keep the same id and change only that field;
+ * {@link #withNewId()} keeps the same content with a new id.
  *
- * @param pendingId 확정·해제가 가리키는 예약의 ID. 그 밖에는 null
+ * @param pendingId id of the reservation that a post or void refers to; null otherwise
  */
 public record Transfer(byte[] id, Account from, Account to, BigInteger amount,
         int ledger, int code, long userData128, long userData64, int userData32,
         int flags, byte[] pendingId, long timeoutSeconds) {
 
-    /** TB가 확정에서 "예약 금액 전부"로 읽는 값(2^128-1). */
+    /** The value (2^128-1) that TB reads in a post as "the full reserved amount". */
     public static final BigInteger AMOUNT_MAX = TransferBatch.AMOUNT_MAX;
 
     public static Draft transfer(long amount) {
@@ -29,13 +29,18 @@ public record Transfer(byte[] id, Account from, Account to, BigInteger amount,
         return new Draft(amount, TransferFlags.PENDING);
     }
 
-    /** 예약을 금액 없이(전액) 확정한다. 계좌·ledger·code는 0으로 보내 예약의 값을 물려받는다. */
+    /**
+     * Posts the reservation without an amount (full amount). Accounts, ledger and code are sent as 0 so they inherit
+     * the reservation's values.
+     */
     public static Transfer postOf(Transfer hold) {
         return new Transfer(UInt128.id(), null, null, AMOUNT_MAX, 0, 0, 0, 0, 0,
                 TransferFlags.POST_PENDING_TRANSFER, hold.id(), 0);
     }
 
-    /** 예약을 해제한다. 금액·계좌·ledger·code는 0으로 보내 예약의 값을 물려받는다. */
+    /**
+     * Voids the reservation. Amount, accounts, ledger and code are sent as 0 so they inherit the reservation's values.
+     */
     public static Transfer voidOf(Transfer hold) {
         return new Transfer(UInt128.id(), null, null, BigInteger.ZERO, 0, 0, 0, 0, 0,
                 TransferFlags.VOID_PENDING_TRANSFER, hold.id(), 0);
@@ -85,13 +90,13 @@ public record Transfer(byte[] id, Account from, Account to, BigInteger amount,
                 flags, pendingId, timeoutSeconds);
     }
 
-    /** 예약의 만료(초). 예약이 아닌 이체에 주면 TB가 거부한다. */
+    /** Expiry (seconds) of a reservation. TB rejects it on a transfer that is not a reservation. */
     public Transfer withTimeout(long seconds) {
         return new Transfer(id, from, to, amount, ledger, code, userData128, userData64, userData32,
                 flags, pendingId, seconds);
     }
 
-    /** 확정·해제가 가리키는 이체를 바꾼다. */
+    /** Changes the transfer that a post or void refers to. */
     public Transfer withPendingId(Transfer other) {
         return new Transfer(id, from, to, amount, ledger, code, userData128, userData64, userData32,
                 flags, other.id(), timeoutSeconds);
@@ -104,14 +109,14 @@ public record Transfer(byte[] id, Account from, Account to, BigInteger amount,
 
     @Override
     public String toString() {
-        String shown = amount.equals(AMOUNT_MAX) ? "전액" : amount.toString();
+        String shown = amount.equals(AMOUNT_MAX) ? "full amount" : amount.toString();
         if ((flags & TransferFlags.POST_PENDING_TRANSFER) != 0) {
-            return "확정 " + shown;
+            return "post " + shown;
         }
         if ((flags & TransferFlags.VOID_PENDING_TRANSFER) != 0) {
-            return "해제 " + shown;
+            return "void " + shown;
         }
-        String kind = (flags & TransferFlags.PENDING) != 0 ? "예약 " : "";
+        String kind = (flags & TransferFlags.PENDING) != 0 ? "reservation " : "";
         return kind + shown + " (" + from + " → " + to + ")";
     }
 

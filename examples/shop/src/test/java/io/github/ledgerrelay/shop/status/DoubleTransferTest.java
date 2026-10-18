@@ -28,10 +28,10 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 
-/** 정합성을 일부러 깨므로 다른 테스트와 나누지 않는 PG·TB 위에서 돈다. */
+/** Breaks consistency on purpose, so it runs on its own PG and TB, not shared with other tests. */
 @SpringBootTest
 @AutoConfigureMockMvc
-@DisplayName("중복 이체 — 한 주문에 확정이 두 번 들어오면 숫자가 그것을 드러낸다")
+@DisplayName("Double transfers — the numbers expose a second post for one order")
 class DoubleTransferTest {
 
     static final ShopTestEnvironment ENVIRONMENT = ShopTestEnvironment.isolated();
@@ -58,7 +58,7 @@ class DoubleTransferTest {
     DataSource dataSource;
 
     @Test
-    @DisplayName("결제 완료된 주문에 TB로 직접 확정을 한 번 더 넣으면 중복 이체가 1이 되고 정합성은 broken이다")
+    @DisplayName("Posting a paid order once more directly in TB makes double transfers 1 and the consistency verdict broken")
     void aSecondCaptureForOneOrderIsCounted() throws Exception {
         // given
         ShopProbe probe = new ShopProbe(orders, client, dataSource);
@@ -67,7 +67,7 @@ class DoubleTransferTest {
         shop.ship(order.id());
         probe.awaitState(order.id(), OrderState.PAID);
 
-        // when: 라이브러리를 거치지 않고 같은 주문 id로 예약과 확정을 한 번 더 넣는다(버그나 수동 이체를 흉내)
+        // when: bypassing the library, reserve and post once more with the same order id (imitates a bug or a manual transfer)
         captureAgainBehindTheRelaysBack(order);
 
         // then
@@ -78,8 +78,8 @@ class DoubleTransferTest {
             consistency = http.get().uri("/api/consistency").exchange().getResponse()
                     .getContentAsString(StandardCharsets.UTF_8);
         } while (StatusApiTest.number(consistency, "$.doubleTransfers") == 0 && System.nanoTime() < deadline);
-        assertThat(StatusApiTest.number(consistency, "$.doubleTransfers")).as("중복 이체").isEqualTo(1);
-        assertThat((String) JsonPath.read(consistency, "$.verdict")).as("정합성").isEqualTo("broken");
+        assertThat(StatusApiTest.number(consistency, "$.doubleTransfers")).as("double transfers").isEqualTo(1);
+        assertThat((String) JsonPath.read(consistency, "$.verdict")).as("consistency verdict").isEqualTo("broken");
     }
 
     private void captureAgainBehindTheRelaysBack(ShopOrder order) throws InterruptedException {
@@ -102,7 +102,7 @@ class DoubleTransferTest {
         CreateTransferResultBatch results = client.createTransfers(transfers);
         while (results.next()) {
             if (results.getStatus() != CreateTransferStatus.Created) {
-                throw new IllegalStateException("given 준비 실패: " + results.getStatus());
+                throw new IllegalStateException("given setup failed: " + results.getStatus());
             }
         }
     }

@@ -5,7 +5,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-/** 공용 PG·TB 위에서 워커까지 켠 앱 하나. 같은 설정의 테스트 클래스는 Spring 컨텍스트를 나눠 쓴다. */
+/** One app, worker included, on the shared PG and TB. Test classes with the same configuration share the Spring context. */
 @SpringBootTest
 @AutoConfigureMockMvc
 public abstract class ShopSpringTest {

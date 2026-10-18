@@ -7,9 +7,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
- * 다른 스레드에서 연 트랜잭션. 동시성 장이 "다른 워커·다른 앱 트랜잭션"을 결정적으로 만들 때 쓴다.
- * 일을 마친 뒤에도 {@link #commit()}이나 {@link #rollback()}을 부를 때까지 트랜잭션을 연 채로 기다린다.
- * 그래서 그 트랜잭션이 잡은 행 잠금이 테스트가 정한 순간까지 살아 있다. 상한(10초) 안에 지시가 없으면 롤백한다.
+ * A transaction opened on another thread. Concurrency sections use it to make "another worker, another app transaction"
+ * deterministic.
+ * After its work finishes, it keeps the transaction open and waits until {@link #commit()} or {@link #rollback()} is
+ * called.
+ * So the row locks that transaction took stay alive until the moment the test chooses. With no instruction within the
+ * limit (10 seconds), it rolls back.
  */
 public final class OtherTransaction<T> implements AutoCloseable {
 
@@ -29,12 +32,12 @@ public final class OtherTransaction<T> implements AutoCloseable {
         this.limit = limit;
     }
 
-    /** 새 스레드에서 트랜잭션을 열어 {@code work}를 실행한다. 바로 돌아온다. */
+    /** Opens a transaction on a new thread and runs {@code work}. Returns right away. */
     public static <T> OtherTransaction<T> start(Transactions transactions, Supplier<T> work) {
         return start(transactions, work, LIMIT);
     }
 
-    /** 상한을 정해 연다. 이 클래스의 테스트가 상한이 지난 뒤의 동작을 짧게 확인할 때 쓴다. */
+    /** Opens with a given limit. This class's own tests use it to check briefly what happens after the limit passes. */
     static <T> OtherTransaction<T> start(Transactions transactions, Supplier<T> work, Duration limit) {
         OtherTransaction<T> other = new OtherTransaction<>(limit);
         Thread thread = new Thread(() -> other.run(transactions, work), "other-transaction");
@@ -43,56 +46,60 @@ public final class OtherTransaction<T> implements AutoCloseable {
         return other;
     }
 
-    /** 일이 끝나기를 기다려 결과를 돌려준다. 일이 던졌으면 그 예외를 던진다. */
+    /** Waits for the work to finish and returns its result. If the work threw, throws that exception. */
     public T awaitWork() {
-        await(workDone, "다른 트랜잭션의 일이");
+        await(workDone, "The other transaction's work");
         if (workFailure != null) {
             throw asUnchecked(workFailure);
         }
         return result;
     }
 
-    /** 관찰 시간 동안 일이 끝나지 않았음을 확인한다 — 무언가에 막혀 있다. */
+    /** Checks that the work did not finish during the observation time — it is blocked on something. */
     public void assertStillWorkingAfter(Duration observation) {
         try {
             if (workDone.await(observation.toMillis(), TimeUnit.MILLISECONDS)) {
-                throw new AssertionError("다른 트랜잭션의 일이 " + observation.toMillis()
-                        + "ms 안에 끝났다: 막혀 있기를 기대했다"
-                        + (workFailure == null ? "" : " (일이 던진 예외: " + workFailure + ")"));
+                throw new AssertionError("The other transaction's work finished within " + observation.toMillis()
+                        + "ms: expected it to be blocked"
+                        + (workFailure == null ? "" : " (exception thrown by the work: " + workFailure + ")"));
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new AssertionError("기다리다 인터럽트되었다", e);
+            throw new AssertionError("Interrupted while waiting", e);
         }
     }
 
-    /** 관찰 시간 안에 일이 끝났음을 확인하고 결과를 돌려준다 — 아무것에도 막히지 않았다. 일이 던졌으면 그 예외를 던진다. */
+    /**
+     * Checks that the work finished within the observation time and returns the result — nothing blocked it. If the
+     * work threw, throws that exception.
+     */
     public T assertFinishedWithin(Duration observation) {
         try {
             if (!workDone.await(observation.toMillis(), TimeUnit.MILLISECONDS)) {
-                throw new AssertionError("다른 트랜잭션의 일이 " + observation.toMillis()
-                        + "ms 안에 끝나지 않았다: 막히지 않기를 기대했다");
+                throw new AssertionError("The other transaction's work did not finish within " + observation.toMillis()
+                        + "ms: expected it not to be blocked");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new AssertionError("기다리다 인터럽트되었다", e);
+            throw new AssertionError("Interrupted while waiting", e);
         }
         return awaitWork();
     }
 
-    /** 트랜잭션을 커밋하고 끝날 때까지 기다린다. 커밋이 실패하면 그 예외를 던진다. */
+    /** Commits the transaction and waits until it ends. If the commit fails, throws that exception. */
     public void commit() {
         end(false);
     }
 
-    /** 트랜잭션을 롤백하고 끝날 때까지 기다린다. */
+    /** Rolls back the transaction and waits until it ends. */
     public void rollback() {
         end(true);
     }
 
     /**
-     * 아직 열려 있으면 롤백을 지시한다. 일이 다른 트랜잭션의 잠금에 막혀 있을 수 있으므로(그 트랜잭션은 뒤에 닫힌다)
-     * 일이 끝난 경우에만 트랜잭션이 끝나기를 기다린다.
+     * If it is still open, instructs a rollback. The work may be blocked on another transaction's lock (that
+     * transaction
+     * closes later), so it waits for the transaction to end only if the work has finished.
      */
     @Override
     public void close() {
@@ -117,7 +124,7 @@ public final class OtherTransaction<T> implements AutoCloseable {
                 } finally {
                     workDone.countDown();
                 }
-                // 상한 안에 지시가 없으면 롤백한다. 실패한 테스트가 다음 테스트에 행을 남기지 않게
+                // With no instruction within the limit, roll back, so a failed test leaves no rows for the next test
                 if (!awaitQuietly(finish)) {
                     rollingBack = true;
                 }
@@ -127,7 +134,7 @@ public final class OtherTransaction<T> implements AutoCloseable {
                 return null;
             });
         } catch (RollbackSignal expected) {
-            // 롤백을 지시받았다
+            // A rollback was instructed
         } catch (Throwable e) {
             if (workFailure == null) {
                 endFailure = e;
@@ -141,7 +148,7 @@ public final class OtherTransaction<T> implements AutoCloseable {
     private void end(boolean rollback) {
         rollingBack = rollback;
         finish.countDown();
-        await(transactionDone, "다른 트랜잭션이");
+        await(transactionDone, "The other transaction");
         if (endFailure != null) {
             throw asUnchecked(endFailure);
         }
@@ -150,15 +157,15 @@ public final class OtherTransaction<T> implements AutoCloseable {
     private void await(CountDownLatch latch, String what) {
         try {
             if (!latch.await(limit.toMillis(), TimeUnit.MILLISECONDS)) {
-                throw new AssertionError(what + " " + limit.toMillis() + "ms 안에 끝나지 않았다");
+                throw new AssertionError(what + " did not finish within " + limit.toMillis() + "ms");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new AssertionError("기다리다 인터럽트되었다", e);
+            throw new AssertionError("Interrupted while waiting", e);
         }
     }
 
-    /** @return 상한 안에 latch가 열렸는지 */
+    /** @return whether the latch opened within the limit */
     private boolean awaitQuietly(CountDownLatch latch) {
         try {
             return latch.await(limit.toMillis(), TimeUnit.MILLISECONDS);
@@ -178,7 +185,7 @@ public final class OtherTransaction<T> implements AutoCloseable {
         return new IllegalStateException(t);
     }
 
-    /** 롤백을 일으키려고 트랜잭션 안에서 던지는 신호. 밖으로 나가지 않는다. */
+    /** The signal thrown inside the transaction to cause a rollback. It never leaves the class. */
     private static final class RollbackSignal extends RuntimeException {
         RollbackSignal() {
             super(null, null, false, false);

@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("원장 어휘 — docs/testing.md §3·§5: 전제와 효과 확인이 틀린 상황에서 제대로 멈추는가")
+@DisplayName("Ledger vocabulary — docs/testing.md §3·§5: do preconditions and effect checks stop correctly when the situation is wrong")
 class TigerBeetleTestLedgerTest {
 
     static final TigerBeetleContainer TB = new TigerBeetleContainer();
@@ -48,103 +48,103 @@ class TigerBeetleTestLedgerTest {
 
     @Nested
     @Order(1)
-    @DisplayName("given 전제 메서드는")
+    @DisplayName("A given precondition method")
     class Preconditions {
 
         @Test
-        @DisplayName("recorded: 실제로는 거부되는 이체로 '기록됨' 전제를 만들면 준비 단계에서 멈춘다")
+        @DisplayName("recorded: building a 'recorded' precondition from a transfer that is actually rejected stops at setup")
         void recordedStopsWhenTheTransferIsRejected() {
-            Account wallet = ledger.openAccountThatCannotOverdraw("지갑");
-            Account merchant = ledger.openAccount("가맹점");
+            Account wallet = ledger.openAccountThatCannotOverdraw("wallet");
+            Account merchant = ledger.openAccount("merchant");
 
             assertThatThrownBy(() -> ledger.recorded(transfer(100).from(wallet).to(merchant)))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageStartingWith("given 준비 실패")
+                    .hasMessageStartingWith("given setup failed")
                     .hasMessageContaining("ExceedsCredits");
         }
 
         @Test
-        @DisplayName("rejected: 실제로는 기록되는 이체로 '거부됨' 전제를 만들면 준비 단계에서 멈춘다")
+        @DisplayName("rejected: building a 'rejected' precondition from a transfer that is actually recorded stops at setup")
         void rejectedStopsWhenTheTransferIsCreated() {
-            Account payer = ledger.openAccount("구매자");
-            Account payee = ledger.openAccount("가맹점");
+            Account payer = ledger.openAccount("buyer");
+            Account payee = ledger.openAccount("merchant");
 
             assertThatThrownBy(() -> ledger.rejected(transfer(100).from(payer).to(payee), ExceedsCredits))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageStartingWith("given 준비 실패")
+                    .hasMessageStartingWith("given setup failed")
                     .hasMessageContaining("Created");
         }
 
         @Test
-        @DisplayName("closeAccount: 이미 닫은 계좌를 다시 닫으면 준비 단계에서 멈춘다")
+        @DisplayName("closeAccount: closing an already closed account again stops at setup")
         void closeAccountRefusesAnAlreadyClosedAccount() {
-            Account payer = ledger.openAccount("닫을 계좌");
+            Account payer = ledger.openAccount("account to close");
             ledger.closeAccount(payer);
 
             assertThatThrownBy(() -> ledger.closeAccount(payer))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageStartingWith("given 준비 실패")
-                    .hasMessageContaining("닫을 계좌");
+                    .hasMessageStartingWith("given setup failed")
+                    .hasMessageContaining("account to close");
         }
     }
 
     @Nested
     @Order(2)
-    @DisplayName("예약 이체를 보내면")
+    @DisplayName("When a reservation is sent")
     class Reservations {
 
         @Test
-        @DisplayName("reservation: 금액이 보류될 뿐 확정되지 않는다")
+        @DisplayName("reservation: the amount is only held, not posted")
         void reservingHoldsTheAmountWithoutPosting() {
-            Account payer = ledger.openAccount("구매자");
-            Account payee = ledger.openAccount("가맹점");
+            Account payer = ledger.openAccount("buyer");
+            Account payee = ledger.openAccount("merchant");
 
             ledger.recorded(reservation(500).from(payer).to(payee));
 
             Balance balance = ledger.balanceOf(payer);
-            assertThat(balance.debitsPosted()).as("구매자의 확정 출금").isZero();
-            assertThat(balance.debitsPending()).as("구매자의 보류 출금").isEqualTo(500);
+            assertThat(balance.debitsPosted()).as("buyer's posted debits").isZero();
+            assertThat(balance.debitsPending()).as("buyer's pending debits").isEqualTo(500);
         }
 
         @Test
-        @DisplayName("stored: TB가 저장한 값을 읽는다")
+        @DisplayName("stored: reads the values TB stored")
         void storedReadsWhatTigerBeetleKept() {
-            Account payer = ledger.openAccount("구매자");
-            Account payee = ledger.openAccount("가맹점");
+            Account payer = ledger.openAccount("buyer");
+            Account payee = ledger.openAccount("merchant");
             Transfer payment = ledger.recorded(transfer(500).from(payer).to(payee));
 
             StoredTransfer stored = ledger.stored(payment);
 
-            assertThat(stored.amount()).as("저장된 금액").isEqualTo(BigInteger.valueOf(500));
-            assertThat(stored.ledger()).as("저장된 ledger").isEqualTo(1);
-            assertThat(stored.userData128()).as("저장된 user_data_128").isEqualTo(BigInteger.ZERO);
+            assertThat(stored.amount()).as("stored amount").isEqualTo(BigInteger.valueOf(500));
+            assertThat(stored.ledger()).as("stored ledger").isEqualTo(1);
+            assertThat(stored.userData128()).as("stored user_data_128").isEqualTo(BigInteger.ZERO);
         }
 
         @Test
-        @DisplayName("stored: 원장에 없는 이체를 읽으면 실패한다")
+        @DisplayName("stored: reading a transfer that is not in the ledger fails")
         void storedFailsForAnUnknownTransfer() {
-            Account payer = ledger.openAccount("구매자");
-            Account payee = ledger.openAccount("가맹점");
+            Account payer = ledger.openAccount("buyer");
+            Account payee = ledger.openAccount("merchant");
             Transfer neverSent = transfer(500).from(payer).to(payee);
 
             assertThatThrownBy(() -> ledger.stored(neverSent))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("원장에 없습니다");
+                    .hasMessageContaining("is not in the ledger");
         }
     }
 
     @Nested
     @Order(3)
-    @DisplayName("나중에 여는 계좌는")
+    @DisplayName("An account opened later")
     class AccountsOpenedLater {
 
         @Test
-        @DisplayName("open: 열기 전에는 원장에 없고, 열면 그 ID 그대로 조회된다")
+        @DisplayName("open: before opening it is not in the ledger; after opening it is found under the same id")
         void openUsesTheSameId() {
-            Account later = Account.notOpened("나중에 열 계좌");
+            Account later = Account.notOpened("account to open later");
             assertThatThrownBy(() -> ledger.balanceOf(later))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("원장에 없습니다");
+                    .hasMessageContaining("is not in the ledger");
 
             ledger.open(later);
 
@@ -152,96 +152,96 @@ class TigerBeetleTestLedgerTest {
         }
 
         @Test
-        @DisplayName("openAccount(이름, ledger): 그 ledger에 계좌를 연다 — 다른 ledger 계좌로는 이체할 수 없다")
+        @DisplayName("openAccount(name, ledger): opens an account on that ledger — it cannot transfer to an account on another ledger")
         void openAccountOnAnotherLedger() {
-            Account payer = ledger.openAccount("구매자");
-            Account elsewhere = ledger.openAccount("다른 ledger의 가맹점", 2);
+            Account payer = ledger.openAccount("buyer");
+            Account elsewhere = ledger.openAccount("merchant on another ledger", 2);
 
             assertThatThrownBy(() -> ledger.recorded(transfer(1).from(payer).to(elsewhere)))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageStartingWith("given 준비 실패")
+                    .hasMessageStartingWith("given setup failed")
                     .hasMessageContaining("Ledger");
         }
 
         @Test
-        @DisplayName("open: 이미 열린 계좌를 다시 열면 준비 단계에서 멈춘다")
+        @DisplayName("open: opening an already opened account again stops at setup")
         void openStopsWhenTheAccountAlreadyExists() {
-            Account opened = ledger.openAccount("이미 연 계좌");
+            Account opened = ledger.openAccount("account already opened");
 
             assertThatThrownBy(() -> ledger.open(opened))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageStartingWith("given 준비 실패")
-                    .hasMessageContaining("이미 연 계좌");
+                    .hasMessageStartingWith("given setup failed")
+                    .hasMessageContaining("account already opened");
         }
     }
 
     @Nested
     @Order(4)
-    @DisplayName("효과를 확인하는 assert는")
+    @DisplayName("An assert that checks an effect")
     class EffectAssertions {
 
         @Test
-        @DisplayName("assertMovedExactly: 실제로 움직인 금액이 다르면 기대 금액과 실제 잔액을 담아 실패한다")
+        @DisplayName("assertMovedExactly: when the amount actually moved differs, fails with the expected amount and the actual balances")
         void movedExactlyFailsOnADifferentAmount() {
-            Account payer = ledger.openAccount("구매자");
-            Account payee = ledger.openAccount("가맹점");
+            Account payer = ledger.openAccount("buyer");
+            Account payee = ledger.openAccount("merchant");
             ledger.recorded(transfer(500).from(payer).to(payee));
 
             assertThatThrownBy(() -> assertMovedExactly(ledger, payer, payee, 501))
                     .isInstanceOf(AssertionError.class)
-                    .hasMessageContaining("정확히 501")
-                    .hasMessageContaining("출금 500");
+                    .hasMessageContaining("exactly 501")
+                    .hasMessageContaining("debits 500");
         }
 
         @Test
-        @DisplayName("assertNothingMoved: 돈이 움직인 계좌면 실패한다")
+        @DisplayName("assertNothingMoved: fails on an account where money moved")
         void nothingMovedFailsAfterAMove() {
-            Account payer = ledger.openAccount("구매자");
-            Account payee = ledger.openAccount("가맹점");
+            Account payer = ledger.openAccount("buyer");
+            Account payee = ledger.openAccount("merchant");
             ledger.recorded(transfer(1).from(payer).to(payee));
 
             assertThatThrownBy(() -> assertNothingMoved(ledger, payee))
                     .isInstanceOf(AssertionError.class)
-                    .hasMessageContaining("가맹점")
-                    .hasMessageContaining("입금 1");
+                    .hasMessageContaining("merchant")
+                    .hasMessageContaining("credits 1");
         }
 
         @Test
-        @DisplayName("assertStillWaitingAfter: 이미 응답이 온 요청이면 실패한다")
+        @DisplayName("assertStillWaitingAfter: fails when the request already got a reply")
         void stillWaitingFailsWhenTheReplyArrived() {
-            Account payer = ledger.openAccount("구매자");
-            Account payee = ledger.openAccount("가맹점");
+            Account payer = ledger.openAccount("buyer");
+            Account payee = ledger.openAccount("merchant");
             PendingTransfer pending = ledger.submitInBackground(transfer(1).from(payer).to(payee));
             pending.awaitResult(Duration.ofSeconds(30));
 
             assertThatThrownBy(() -> assertStillWaitingAfter(pending, Duration.ofMillis(100)))
                     .isInstanceOf(AssertionError.class)
-                    .hasMessageContaining("응답");
+                    .hasMessageContaining("reply");
         }
 
         @Test
-        @DisplayName("assertReserved: 보류가 아니라 확정된 금액이면 실패한다")
+        @DisplayName("assertReserved: fails when the amount was posted rather than held")
         void assertReservedFailsWhenTheAmountWasPosted() {
-            Account payer = ledger.openAccount("구매자");
-            Account payee = ledger.openAccount("가맹점");
+            Account payer = ledger.openAccount("buyer");
+            Account payee = ledger.openAccount("merchant");
             ledger.recorded(transfer(500).from(payer).to(payee));
 
             assertThatThrownBy(() -> assertReserved(ledger, payer, payee, 500))
                     .isInstanceOf(AssertionError.class)
-                    .hasMessageContaining("보류")
-                    .hasMessageContaining("출금 500");
+                    .hasMessageContaining("held")
+                    .hasMessageContaining("debits 500");
         }
 
         @Test
-        @DisplayName("assertPostedAndReleased: 아직 보류 중인 금액이 있으면 실패한다")
+        @DisplayName("assertPostedAndReleased: fails while an amount is still held")
         void assertPostedAndReleasedFailsWhileStillReserved() {
-            Account payer = ledger.openAccount("구매자");
-            Account payee = ledger.openAccount("가맹점");
+            Account payer = ledger.openAccount("buyer");
+            Account payee = ledger.openAccount("merchant");
             ledger.recorded(reservation(500).from(payer).to(payee));
 
             assertThatThrownBy(() -> assertPostedAndReleased(ledger, payer, payee, 0))
                     .isInstanceOf(AssertionError.class)
-                    .hasMessageContaining("보류 출금 500");
+                    .hasMessageContaining("pending debits 500");
         }
     }
 }

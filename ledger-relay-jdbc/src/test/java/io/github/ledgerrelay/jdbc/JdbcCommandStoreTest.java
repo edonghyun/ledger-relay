@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-@DisplayName("PostgreSQL 저장소 — CommandStore 계약")
+@DisplayName("PostgreSQL storage — CommandStore contract")
 class JdbcCommandStoreTest extends CommandStoreContract {
 
     static final String CHECK_VIOLATION = "23514";
@@ -31,7 +31,7 @@ class JdbcCommandStoreTest extends CommandStoreContract {
         return PostgresStorage.withDataSourceTransactions();
     }
 
-    /** 어느 장이 끝나도 맨 앞 표시와 미완료 개수가 행과 맞다. */
+    /** After every test, the head marks and the unfinished counts match the rows. */
     @AfterEach
     void theHeadsStayConsistent() {
         ((PostgresStorage) storage).assertHeadsConsistent();
@@ -39,7 +39,7 @@ class JdbcCommandStoreTest extends CommandStoreContract {
 
     @Nested
     @Order(100)
-    @DisplayName("jdbc 전용: u128 컬럼에 TB 범위를 벗어난 값을 직접 넣으면")
+    @DisplayName("jdbc only: when a value outside the TB range is written directly to a u128 column")
     class OutOfRangeU128 {
 
         PostgresStorage storage;
@@ -64,7 +64,7 @@ class JdbcCommandStoreTest extends CommandStoreContract {
                 amount,              340282366920938463463374607431768211456
                 amount,              -1
                 """)
-        @DisplayName("스키마의 CHECK가 거부한다 — SQL로 고친 값도 TB 범위(0 ~ 2^128-1)를 벗어나지 못한다")
+        @DisplayName("The schema's CHECK rejects it — even values changed with SQL cannot leave the TB range (0 to 2^128-1)")
         void outOfRangeU128ValuesAreRefusedByTheSchema(String column, BigInteger value) {
             // when
             Throwable refused = catchThrowable(() -> storage.sql()
@@ -72,14 +72,14 @@ class JdbcCommandStoreTest extends CommandStoreContract {
                     .param("value", new BigDecimal(value)).update());
 
             // then
-            assertThat(sqlState(refused)).as("%s = %s를 쓴 결과의 SQLSTATE (실패: %s)", column, value, refused)
+            assertThat(sqlState(refused)).as("SQLSTATE of writing %s = %s (failure: %s)", column, value, refused)
                     .isEqualTo(CHECK_VIOLATION);
         }
     }
 
     @Nested
     @Order(101)
-    @DisplayName("jdbc 전용: 시각 컬럼이 바로 지금(now())과 같으면 — 한 트랜잭션 안에서 now()는 멈춰 있다")
+    @DisplayName("jdbc only: when a time column equals the current instant (now()) — now() stands still within a transaction")
     class AtTheExactInstant {
 
         PostgresStorage storage;
@@ -90,7 +90,7 @@ class JdbcCommandStoreTest extends CommandStoreContract {
         }
 
         @Test
-        @DisplayName("다음 시도 시각이 지금인 접수 명령은 후보다 (next_attempt_at <= now())")
+        @DisplayName("An accepted command whose next attempt time is now is a candidate (next_attempt_at <= now())")
         void aPendingCommandAtItsRetryInstantIsDue() {
             // when
             List<String> due = storage.transactions().inTransaction(() -> {
@@ -100,11 +100,11 @@ class JdbcCommandStoreTest extends CommandStoreContract {
             });
 
             // then
-            assertThat(due).as("후보").containsExactly("pay-1");
+            assertThat(due).as("candidates").containsExactly("pay-1");
         }
 
         @Test
-        @DisplayName("lease 만료 시각이 지금인 처리 중 명령은 아직 후보가 아니다 (lease_expires_at < now())")
+        @DisplayName("An in-flight command whose lease expires now is not a candidate yet (lease_expires_at < now())")
         void aClaimedCommandAtItsLeaseExpiryIsNotDue() {
             // when
             List<String> due = storage.transactions().inTransaction(() -> {
@@ -117,7 +117,7 @@ class JdbcCommandStoreTest extends CommandStoreContract {
             });
 
             // then
-            assertThat(due).as("후보").isEmpty();
+            assertThat(due).as("candidates").isEmpty();
         }
 
         private List<String> dueIds() {
@@ -127,7 +127,7 @@ class JdbcCommandStoreTest extends CommandStoreContract {
 
     @Nested
     @Order(102)
-    @DisplayName("jdbc 전용: 스키마가 지키는 것 — F31")
+    @DisplayName("jdbc only: what the schema guards — F31")
     class TheSchemaGuards {
 
         static final String UNIQUE_VIOLATION = "23505";
@@ -146,7 +146,7 @@ class JdbcCommandStoreTest extends CommandStoreContract {
                 ledger_command,      reservation_command_id
                 ledger_ordering_key, ordering_key
                 """)
-        @DisplayName("ID 컬럼은 바이트로 비교한다(COLLATE \"C\") — OS collation이 바뀌어도 유일 인덱스가 어긋나지 않게")
+        @DisplayName("ID columns compare byte for byte (COLLATE \"C\") — so unique indexes stay correct when the OS collation changes")
         void idColumnsCompareByteForByte(String table, String column) {
             // when
             String collation = storage.sql().sql("""
@@ -155,11 +155,11 @@ class JdbcCommandStoreTest extends CommandStoreContract {
                     """).param("table", table).param("column", column).query(String.class).single();
 
             // then
-            assertThat(collation).as("%s.%s의 collation", table, column).isEqualTo("C");
+            assertThat(collation).as("collation of %s.%s", table, column).isEqualTo("C");
         }
 
         @Test
-        @DisplayName("다른 명령에 같은 TB 이체 ID를 넣으면 거부된다 — 이체 ID가 겹치면 TB의 exists가 남의 명령을 적용됨으로 만든다")
+        @DisplayName("Giving another command the same TB transfer id is rejected — if transfer ids collide, TB's exists marks another command as applied")
         void aDuplicateTransferIdIsRefused() {
             // given
             storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(newTransfer("pay-1", "order-1", 1)));
@@ -175,17 +175,17 @@ class JdbcCommandStoreTest extends CommandStoreContract {
                             record("pay-2").transferId(), "hash-of-pay-3", newTransfer("pay-3", "order-3", 1).body()))));
 
             // then
-            assertThat(refused).as("이름만 바꾼 행").isNull();
-            assertThat(sqlState(duplicate)).as("같은 이체 ID의 새 명령 (실패: %s)", duplicate).isEqualTo(UNIQUE_VIOLATION);
+            assertThat(refused).as("row with only its names changed").isNull();
+            assertThat(sqlState(duplicate)).as("new command with the same transfer id (failure: %s)", duplicate).isEqualTo(UNIQUE_VIOLATION);
         }
 
         @ParameterizedTest(name = "{0} → {2}", quoteTextArguments = false)
         @CsvSource(textBlock = """
-                확정의 참조 예약을 지우면,          UPDATE ledger_command SET reservation_command_id = NULL WHERE command_id = 'capture-1', ledger_command_reference_check
-                처리 중인데 lease가 없으면,         UPDATE ledger_command SET state = 'CLAIMED' WHERE command_id = 'capture-1',            ledger_command_claimed_lease_check
-                순번이 0이면,                       UPDATE ledger_command SET seq = 0 WHERE command_id = 'capture-1',                      ledger_command_seq_check
+                post loses its reservation,   UPDATE ledger_command SET reservation_command_id = NULL WHERE command_id = 'capture-1', ledger_command_reference_check
+                in flight without a lease,    UPDATE ledger_command SET state = 'CLAIMED' WHERE command_id = 'capture-1',            ledger_command_claimed_lease_check
+                sequence number is 0,         UPDATE ledger_command SET seq = 0 WHERE command_id = 'capture-1',                      ledger_command_seq_check
                 """)
-        @DisplayName("Java 불변식과 어긋나는 행은 이름 붙은 CHECK가 거부한다")
+        @DisplayName("Rows that break the Java invariants are rejected by named CHECK constraints")
         void rowsThatBreakTheInvariantsAreRefused(String meaning, String update, String constraint) {
             // given
             storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(newPost("capture-1", "order-1", 2,
@@ -195,8 +195,8 @@ class JdbcCommandStoreTest extends CommandStoreContract {
             Throwable refused = catchThrowable(() -> storage.sql().sql(update).update());
 
             // then
-            assertThat(sqlState(refused)).as("%s (실패: %s)", meaning, refused).isEqualTo(CHECK_VIOLATION);
-            assertThat(refused).as("%s를 막은 제약", meaning).hasMessageContaining(constraint);
+            assertThat(sqlState(refused)).as("%s (failure: %s)", meaning, refused).isEqualTo(CHECK_VIOLATION);
+            assertThat(refused).as("constraint that rejected: %s", meaning).hasMessageContaining(constraint);
         }
 
         @ParameterizedTest(name = "{0}", quoteTextArguments = false)
@@ -204,7 +204,7 @@ class JdbcCommandStoreTest extends CommandStoreContract {
                 known_result
                 result_code
                 """)
-        @DisplayName("결과 코드 칸에 모르는 저장 이름을 넣으면 거부된다 — claim이 그 행을 읽다 전체가 멈추지 않게 (F29)")
+        @DisplayName("An unknown stored name in a result code column is rejected — so the claim does not halt everything reading that row (F29)")
         void anUnknownResultCodeIsRefused(String column) {
             // given
             storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(newTransfer("pay-1", "order-1", 1)));
@@ -214,11 +214,11 @@ class JdbcCommandStoreTest extends CommandStoreContract {
                     .sql("UPDATE ledger_command SET " + column + " = 'made_up_code' WHERE command_id = 'pay-1'").update());
 
             // then
-            assertThat(sqlState(refused)).as("%s에 모르는 값 (실패: %s)", column, refused).isEqualTo(CHECK_VIOLATION);
+            assertThat(sqlState(refused)).as("unknown value in %s (failure: %s)", column, refused).isEqualTo(CHECK_VIOLATION);
         }
 
         @Test
-        @DisplayName("결과 코드의 저장 이름은 모두 받아들인다 — TB를 올려 코드가 늘면 스키마도 함께 고치게")
+        @DisplayName("Every stored name of a result code is accepted — so a TB upgrade that adds codes forces a schema update too")
         void everyWireNameIsAccepted() {
             // given
             storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(newTransfer("pay-1", "order-1", 1)));
@@ -235,13 +235,13 @@ class JdbcCommandStoreTest extends CommandStoreContract {
             }
 
             // then
-            assertThat(refused).as("스키마가 거부한 저장 이름").isEmpty();
+            assertThat(refused).as("stored names the schema rejected").isEmpty();
         }
 
         @Test
-        @DisplayName("같은 커넥션에서 준비 문장이 된 조회도 운영 중 ADD COLUMN 뒤에 깨지지 않는다 — SELECT * 를 쓰지 않는다")
+        @DisplayName("A find that became a prepared statement on the same connection does not break after an ADD COLUMN in production — SELECT * is not used")
         void findSurvivesAnAddedColumn() {
-            // given: 커넥션 하나로 같은 조회를 여섯 번 해 서버 준비 문장으로 만들었다(pgjdbc prepareThreshold 5)
+            // given: the same find ran six times on one connection and became a server-side prepared statement (pgjdbc prepareThreshold 5)
             var single = PostgresStorage.singleConnection();
             try {
                 JdbcCommandStore onOneConnection = new JdbcCommandStore(single);
@@ -252,13 +252,13 @@ class JdbcCommandStoreTest extends CommandStoreContract {
                 }
                 storage.sql().sql("ALTER TABLE ledger_command ADD COLUMN migration_probe int").update();
 
-                // when: 앱 트랜잭션 안의 조회(접수가 하는 것)
+                // when: a find inside an app transaction (what a submit does)
                 var inAppTransaction = new org.springframework.transaction.support.TransactionTemplate(
                         new org.springframework.jdbc.datasource.DataSourceTransactionManager(single));
                 Throwable broken = catchThrowable(() -> inAppTransaction.execute(status -> onOneConnection.find("pay-1")));
 
                 // then
-                assertThat(broken).as("컬럼이 늘어난 뒤의 조회").isNull();
+                assertThat(broken).as("find after a column was added").isNull();
             } finally {
                 storage.sql().sql("ALTER TABLE ledger_command DROP COLUMN IF EXISTS migration_probe").update();
                 single.destroy();

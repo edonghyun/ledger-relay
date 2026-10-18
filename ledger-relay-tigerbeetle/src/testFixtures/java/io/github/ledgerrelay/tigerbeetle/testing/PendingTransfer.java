@@ -8,7 +8,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-/** 백그라운드로 보낸 이체. 응답이 아직 없을 수 있다. */
+/** A transfer sent in the background. It may not have a reply yet. */
 public final class PendingTransfer {
 
     private final Transfer transfer;
@@ -27,14 +27,14 @@ public final class PendingTransfer {
         return reply.isDone();
     }
 
-    /** 응답을 기다려 결과 코드를 돌려준다. 시간 안에 응답이 없으면 실패한다. */
+    /** Waits for the reply and returns the result code. Fails if no reply arrives within the limit. */
     public CreateTransferStatus awaitResult(Duration limit) {
         try {
             return TigerBeetleTestLedger.singleStatus(reply.get(limit.toMillis(), TimeUnit.MILLISECONDS));
         } catch (TimeoutException e) {
-            throw new AssertionError(limit + " 안에 " + transfer + " 이체의 응답이 오지 않았습니다", e);
+            throw new AssertionError("No reply to transfer " + transfer + " arrived within " + limit, e);
         } catch (ExecutionException e) {
-            throw new AssertionError(transfer + " 이체가 오류로 끝났습니다", e.getCause());
+            throw new AssertionError("Transfer " + transfer + " ended with an error", e.getCause());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(e);

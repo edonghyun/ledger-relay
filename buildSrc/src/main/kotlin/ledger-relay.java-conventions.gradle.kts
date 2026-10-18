@@ -1,4 +1,4 @@
-// 모든 모듈(라이브러리 넷과 샘플 앱)이 같이 쓰는 설정: Java 21, 테스트 도구, 테스트 실행 규칙
+// Settings shared by all modules (the four libraries and the sample app): Java 21, test tools, test run rules
 import java.time.Duration
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 
@@ -30,13 +30,15 @@ dependencies {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
-    // 테스트 컨테이너의 이미지 버전. 버전 목록 한 곳에서 정한다(compose.yaml과 같은지는 ComposeFileTest가 본다)
+    // Image versions of the test containers, set in one place: the version catalog
+    // (ComposeFileTest checks that compose.yaml uses the same ones)
     systemProperty("ledgerrelay.tigerbeetle.version", libs.findVersion("tigerbeetle").get().requiredVersion)
     systemProperty("ledgerrelay.postgres.version", libs.findVersion("postgres").get().requiredVersion)
-    // 테스트 트리를 스펙 목차처럼 위에서 아래로 읽히게 @Order 순서로 돈다(docs/testing.md)
+    // Run in @Order order so the test tree reads top to bottom like the spec's table of contents (docs/testing.md)
     systemProperty("junit.jupiter.testclass.order.default", "org.junit.jupiter.api.ClassOrderer\$OrderAnnotation")
     systemProperty("junit.jupiter.testmethod.order.default", "org.junit.jupiter.api.MethodOrderer\$OrderAnnotation")
-    // TB 클라이언트는 timeout이 없어 서버가 죽으면 영원히 기다린다. 매달림을 실패로 바꾸는 안전망과 전체 상한
+    // The TB client has no timeout and waits forever if the server dies. A safety net that turns a hang into a
+    // failure, plus an overall limit
     systemProperty("junit.jupiter.execution.timeout.default", "2m")
     timeout = Duration.ofMinutes(15)
     testLogging {

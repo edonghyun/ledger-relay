@@ -4,7 +4,7 @@ import io.github.ledgerrelay.core.spi.TransferIdGenerator;
 import java.math.BigInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** 1부터 차례로 이체 ID를 낸다. 테스트에서 이체 ID를 손으로 쓸 수 있게 한다. */
+/** Issues transfer ids in sequence from 1, so tests can write transfer ids by hand. */
 public final class SequentialTransferIds implements TransferIdGenerator {
 
     private final AtomicLong next = new AtomicLong(1);
