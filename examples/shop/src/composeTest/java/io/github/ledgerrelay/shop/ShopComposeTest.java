@@ -233,8 +233,19 @@ class ShopComposeTest {
         awaitOrder(order, "AUTHORIZED");
         post("/api/orders/" + order + "/cancel");
         awaitOrder(order, "CANCELLED");
-        String timeline = await(SETTLE, "/api/orders/" + order + "/timeline", json -> JsonPath.read(json, "$.buyer") != null);
-        return number(timeline, "$.buyer.heldSatang");
+        // 잔액은 1초마다 모으는 값이다. 취소가 반영될 만큼 기다린 뒤, 연달아 두 번 같은 값을 읽을 때까지 본다
+        long previous = -1;
+        while (true) {
+            Thread.sleep(1_500);
+            String timeline = get("/api/orders/" + order + "/timeline");
+            if (JsonPath.read(timeline, "$.buyer") != null) {
+                long held = number(timeline, "$.buyer.heldSatang");
+                if (held == previous) {
+                    return held;
+                }
+                previous = held;
+            }
+        }
     }
 
     private static void awaitOrder(long order, String state) throws Exception {
