@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import javax.sql.DataSource;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -166,6 +167,36 @@ class DemoScenarioTest extends ShopSpringTest {
     @Order(3)
     @DisplayName("대사를 돌리면")
     class Reconciling {
+
+        @Test
+        @DisplayName("화면 아래 대사는 늦게 끝난 명령도 빠뜨리지 않는다 — 멈췄다 포기된 확정과 그 뒤 예약까지 센다")
+        void theRunningReconciliationCountsCommandsThatFinishLate() throws Exception {
+            // given: 잘못된 확정과 그 뒤 예약이 멈춰 있는 동안 다른 주문이 끝난다(행 순서로는 그 뒤다)
+            long injected = ((Number) JsonPath.read(body(http.post().uri("/api/demo/bad-post").exchange()), "$.id"))
+                    .longValue();
+            String postId = ShopOrder.commandId(injected, "post");
+            awaitHalted(postId);
+            ShopOrder other = shop.checkout(newKey(), 1004, "mouse").order();
+            probe.awaitState(other.id(), OrderState.AUTHORIZED);
+            Thread.sleep(2_000);
+
+            // when: 포기해 멈췄던 명령들이 늦게 끝난다
+            abandon(postId);
+            probe.awaitState(injected, OrderState.CANCELLED);
+            probe.awaitQuiet();
+
+            // then
+            long finished = JdbcClient.create(dataSource).sql("SELECT count(*) FROM ledger_command "
+                    + "WHERE state IN ('APPLIED','REJECTED','SKIPPED')").query(Long.class).single();
+            long deadline = System.nanoTime() + ShopProbe.SETTLE.toNanos();
+            long checked;
+            do {
+                Thread.sleep(200);
+                checked = ((Number) JsonPath.read(body(http.get().uri("/api/consistency").exchange()), "$.checked"))
+                        .longValue();
+            } while (checked != finished && System.nanoTime() < deadline);
+            assertThat(checked).as("대사로 확인한 명령 수").isEqualTo(finished);
+        }
 
         @Test
         @DisplayName("장면을 다 돈 뒤에도 PG와 TB의 불일치가 0건이다")

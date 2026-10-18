@@ -60,7 +60,7 @@ class OperatorController {
         return Map.of("outcome", outcome.name());
     }
 
-    /** 처음부터 끝까지 다시 대사한다. 화면 아래 정합성 칸은 이어서 하는 대사를 따로 돈다. */
+    /** 처음부터 끝까지 대사하고 어긋난 명령의 목록을 돌려준다. 화면 아래 정합성 칸은 같은 대사의 숫자만 1초마다 보인다. */
     @PostMapping("/reconcile")
     ReconcileView reconcile() {
         long after = 0;

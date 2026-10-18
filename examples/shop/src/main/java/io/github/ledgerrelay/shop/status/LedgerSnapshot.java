@@ -39,7 +39,8 @@ class LedgerSnapshot {
     static final Duration STALE_AFTER = Duration.ofSeconds(3);
     /** 처리 중인 확정 없이 이만큼 연달아 어긋나야 broken이다. 한 번은 TB 적용과 PG 커밋 사이를 본 것일 수 있다. */
     static final int BROKEN_AFTER = 3;
-    private static final int RECONCILE_PAGES_PER_REFRESH = 10;
+    /** 갱신마다 대사하는 페이지 상한(1,000건씩). 데모 크기에서는 늘 전부다. 넘으면 앞 5만 건만 본다. */
+    private static final int RECONCILE_PAGES = 50;
     private static final int TRANSFER_PAGE = 8189;
 
     record Snapshot(Instant at, Map<Long, AccountBalance> balances, long doubleTransfers, long checked, long matched,
@@ -53,11 +54,7 @@ class LedgerSnapshot {
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> new Thread(r, "shop-ledger-snapshot"));
     private final AtomicBoolean busy = new AtomicBoolean();
 
-    // 이어서 하는 대사와 중복 이체 세기의 위치. 갱신 스레드만 쓴다
-    private long reconciledUpTo;
-    private long checked;
-    private long matched;
-    private long mismatches;
+    // 중복 이체 세기의 위치와 누계. 갱신 스레드만 쓴다
     private long transfersAfter;
     private final Map<Long, Long> capturedByOrder = new HashMap<>();
     private int unequalInARow;
@@ -108,34 +105,44 @@ class LedgerSnapshot {
         for (long buyer : Accounts.BUYERS) {
             balances.put(buyer, Accounts.balanceOf(client, buyer));
         }
-        reconcileOnward();
+        Reconciled reconciled = reconcileAll();
         long doubleTransfers = countDoubleTransfers();
         long posted = balances.get(Accounts.MERCHANT).creditsPosted();
         boolean equal = posted == paid;
         unequalInARow = equal ? 0 : unequalInARow + 1;
         String verdict;
-        if (mismatches > 0 || doubleTransfers > 0) {
+        if (reconciled.mismatches() > 0 || doubleTransfers > 0) {
             verdict = "broken";
         } else if (equal) {
             verdict = "ok";
         } else {
             verdict = capturesInFlight > 0 || unequalInARow < BROKEN_AFTER ? "settling" : "broken";
         }
-        return new Snapshot(Instant.now(), Map.copyOf(balances), doubleTransfers, checked, matched, mismatches, posted, paid,
-                verdict);
+        return new Snapshot(Instant.now(), Map.copyOf(balances), doubleTransfers, reconciled.checked(), reconciled.matched(),
+                reconciled.mismatches(), posted, paid, verdict);
     }
 
-    private void reconcileOnward() {
-        for (int page = 0; page < RECONCILE_PAGES_PER_REFRESH; page++) {
-            ReconciliationReport report = operator.reconcile(reconciledUpTo, 1000);
-            if (report.lastPosition() == reconciledUpTo) {
-                return;
+    private record Reconciled(long checked, long matched, long mismatches) {
+    }
+
+    /**
+     * 끝난 명령을 처음부터 모두 대사한다. 지난 위치부터 이어서 하면 안 된다. 명령은 행 순서대로 끝나지 않는다(멈췄다 포기된 확정, 워커
+     * 둘의 묶음, 늦게 커밋된 트랜잭션). 위치가 아직 안 끝난 행을 지나가면 그 행은 끝난 뒤에도 영영 대사되지 않는다.
+     */
+    private Reconciled reconcileAll() {
+        long after = 0;
+        long checked = 0;
+        long matched = 0;
+        for (int page = 0; page < RECONCILE_PAGES; page++) {
+            ReconciliationReport report = operator.reconcile(after, 1000);
+            if (report.lastPosition() == after) {
+                break;
             }
             checked += report.checked();
             matched += report.matched();
-            mismatches += report.checked() - report.matched();
-            reconciledUpTo = report.lastPosition();
+            after = report.lastPosition();
         }
+        return new Reconciled(checked, matched, checked - matched);
     }
 
     /**
