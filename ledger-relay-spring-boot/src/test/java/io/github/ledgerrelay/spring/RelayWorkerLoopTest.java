@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("워커 루프 — 스레드가 바퀴를 반복하고, 종료는 상한 안에 끝난다 (스펙 §5.5, 03b)")
+@DisplayName("워커 루프 — 스레드가 바퀴를 반복하고, 종료는 상한 안에 끝난다")
 class RelayWorkerLoopTest {
 
     static final Duration SHORT = Duration.ofMillis(10);

@@ -5,7 +5,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
 /**
- * 화면의 타일과 단계 칸 숫자. 라이브러리의 명령 표를 직접 센다. 데모 크기에서는 질의 하나로 충분하다. 운영 지표는 03c에서
+ * 화면의 타일과 단계 칸 숫자. 라이브러리의 명령 표를 직접 센다. 데모 크기에서는 질의 하나로 충분하다. 운영 지표는 나중에
  * Micrometer로 바꿀 자리다(docs/development.md).
  */
 @Component

@@ -5,7 +5,7 @@ plugins {
     alias(libs.plugins.spring.boot)
 }
 
-// 끝-끝 테스트(03b §7.6): 실제 compose.yaml을 띄운다. 이미지 빌드가 있어 느리므로 test와 나누고 check에 건다
+// 끝-끝 테스트: 실제 compose.yaml을 띄운다. 이미지 빌드가 있어 느리므로 test와 나누고 check에 건다
 val composeTest by sourceSets.creating {
     compileClasspath += sourceSets.main.get().output
     runtimeClasspath += sourceSets.main.get().output
@@ -28,7 +28,7 @@ dependencies {
 }
 
 val composeTestTask = tasks.register<Test>("composeTest") {
-    description = "docker compose up 한 번으로 뜬 샘플 쇼핑몰에 장면 1~5를 돌린다(03b §7.6)"
+    description = "docker compose up 한 번으로 뜬 샘플 쇼핑몰에 장면 1~5를 돌린다"
     group = "verification"
     testClassesDirs = composeTest.output.classesDirs
     classpath = composeTest.runtimeClasspath

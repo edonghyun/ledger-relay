@@ -6,9 +6,9 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 원장 명령 하나(스펙 §2, §6). 명령 1개에는 TB 이체 ID 1개만 대응한다(D7).
+ * 원장 명령 하나. 명령 1개에는 TB 이체 ID 1개만 대응한다.
  *
- * <p>값은 정규화된 상태로 담는다(§5.1). 생략한 선택값은 명시적 기본값이 된다. post·void는 계좌·ledger·code를
+ * <p>값은 정규화된 상태로 담는다. 생략한 선택값은 명시적 기본값이 된다. post·void는 계좌·ledger·code를
  * 예약에서 물려받으므로 0이다. 금액을 생략한 post는 {@link #AMOUNT_MAX}(전액 확정)다. 규칙을 어기면
  * {@link InvalidCommandException}을 던진다. 빌더를 거치지 않고 생성자를 직접 불러도 같은 검증을 받는다.
  *

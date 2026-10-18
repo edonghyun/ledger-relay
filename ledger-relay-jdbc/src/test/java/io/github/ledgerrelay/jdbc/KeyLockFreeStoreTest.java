@@ -29,11 +29,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * 명령 저장소({@code CommandStore})는 순서 키 행을 잡지 않는다(02e P2e-7). 핸들러가 도는 워커 쓰기가 이 저장소만 쓰므로,
+ * 명령 저장소({@code CommandStore})는 순서 키 행을 잡지 않는다. 핸들러가 도는 워커 쓰기가 이 저장소만 쓰므로,
  * 저장소가 속에서 키 행을 잡으면 앱의 "주문 행 → 접수" 트랜잭션과 교착한다. 그래서 다른 트랜잭션이 키 행을 쥔 동안에도
  * 저장소의 모든 메서드가 기다리지 않고 끝나야 한다.
  */
-@DisplayName("명령 저장소는 순서 키 행을 잡지 않는다 — 키 행을 쥔 트랜잭션이 있어도 기다리지 않는다 (02e P2e-7)")
+@DisplayName("명령 저장소는 순서 키 행을 잡지 않는다 — 키 행을 쥔 트랜잭션이 있어도 기다리지 않는다")
 class KeyLockFreeStoreTest {
 
     static final Duration NOT_BLOCKED = Duration.ofSeconds(2);

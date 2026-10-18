@@ -5,7 +5,7 @@ import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
-/** {@code ledger-relay.*} 설정(상위 스펙 §6). 기본값은 스펙의 예시 값이다. */
+/** {@code ledger-relay.*} 설정. */
 @ConfigurationProperties("ledger-relay")
 public record LedgerRelayProperties(
         @DefaultValue Tigerbeetle tigerbeetle,

@@ -7,12 +7,12 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 순서 게이트(스펙 G4, §5.2). 같은 순서 키에서 seq가 더 작은 명령이 모두 최종 상태일 때만 제출한다.
+ * 순서 게이트(G4, docs/design.md). 같은 순서 키에서 seq가 더 작은 명령이 모두 최종 상태일 때만 제출한다.
  * post·void는 참조한 예약이 APPLIED가 아닌 최종 상태로 끝났으면 건너뛴다.
  *
  * <p>애플리케이션 서비스가 claim할 때 이 규칙을 실행한다. 서비스는 {@code sameKey}로 참조한 예약 하나만 넘긴다. 키마다 맨 앞만
  * 후보로 내는 것은 저장소 계약({@code CommandStoreContract})이 지키므로, 앞 미완료 명령 검사({@link GateDecision#CLOSED})는 그
- * 계약이 깨졌을 때를 위한 것이다(02d P2d-10).
+ * 계약이 깨졌을 때를 위한 것이다.
  */
 public final class OrderingGate {
 
@@ -51,7 +51,7 @@ public final class OrderingGate {
                 .filter(q -> q.commandId().equals(reservationId))
                 .findFirst();
         if (reservation.isEmpty()) {
-            // 접수 때 참조 검사(§5.1)를 통과했고, 보관 정책은 미완료 post·void가 참조하는 예약을 지우지 않는다(§5.6).
+            // 접수 때 참조 검사를 통과했고, 보관 정책은 미완료 post·void가 참조하는 예약을 지우지 않는다.
             // 그런데도 없다면 버그나 DB 직접 수정이다. 예약이 충돌(CONFLICT)로 끝났다면 같은 TB ID에 남의 이체가 있어,
             // 보내면 그 이체를 확정할 수 있다. 저장소가 잠긴 예약을 못 읽은 경우라면 확정이 예약보다 먼저 간다.
             // 어느 쪽이든 TB에 보내지 않고 멈춘다(docs/failure-modes.md F10).

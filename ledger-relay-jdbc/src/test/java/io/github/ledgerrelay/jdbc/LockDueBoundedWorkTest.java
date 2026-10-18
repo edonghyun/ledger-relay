@@ -11,11 +11,11 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 /**
- * 한 번의 claim이 읽는 페이지는 "지금 보낼 수 있는 맨 앞" limit개에만 비례한다(02e, F32). 막힌 키 뒤의 백로그, 맨 앞이
+ * 한 번의 claim이 읽는 페이지는 "지금 보낼 수 있는 맨 앞" limit개에만 비례한다(F32). 막힌 키 뒤의 백로그, 맨 앞이
  * backoff 중인 키의 수, 보낼 수 있는 맨 앞의 수 어느 것에도 늘지 않는다. limit 128건을 잠그는 데 약 260페이지를 읽는다.
  * 옛 질의는 백로그 한 건에 약 4페이지를 읽었다.
  */
-@DisplayName("claim 질의가 읽는 양 — 보낼 수 있는 맨 앞 limit개에만 비례한다 (02e, F32)")
+@DisplayName("claim 질의가 읽는 양 — 보낼 수 있는 맨 앞 limit개에만 비례한다 (F32)")
 class LockDueBoundedWorkTest {
 
     static final int LIMIT = 128;
@@ -98,7 +98,7 @@ class LockDueBoundedWorkTest {
     class ManyFinishedHeads {
 
         @Test
-        @DisplayName("넘기기는 limit개 키를 잠그면 멈춘다 — 끝난 이력을 훑지 않는다 (P2e-7)")
+        @DisplayName("넘기기는 limit개 키를 잠그면 멈춘다 — 끝난 이력을 훑지 않는다")
         void passingOnStopsAtTheLimit() {
             // given: TB가 회복된 직후처럼 방금 끝난 맨 앞 2만 개가 넘길 차례를 기다리고, 그 앞에 끝난 이력 5만 건이 있다
             finishedHistory(HISTORY);
@@ -111,7 +111,7 @@ class LockDueBoundedWorkTest {
         }
 
         @Test
-        @DisplayName("막힌 키의 맨 앞이 끝나 넘길 때 그 뒤 대기 2만 건은 읽지 않는다 — 다음 미완료 하나만 찾는다 (P2e-7)")
+        @DisplayName("막힌 키의 맨 앞이 끝나 넘길 때 그 뒤 대기 2만 건은 읽지 않는다 — 다음 미완료 하나만 찾는다")
         void passingOnABlockedKeyDoesNotReadItsBacklog() {
             // given: 키 hot의 맨 앞 hot-1이 방금 끝났고, 그 뒤에 2만 건이 기다린다
             inserted("'hot-' || g", "'hot'", "g", "now()", 1, MANY + 1);
@@ -128,7 +128,7 @@ class LockDueBoundedWorkTest {
 
     @Nested
     @Order(4)
-    @DisplayName("대기를 세면 — 03b health")
+    @DisplayName("대기를 세면 — health")
     class CountingTheBacklog {
 
         @Test
@@ -191,7 +191,7 @@ class LockDueBoundedWorkTest {
                 """.formatted(commandId, orderingKey, seq, nextAttemptAt)).param("from", from).param("to", to).update();
     }
 
-    /** 직접 넣은 행의 맨 앞 표시를 정하고(P2e-5) 통계를 갱신한다. */
+    /** 직접 넣은 행의 맨 앞 표시를 정하고 통계를 갱신한다. */
     private void prepared() {
         storage.rebuildHeads();
         storage.sql().sql("ANALYZE ledger_command").update();

@@ -10,7 +10,7 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * 라이브러리 스키마와 샘플 앱 스키마를 적용한다(03b §7.5). 라이브러리는 스키마를 자동 적용하지 않는다. 이것은 샘플 앱만의 편의다.
+ * 라이브러리 스키마와 샘플 앱 스키마를 적용한다. 라이브러리는 스키마를 자동 적용하지 않는다. 이것은 샘플 앱만의 편의다.
  *
  * <p>compose는 앱 둘을 같은 DB에 동시에 띄운다. 둘이 함께 {@code CREATE TABLE}을 하면 한쪽이 실패해 기동하지 못한다
  * (docs/failure-modes.md F37). 그래서 한 트랜잭션에서 advisory lock을 잡고, 표가 없을 때만 적용한다. 늦은 쪽은 앞쪽이 커밋할

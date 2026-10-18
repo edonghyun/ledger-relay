@@ -10,13 +10,13 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Spring 트랜잭션 매니저 위의 트랜잭션 포트(P2b-12). 앱이 쓰는 매니저(DataSource, JPA)를 그대로 받으므로 접수는 앱
- * 트랜잭션에 합류한다(R16). 이미 열린 트랜잭션이 있으면 합류하고(PROPAGATION_REQUIRED), 없으면 새로 연다.
+ * Spring 트랜잭션 매니저 위의 트랜잭션 포트. 앱이 쓰는 매니저(DataSource, JPA)를 그대로 받으므로 접수는 앱
+ * 트랜잭션에 합류한다. 이미 열린 트랜잭션이 있으면 합류하고(PROPAGATION_REQUIRED), 없으면 새로 연다.
  *
- * <p>새로 여는 트랜잭션(워커 단계)은 READ COMMITTED로 연다(P2b-16). 행 잠금으로 순서를 잡는 설계라, 풀의 기본값이
+ * <p>새로 여는 트랜잭션(워커 단계)은 READ COMMITTED로 연다. 행 잠금으로 순서를 잡는 설계라, 풀의 기본값이
  * REPEATABLE READ여도 다른 워커와 부딪히면 직렬화 실패로 터지지 않고 기다려야 한다. 합류할 때는 앱의 격리 수준을 그대로
  * 둔다(Spring은 합류 시 격리 수준을 바꾸지 않는다). 높은 수준의 앱 트랜잭션에서는 동시 접수가 직렬화 실패로 끝날 수
- * 있으며 재시도는 앱이 한다(P2b-17).
+ * 있으며 재시도는 앱이 한다.
  *
  * <p>JTA({@code JtaTransactionManager})는 지원하지 않는다. 트랜잭션이 시작될 때 DataSource 커넥션이 묶이지 않아 {@link #requireActive()}가
  * 접수를 거부한다. JPA의 {@code DefaultJpaDialect}는 격리 수준 지정을 거부하므로 워커 트랜잭션이 시작하지 못한다(docs/development.md).

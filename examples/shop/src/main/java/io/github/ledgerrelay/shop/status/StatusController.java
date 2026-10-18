@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 화면이 1초마다 부르는 숫자. 모두 PG나 TB의 실제 상태에서 온다(03b 반목표 "가짜 숫자 없음"). */
+/** 화면이 1초마다 부르는 숫자. 모두 PG나 TB의 실제 상태에서 온다(반목표 "가짜 숫자 없음"). */
 @RestController
 class StatusController {
 

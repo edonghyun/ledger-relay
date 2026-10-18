@@ -12,7 +12,7 @@ import com.tigerbeetle.TransferBatch;
 import java.util.List;
 
 /**
- * 원장 계좌(03b §7.2). 기동할 때 만들고, 이미 있으면 그대로 둔다. 구매자는 처음 한 번 자금 계좌에서 충전받는다. 충전 이체 ID가
+ * 원장 계좌. 기동할 때 만들고, 이미 있으면 그대로 둔다. 구매자는 처음 한 번 자금 계좌에서 충전받는다. 충전 이체 ID가
  * 고정이라 다시 기동해도 TB가 {@code exists}로 답하고 두 번 충전하지 않는다.
  */
 public final class Accounts {

@@ -13,7 +13,7 @@ public sealed interface WriteResult {
     record Fenced() implements WriteResult {
     }
 
-    /** 결과 반영 핸들러가 던졌다. 최종 쓰기는 없던 일이 됐고, 받은 결과를 남긴 채 backoff 뒤 다시 잡힌다(§5.4). */
+    /** 결과 반영 핸들러가 던졌다. 최종 쓰기는 없던 일이 됐고, 받은 결과를 남긴 채 backoff 뒤 다시 잡힌다. */
     record HandlerFailed(RuntimeException cause) implements WriteResult {
         public HandlerFailed {
             Objects.requireNonNull(cause, "cause");

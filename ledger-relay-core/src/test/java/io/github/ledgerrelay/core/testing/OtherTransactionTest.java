@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("다른 트랜잭션 어휘 — 동시성 장이 믿는 도구 (docs/testing.md §6)")
+@DisplayName("다른 트랜잭션 어휘 — 동시성 장이 믿는 도구 (docs/testing.md)")
 class OtherTransactionTest {
 
     static final Duration BLOCKED = Duration.ofMillis(300);

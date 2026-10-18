@@ -1,11 +1,11 @@
--- ledger-relay 스키마(스펙 §5.6). 앱의 마이그레이션 도구(Flyway, Liquibase 등)가 적용한다. 라이브러리는 자동 적용하지 않는다.
--- 부호 없는 값(P2b-5): u128은 numeric(39,0), u64는 numeric(20,0), u32는 bigint, u16은 integer. 범위는 CHECK가 막는다.
--- 열거값(P2b-6): state·kind·skip_reason은 Java 상수 이름, known_result·result_code는 결과 코드의 저장 이름(wireName).
+-- ledger-relay 스키마. 앱의 마이그레이션 도구(Flyway, Liquibase 등)가 적용한다. 라이브러리는 자동 적용하지 않는다.
+-- 부호 없는 값: u128은 numeric(39,0), u64는 numeric(20,0), u32는 bigint, u16은 integer. 범위는 CHECK가 막는다.
+-- 열거값: state·kind·skip_reason은 Java 상수 이름, known_result·result_code는 결과 코드의 저장 이름(wireName).
 -- ID(command_id, ordering_key, reservation_command_id)는 바이트로 비교하는 불투명 값이라 COLLATE "C"다. OS collation이 바뀌어도
--- 유일 인덱스가 어긋나지 않는다(F31). 순서 키 행은 지우지 않는다: 지우면 경쟁 중에 순번이 1로 돌아간다(02d P2d-11).
+-- 유일 인덱스가 어긋나지 않는다(F31). 순서 키 행은 지우지 않는다: 지우면 경쟁 중에 순번이 1로 돌아간다.
 
--- 순서 키마다 다음에 낼 순번. 접수가 이 행을 잠그고 커밋까지 놓지 않으므로 seq 순서가 커밋 순서와 같다(R12, P2b-8).
--- 이 행을 잡는 것은 접수와 claim의 맨 앞 넘기기뿐이다. 결과를 쓰고 핸들러를 부르는 트랜잭션은 잡지 않는다(02e P2e-7).
+-- 순서 키마다 다음에 낼 순번. 접수가 이 행을 잠그고 커밋까지 놓지 않으므로 seq 순서가 커밋 순서와 같다.
+-- 이 행을 잡는 것은 접수와 claim의 맨 앞 넘기기뿐이다. 결과를 쓰고 핸들러를 부르는 트랜잭션은 잡지 않는다.
 CREATE TABLE ledger_ordering_key (
     ordering_key     text COLLATE "C" PRIMARY KEY,
     next_seq         bigint NOT NULL CHECK (next_seq >= 1)
@@ -40,17 +40,17 @@ CREATE TABLE ledger_command (
     result_code            text,
     handler_failures       integer NOT NULL DEFAULT 0,
     skip_reason            text CHECK (skip_reason IN ('RESERVATION_NOT_APPLIED','ABANDONED_BY_OPERATOR')),
-    -- 이 행을 넣은 트랜잭션. 같은 트랜잭션에서 접수한 예약을 참조하는지 가린다(P2b-2). xid8은 랩어라운드가 없다.
+    -- 이 행을 넣은 트랜잭션. 같은 트랜잭션에서 접수한 예약을 참조하는지 가린다. xid8은 랩어라운드가 없다.
     accepted_xact          xid8 NOT NULL DEFAULT pg_current_xact_id(),
     accepted_at            timestamptz NOT NULL DEFAULT now(),
     completed_at           timestamptz,
-    -- 멈춘(HALTED) 행만: 왜, 언제 멈췄는가(03b 운영자 포트). 포기해 끝나면 비운다
+    -- 멈춘(HALTED) 행만: 왜, 언제 멈췄는가(운영자 포트). 포기해 끝나면 비운다
     halt_reason            text CHECK (halt_reason IN ('RESERVATION_MISSING','RESERVATION_NOT_EARLIER','MALFORMED_ROW')),
     halted_at              timestamptz,
     -- 그 키에서 지금 차례인 명령인가. 넣을 때 키에 맨 앞이 없으면 켠다. 명령이 끝나도 그대로 두고, 다음 claim이 그 키
-    -- 행을 잡아 다음 미완료로 넘긴다(02e P2e-7). DB를 직접 고친 뒤에는 rebuild-heads.sql로 다시 계산한다(P2e-5)
+    -- 행을 잡아 다음 미완료로 넘긴다. DB를 직접 고친 뒤에는 rebuild-heads.sql로 다시 계산한다
     is_head                boolean NOT NULL DEFAULT false,
-    -- 보낼 수 있게 되는 시각: 접수 명령은 다음 시도 시각, 처리 중 명령은 lease 만료 시각(02e P2e-1)
+    -- 보낼 수 있게 되는 시각: 접수 명령은 다음 시도 시각, 처리 중 명령은 lease 만료 시각
     ready_at               timestamptz GENERATED ALWAYS AS (
         CASE WHEN state = 'CLAIMED' THEN lease_expires_at ELSE next_attempt_at END) STORED,
     UNIQUE (ordering_key, seq),
@@ -122,25 +122,25 @@ CREATE TABLE ledger_command (
         'overflows_credits', 'overflows_timeout', 'exceeds_credits', 'exceeds_debits'))
 );
 
--- 미완료 명령의 키별 맨 앞 판정(§5.2, R7). HALTED도 키를 막으므로 넣는다(F9).
+-- 미완료 명령의 키별 맨 앞 판정. HALTED도 키를 막으므로 넣는다(F9).
 CREATE INDEX ledger_command_unfinished ON ledger_command (ordering_key, seq)
     WHERE state IN ('PENDING','CLAIMED','HALTED');
 
--- 키마다 맨 앞은 하나다. 표시를 고치는 쪽에 버그가 있어도 둘이 되지 않게 DB가 막는다(02e P2e-3).
+-- 키마다 맨 앞은 하나다. 표시를 고치는 쪽에 버그가 있어도 둘이 되지 않게 DB가 막는다.
 CREATE UNIQUE INDEX ledger_command_one_head ON ledger_command (ordering_key) WHERE is_head;
 
--- claim 후보(§5.2, lockDue)를 보낼 수 있게 된 시각 순서로 고른다. 맨 앞 명령만 담으므로 끝난 이력(F19)도, 막힌 키 뒤의
--- 백로그도 읽지 않고, 인덱스 순서가 곧 후보 순서라 limit개를 잠그면 멈춘다(02e P2e-3, F32).
+-- claim 후보(lockDue)를 보낼 수 있게 된 시각 순서로 고른다. 맨 앞 명령만 담으므로 끝난 이력(F19)도, 막힌 키 뒤의
+-- 백로그도 읽지 않고, 인덱스 순서가 곧 후보 순서라 limit개를 잠그면 멈춘다(F32).
 CREATE INDEX ledger_command_ready ON ledger_command (ready_at, id)
     WHERE is_head AND state IN ('PENDING','CLAIMED');
 
--- 끝났는데 아직 맨 앞인 명령. claim이 넘길 키를 찾는다. 넘기고 나면 빠지므로 방금 끝난 명령만 담긴다(02e P2e-7).
+-- 끝났는데 아직 맨 앞인 명령. claim이 넘길 키를 찾는다. 넘기고 나면 빠지므로 방금 끝난 명령만 담긴다.
 CREATE INDEX ledger_command_finished_head ON ledger_command (id)
     WHERE is_head AND state IN ('APPLIED','REJECTED','CONFLICT','SKIPPED');
 
--- 멈춘 명령 목록(운영자 포트, 03b). 멈춘 명령만 담으므로 작다.
+-- 멈춘 명령 목록(운영자 포트). 멈춘 명령만 담으므로 작다.
 CREATE INDEX ledger_command_halted ON ledger_command (id) WHERE state = 'HALTED';
 
--- 대기·처리 중 명령(health, 03b). 가장 오래된 대기를 첫 항목에서 읽고, 개수를 상한까지만 센다. 장애로 대기가 커져도 health가
+-- 대기·처리 중 명령(health). 가장 오래된 대기를 첫 항목에서 읽고, 개수를 상한까지만 센다. 장애로 대기가 커져도 health가
 -- 그만큼 느려지지 않게 한다.
 CREATE INDEX ledger_command_waiting ON ledger_command (id) WHERE state IN ('PENDING','CLAIMED');

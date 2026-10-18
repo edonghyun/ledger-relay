@@ -13,7 +13,7 @@ class JdbcLedgerRelayTest extends LedgerRelayContract {
         return PostgresStorage.withDataSourceTransactions();
     }
 
-    /** 어느 장이 끝나도 맨 앞 표시와 미완료 개수가 행과 맞다(02e P2e-4). */
+    /** 어느 장이 끝나도 맨 앞 표시와 미완료 개수가 행과 맞다. */
     @AfterEach
     void theHeadsStayConsistent() {
         ((PostgresStorage) storage).assertHeadsConsistent();

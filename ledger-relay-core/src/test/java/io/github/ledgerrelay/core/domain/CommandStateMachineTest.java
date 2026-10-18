@@ -30,7 +30,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
-@DisplayName("토큰을 다루는 상태 기계 — 스펙 §4.3, §5.2~§5.4, G5")
+@DisplayName("토큰을 다루는 상태 기계 — G5")
 class CommandStateMachineTest {
 
     @Nested
@@ -216,7 +216,7 @@ class CommandStateMachineTest {
 
     @Nested
     @Order(3)
-    @DisplayName("이미 아는 TB 결과가 있으면 — §5.4")
+    @DisplayName("이미 아는 TB 결과가 있으면")
     class WithAKnownResult {
 
         static final CommandRow HELD_KNOWING_EXCEEDS_CREDITS =
@@ -257,7 +257,7 @@ class CommandStateMachineTest {
 
     @Nested
     @Order(4)
-    @DisplayName("오래된 토큰이거나 처리 중이 아닌 행에 쓰면 — G5, E3")
+    @DisplayName("오래된 토큰이거나 처리 중이 아닌 행에 쓰면 — G5")
     class FencedWrites {
 
         static List<Step.Write> everyWriteWithToken(long token) {
@@ -318,7 +318,7 @@ class CommandStateMachineTest {
 
     @Nested
     @Order(5)
-    @DisplayName("멈춘 명령을 운영자가 포기하면 — §5.2 HALT")
+    @DisplayName("멈춘 명령을 운영자가 포기하면 — HALT")
     class AbandoningAHaltedCommand {
 
         static final CommandRow HALTED_WITH_TOKEN_1 =

@@ -31,7 +31,7 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 /** 정합성을 일부러 깨므로 다른 테스트와 나누지 않는 PG·TB 위에서 돈다. */
 @SpringBootTest
 @AutoConfigureMockMvc
-@DisplayName("중복 이체 — 한 주문에 확정이 두 번 들어오면 숫자가 그것을 드러낸다 (03b §7.1)")
+@DisplayName("중복 이체 — 한 주문에 확정이 두 번 들어오면 숫자가 그것을 드러낸다")
 class DoubleTransferTest {
 
     static final ShopTestEnvironment ENVIRONMENT = ShopTestEnvironment.isolated();

@@ -10,8 +10,8 @@ import com.tngtech.archunit.core.importer.ImportOption;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/** TB 어댑터는 판단하지 않는다(스펙 §7). 종류→flags, 결과 코드 이름만 옮긴다. 재시도·분류·전이는 core에 있다. */
-@DisplayName("TB 어댑터의 경계 — 판단은 core에만 (스펙 §7)")
+/** TB 어댑터는 판단하지 않는다. 종류→flags, 결과 코드 이름만 옮긴다. 재시도·분류·전이는 core에 있다. */
+@DisplayName("TB 어댑터의 경계 — 판단은 core에만")
 class TigerBeetleArchitectureTest {
 
     static final String CORE = "io.github.ledgerrelay.core";

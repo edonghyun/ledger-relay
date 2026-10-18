@@ -26,7 +26,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
-@DisplayName("주문 — 승인(예약) 뒤 출고 때 매입(확정), 취소는 해제 (03b §7.2)")
+@DisplayName("주문 — 승인(예약) 뒤 출고 때 매입(확정), 취소는 해제")
 class OrderFlowTest extends ShopSpringTest {
 
     static final long EARBUDS = 149_000;

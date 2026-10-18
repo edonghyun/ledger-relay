@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-@DisplayName("기동 준비 — 앱 둘이 같은 DB에 떠도 스키마는 한 번, 계좌는 그대로 (03b §7.2, §7.5)")
+@DisplayName("기동 준비 — 앱 둘이 같은 DB에 떠도 스키마는 한 번, 계좌는 그대로")
 class ShopBootstrapTest {
 
     final ShopTestEnvironment environment = ShopTestEnvironment.shared();

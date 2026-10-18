@@ -22,7 +22,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
-@DisplayName("저장 상태 — 스펙 §4.1, §4.4")
+@DisplayName("저장 상태")
 class StoredStateTest {
 
     @Nested
@@ -69,7 +69,7 @@ class StoredStateTest {
         }
     }
 
-    /** 스펙 §4.2 조회 상태 표. submitCount는 그 행이 TB에 제출된 횟수다. */
+    /** 조회 상태 표. submitCount는 그 행이 TB에 제출된 횟수다. */
     static final String QUERY_STATE_TABLE = """
             PENDING,  0, ACCEPTED
             PENDING,  1, IN_PROGRESS
@@ -85,7 +85,7 @@ class StoredStateTest {
 
     @Nested
     @Order(2)
-    @DisplayName("조회할 때 — §4.2")
+    @DisplayName("조회할 때")
     class WhenQueried {
 
         @ParameterizedTest(name = "{0}, 제출 {1}회 → {2}", quoteTextArguments = false)

@@ -11,7 +11,7 @@ import java.util.Objects;
  * jdbc: {@code UPDATE … WHERE id = ? AND state = ? AND lease_token = ?}.
  *
  * @param next  상태 기계가 계산한 다음 행. 저장소는 그대로 쓴다
- * @param stamp 함께 바꿀 시각 컬럼. 시각은 저장소의 시계(PG now())로 정한다(§5.2)
+ * @param stamp 함께 바꿀 시각 컬럼. 시각은 저장소의 시계(PG now())로 정한다
  */
 public record RowChange(long rowId, StoredState expectedState, long expectedToken, CommandRow next, Stamp stamp) {
 

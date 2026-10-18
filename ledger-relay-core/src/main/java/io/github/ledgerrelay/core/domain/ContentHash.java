@@ -11,7 +11,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * 명령 내용의 정규화 해시(스펙 §5.1, G7). 같은 commandId로 다시 접수할 때 내용이 같은지를 이 값으로 비교한다.
+ * 명령 내용의 정규화 해시(G7). 같은 commandId로 다시 접수할 때 내용이 같은지를 이 값으로 비교한다.
  *
  * <p>이 값은 DB({@code content_hash})에 저장된다. 인코딩을 바꾸면 이미 저장된 명령과의 비교가 깨진다.
  * 바꿀 때는 {@link #VERSION}을 올리고 이전 버전과 어떻게 비교할지 함께 정한다.

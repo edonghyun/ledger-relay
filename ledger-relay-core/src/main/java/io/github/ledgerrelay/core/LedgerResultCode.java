@@ -6,7 +6,7 @@ import java.util.stream.Collectors;
 
 /**
  * TB {@code create_transfers} 결과 코드(TB 0.17.9 기준 68종). 상수 이름은 TB Java 클라이언트의
- * {@code CreateTransferStatus}와 같다(P1-9). 두 enum이 정확히 같은지는 tigerbeetle 모듈의
+ * {@code CreateTransferStatus}와 같다. 두 enum이 정확히 같은지는 tigerbeetle 모듈의
  * {@code ResultCodeGuardTest}가 확인한다.
  *
  * <p>DB에는 {@link #wireName()}을 저장한다. 상수 이름은 TB 클라이언트를 따라 바뀔 수 있다.

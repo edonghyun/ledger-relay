@@ -2,7 +2,7 @@ package io.github.ledgerrelay.core.domain;
 
 import java.util.Set;
 
-/** 전이표 한 칸의 결과(스펙 §4.3). */
+/** 전이표 한 칸의 결과. */
 public record Transition(Outcome outcome, StoredState to, Set<Effect> effects) {
 
     public enum Outcome {
@@ -19,17 +19,17 @@ public record Transition(Outcome outcome, StoredState to, Set<Effect> effects) {
     }
 
     public enum Effect {
-        /** lease_token += 1, lease_expires_at 갱신(§5.2). */
+        /** lease_token += 1, lease_expires_at 갱신. */
         INCREMENT_LEASE_TOKEN,
         /** 결과 반영 핸들러를 같은 트랜잭션에서 실행한다(G6). */
         RUN_HANDLER,
         /** next_attempt_at = now() + backoff. */
         BACKOFF,
-        /** TB 결과를 known_result로 남겨 다음 claim이 TB를 건너뛰게 한다(§5.4). */
+        /** TB 결과를 known_result로 남겨 다음 claim이 TB를 건너뛰게 한다. */
         KEEP_KNOWN_RESULT,
         /** submit_count += 1. 처음이면 first_submitted_at = now(). */
         RECORD_SUBMISSION,
-        /** handler_failures += 1(§5.4). 막힌 키를 지표로 드러내는 근거다. */
+        /** handler_failures += 1. 막힌 키를 지표로 드러내는 근거다. */
         COUNT_HANDLER_FAILURE
     }
 

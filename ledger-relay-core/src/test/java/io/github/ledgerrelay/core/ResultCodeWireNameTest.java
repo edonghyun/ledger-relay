@@ -14,7 +14,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-@DisplayName("결과 코드의 저장 이름 — 스펙 §5.6 result_code·known_result 컬럼")
+@DisplayName("결과 코드의 저장 이름 — result_code·known_result 컬럼")
 class ResultCodeWireNameTest {
 
     /**

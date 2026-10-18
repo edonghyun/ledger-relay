@@ -23,7 +23,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
 /**
- * TB Java 클라이언트 위의 {@link LedgerClient}(03a P3a-9·P3a-10). 묶음 하나를 TB 요청 하나로 보낸다.
+ * TB Java 클라이언트 위의 {@link LedgerClient}. 묶음 하나를 TB 요청 하나로 보낸다.
  * 클라이언트의 수명은 만든 쪽이 관리하며 이 어댑터는 닫지 않는다. 결과 개수는 검사하지 않는다. 그것은 워커의 판단이다.
  */
 public final class TigerBeetleLedgerClient implements LedgerClient {
@@ -110,7 +110,7 @@ public final class TigerBeetleLedgerClient implements LedgerClient {
 
     /**
      * 닫힌 클라이언트, 세션 축출(clients_max 초과), 클라이언트·서버 버전 불일치는 다시 보내도 회복되지 않는다. 일시적 실패와
-     * 구분되게 {@link LedgerUnavailableException}으로 감싼다(02d P2d-8). 나머지는 그대로 둔다.
+     * 구분되게 {@link LedgerUnavailableException}으로 감싼다. 나머지는 그대로 둔다.
      */
     private static RuntimeException unavailableOrAsIs(Throwable failure) {
         if (failure instanceof ClientClosedException || failure instanceof ClientEvictedException

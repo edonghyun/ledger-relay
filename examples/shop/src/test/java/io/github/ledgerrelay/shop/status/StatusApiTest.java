@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 
-@DisplayName("상태 API — 화면의 숫자는 모두 PG와 TB에서 온다 (03b §7.1, 반목표)")
+@DisplayName("상태 API — 화면의 숫자는 모두 PG와 TB에서 온다 (반목표)")
 class StatusApiTest extends ShopSpringTest {
 
     @Autowired

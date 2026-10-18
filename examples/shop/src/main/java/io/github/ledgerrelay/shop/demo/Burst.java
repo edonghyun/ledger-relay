@@ -13,7 +13,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
- * 여러 구매자의 주문을 각기 다른 키로 한꺼번에 넣는다(03b §7.1). 워커 둘이 같은 명령을 함께 집지 않고 나눠 처리하는 것을
+ * 여러 구매자의 주문을 각기 다른 키로 한꺼번에 넣는다. 워커 둘이 같은 명령을 함께 집지 않고 나눠 처리하는 것을
  * 보이려는 장면이다. 같은 키 경쟁은 더블 클릭 장면이 맡는다.
  */
 @Component

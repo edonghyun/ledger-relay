@@ -22,7 +22,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
-@DisplayName("명령 모델 — 스펙 §6 빌더와 §5.1 정규화")
+@DisplayName("명령 모델 — 빌더와 정규화")
 class LedgerCommandTest {
 
     @Nested

@@ -20,7 +20,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-@DisplayName("내용 해시 — 스펙 §5.1 정규화, G7 내용 무결성")
+@DisplayName("내용 해시 — 정규화, G7 내용 무결성")
 class ContentHashTest {
 
     @Nested

@@ -4,29 +4,31 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 
 - 재현은 테스트로 한다. 테스트 이름을 적어 두면 그 장애가 다시 생겼을 때 어느 테스트가 실패할지 알 수 있다.
 - 처음부터 통과하는 테스트는 코드를 일부러 망가뜨려(대조군) 정말 실패하는지 확인한다. 대조군 결과도 적는다.
-- 수치는 실제로 잰 것만 적는다. 운영 지표와 실험(스펙 §9 E1~E10)은 해당 단계에서 채운다.
+- 수치는 실제로 잰 것만 적는다. 운영 지표와 실험은 해당 단계에서 채운다.
 
-## 1. 막은 장애 (F1~F10은 02a core, F11~F19는 02b jdbc, F20은 1단계 리뷰, F21~F25는 03a 워커, F26은 테스트 환경, F27부터 02d 전체 리뷰, F32·F33은 02e, F34~F36은 03b, F37부터 샘플 쇼핑몰, F40은 그때 찾은 라이브러리 결함)
+## 1. 막은 장애
+
+F1~F10은 core의 규칙, F11~F19는 PostgreSQL 저장소, F21~F25는 워커, F26은 테스트 환경, F27~F36은 리뷰에서 찾은 core·저장소·Spring 모듈의 결함, F37~F44는 샘플 쇼핑몰을 만들며 찾은 것이다(F40은 그때 찾은 라이브러리 결함).
 
 ### F1. 막힌 키의 대기 명령이 claim 한도를 다 차지해 다른 키가 굶는다
 
 - **깨지는 것**: 한 키의 앞 명령이 처리 중이면 뒤 명령들은 기다린다. 저장소가 이 대기 명령들까지 후보로 내면, 한 번에 잡는 한도(limit)가 대기 명령으로 차서 다른 키가 영영 잡히지 않는다.
 - **재현**: `CommandStoreContract` › claim 후보를 잠그면 › `aBlockedKeyDoesNotUseUpTheLimit`. 키 a에 명령 셋이 있고 맨 앞이 처리 중일 때, limit 1로 잠그면 키 b의 명령이 나와야 한다.
-- **구조**: 저장소는 순서 키마다 맨 앞의 미완료 명령만 후보로 낸다(P2a-19). 키마다 맨 앞 판정(G4)은 저장소 계약(`CommandStoreContract`)이 메모리와 PG 양쪽에서 고정하며, core는 이것을 다시 확인하지 않는다. core의 게이트는 참조한 예약만 본다(02d P2d-10).
+- **구조**: 저장소는 순서 키마다 맨 앞의 미완료 명령만 후보로 낸다. 키마다 맨 앞 판정(G4)은 저장소 계약(`CommandStoreContract`)이 메모리와 PG 양쪽에서 고정하며, core는 이것을 다시 확인하지 않는다. core의 게이트는 참조한 예약만 본다.
 - **확인**: 맨 앞 거르기를 지운 대조군에서 3건이 실패한다. jdbc에서 행 잠금과 함께 다시 확인했다(F12).
 
 ### F2. lease가 끝나 다른 워커가 가져간 명령에 앞 워커가 결과를 쓴다
 
 - **깨지는 것**: 느린 워커가 늦게 쓴 결과가 반영되면, 결과가 두 번 쓰이거나 핸들러가 두 번 실행된다(G5).
 - **재현**: `LedgerRelayContract` › lease가 끝나 다른 워커가 잡은 뒤 앞 워커가 쓰면 › `theLateResultIsFenced`, `theCurrentWorkerWins`.
-- **구조**: claim할 때마다 lease 토큰이 오른다. 모든 쓰기는 "상태가 처리 중이고 토큰이 같을 때만"이다. 상태 기계에서 한 번, 저장소의 조건부 쓰기에서 한 번 막는다(P2a-7).
+- **구조**: claim할 때마다 lease 토큰이 오른다. 모든 쓰기는 "상태가 처리 중이고 토큰이 같을 때만"이다. 상태 기계에서 한 번, 저장소의 조건부 쓰기에서 한 번 막는다.
 - **확인**: 서비스가 토큰을 보지 않게 바꾼 대조군에서 2건이 실패한다.
 
 ### F3. 결과는 기록됐는데 결과 반영 핸들러의 효과는 없다
 
 - **깨지는 것**: 핸들러가 던진 뒤에도 최종 상태가 커밋되면, 앱의 업무 상태(주문, 지갑)가 원장 결과를 영영 따라가지 못한다(G6).
 - **재현**: `LedgerRelayContract` › 결과 반영 핸들러가 실패하면 › `theResultIsRolledBackWithTheHandler`. 저장소 쪽은 `CommandStoreContract` › `aThrowingTransactionUndoesTheWrite`.
-- **구조**: 최종 쓰기와 핸들러를 한 트랜잭션에서 실행한다. 핸들러가 던지면 롤백하고, 새 트랜잭션에서 실패를 기록한다(P2a-22).
+- **구조**: 최종 쓰기와 핸들러를 한 트랜잭션에서 실행한다. 핸들러가 던지면 롤백하고, 새 트랜잭션에서 실패를 기록한다.
 - **확인**: 핸들러 예외에도 커밋하는 대조군에서 4건이 실패한다. PostgreSQL에서 DB에 쓰는 핸들러로 다시 확인했다(`HandlerAtomicityTest`). 핸들러가 트랜잭션 밖 별도 커넥션(auto-commit)으로 쓰는 대조군에서 2건이 실패한다. 쓴 뒤 던지면 앱 테이블에 기록이 남고(`neitherTheResultNorTheAppRowRemains`), 재시도는 기본 키 위반으로 다시 실패해 적용으로 끝나지 못한다(`retryingLeavesExactlyOneAppRow`). 처음 쓴 재시도 테스트는 기록 수만 봐서 이 대조군을 놓쳤고, 최종 상태 확인을 더해 고쳤다.
 
 ### F4. 핸들러 실패 뒤 다시 보내면 원래 거절 사유가 사라진다
@@ -52,7 +54,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 
 ### F7. 저장소가 핸들러 실패 횟수를 버려 backoff가 늘지 않는다
 
-- **깨지는 것**: 계속 실패하는 핸들러가 늘 첫 대기만큼만 쉬고 다시 잡힌다. 막힌 키를 드러내는 지표(`handler_failures`)도 0으로 보인다.
+- **깨지는 것**: 계속 실패하는 핸들러가 늘 첫 대기만큼만 쉬고 다시 잡힌다. 막힌 키를 드러내는 핸들러 실패 횟수(`handler_failures` 열)도 0으로 보인다.
 - **재현**: `CommandStoreContract` › `everyColumnOfTheRowIsKept`, `LedgerRelayContract` › `aSecondFailureWaitsTwiceAsLong`.
 - **구조**: 두 계약이 행 전체의 왕복과 대기 증가를 고정한다. jdbc 저장소도 같은 계약을 통과해야 한다.
 - **확인**: 핸들러 실패 횟수만 버리는 대조군에서 정확히 이 2건이 실패한다.
@@ -71,64 +73,64 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **1차 대응의 한계**: 처음에는 멈추기만 했다. 행은 접수 상태로 남아 claim할 때마다 다시 알리고 limit 한 칸을 차지했으며, 조회하면 '접수됨'으로 보여 원인을 찾기 어려웠다.
 - **재현**: `LedgerRelayContract` › 같은 키에서 확정이 자기가 참조한 예약보다 앞 순번인 상태에서. 순서를 뒤집은 행을 접수 검사 없이 저장소에 바로 넣는다. 계약이므로 jdbc 저장소도 같은 장을 통과해야 한다.
 - **구조**: 게이트가 멈추면 그 명령을 토큰을 올려 HALTED로 주차한다. HALTED는 최종 상태가 아니라 그 키의 맨 앞으로 남아 뒤 명령을 막고(G4), claim 후보가 아니므로 limit을 차지하지 않으며 알림은 한 번이다. 다른 키는 그대로 처리된다. 데드레터큐처럼 빼내지 않는 이유는 3절에 있다.
-- **사후 처리**: 운영자가 원인을 고친 뒤 `abandonHalted(commandId)`로 포기한다. 확정은 `SKIPPED`(이유 `ABANDONED_BY_OPERATOR`)로 끝나고, 같은 트랜잭션에서 핸들러가 그 이유를 받는다. 키가 풀려 뒤의 예약이 처리되고, 앱은 새 commandId로 다시 확정한다. TB에는 한 번도 가지 않았으므로 원장에 잘못된 이동이 없다. 핸들러가 실패하거나 `Error`를 던지면 멈춘 그대로 남아 다시 포기할 수 있다. `abandonHalted`는 지금 내부 서비스(`CommandLifecycle`)에만 있고, 앱이 부를 공개 포트(멈춘 명령 목록·포기)는 03b에서 낸다. 이미 TB에 보낸 적이 있는 명령은 포기를 거부한다(F27).
-- **확인**: HALT를 OPEN으로 처리한 대조군에서 10건, HALTED를 후보로 내는 저장소 대조군에서 4건이 실패한다. 저장소 계약은 멈춘 행의 완료 시각이 비어 있음을 고정한다(완료 시각을 찍는 대조군에서 실패). 멈춘 키 수 지표와 health는 3단계에서 단다.
+- **사후 처리**: 운영자가 원인을 고친 뒤 `abandonHalted(commandId)`로 포기한다. 확정은 `SKIPPED`(이유 `ABANDONED_BY_OPERATOR`)로 끝나고, 같은 트랜잭션에서 핸들러가 그 이유를 받는다. 키가 풀려 뒤의 예약이 처리되고, 앱은 새 commandId로 다시 확정한다. TB에는 한 번도 가지 않았으므로 원장에 잘못된 이동이 없다. 핸들러가 실패하거나 `Error`를 던지면 멈춘 그대로 남아 다시 포기할 수 있다. 앱은 공개 포트 `LedgerRelayOperator`(멈춘 명령 목록·포기)로 이것을 부른다. 이미 TB에 보낸 적이 있는 명령은 포기를 거부한다(F27).
+- **확인**: HALT를 OPEN으로 처리한 대조군에서 10건, HALTED를 후보로 내는 저장소 대조군에서 4건이 실패한다. 저장소 계약은 멈춘 행의 완료 시각이 비어 있음을 고정한다(완료 시각을 찍는 대조군에서 실패). 멈춘 명령 수는 health(`halted`)와 운영자 포트(`haltedCommands`)로 본다.
 
 ### F10. 확정이 참조한 예약 행이 없다 (HALT 유지, 판단 번복)
 
 - **깨지는 것**: 예약이 충돌(CONFLICT)로 끝났다면 TB에는 같은 이체 ID로 **다른 내용의 이체**가 있다. 그 상태에서 확정을 보내면 남의 pending 이체를 금액 전체로 확정할 수 있다. 저장소가 잠긴 예약 행을 읽지 못해 "없음"으로 보인 경우라면 확정이 예약보다 먼저 가서 F9와 같은 피해가 난다.
-- **판단의 변화**: 한때 "예약의 TB 이체 ID를 접수 때 고정하므로(P2a-20) 엉뚱한 예약을 확정할 길이 없다. 보관 정책이 끝난 예약을 지운 것이니 TB에 맡기자"고 판단해 게이트를 OPEN으로 바꿨다. 리뷰에서 두 가지가 틀렸음이 드러났다. 첫째, ID가 고정돼도 그 ID에 TB가 가진 이체가 우리 것이라는 보장이 없다(CONFLICT). 둘째, 스펙의 보관 정책은 미완료 확정이 참조하는 예약을 지우지 않으므로 "행이 없음"은 정상 경로가 아니다. 그래서 되돌렸다.
+- **판단의 변화**: 한때 "예약의 TB 이체 ID를 접수 때 고정하므로 엉뚱한 예약을 확정할 길이 없다. 보관 정책이 끝난 예약을 지운 것이니 TB에 맡기자"고 판단해 게이트를 OPEN으로 바꿨다. 리뷰에서 두 가지가 틀렸음이 드러났다. 첫째, ID가 고정돼도 그 ID에 TB가 가진 이체가 우리 것이라는 보장이 없다(CONFLICT). 둘째, 스펙의 보관 정책은 미완료 확정이 참조하는 예약을 지우지 않으므로 "행이 없음"은 정상 경로가 아니다. 그래서 되돌렸다.
 - **재현**: `LedgerRelayContract` › 확정이 참조한 예약 행이 없는 상태에서. 게이트는 `OrderingGateTest` › `haltsWhenTheReservationIsMissing`.
 - **구조**: F9와 같이 멈추고 HALTED로 주차한다. 멈춤이 이제 싸므로(한 번 알림, limit을 차지하지 않음, 포기 조치 있음) 보내는 쪽으로 바꿀 이유가 없다.
-- **확인**: OPEN으로 되돌린 대조군에서 3건이 실패한다. `lockDue`가 참조 예약을 잠금과 상관없이 읽는지는 02b 동시성 장에서 확인했다(F13).
+- **확인**: OPEN으로 되돌린 대조군에서 3건이 실패한다. `lockDue`가 참조 예약을 잠금과 상관없이 읽는지는 PostgreSQL 동시성 테스트에서 확인했다(F13).
 
 ### F11. 같은 트랜잭션에서 접수한 예약을 확정이 참조한다
 
-- **깨지는 것**: 스펙 §5.1-3은 확정·해제가 참조하는 예약이 "이미 커밋되어" 있기를 요구한다. 같은 앱 트랜잭션 안에서 예약과 확정을 함께 접수하면 두 명령의 운명이 한 트랜잭션에 묶인다. 그 트랜잭션의 다른 쿼리가 실패해 롤백되면 둘 다 사라지는 것은 괜찮지만, 앱이 저장점(savepoint)으로 예약만 되돌리면 참조할 곳이 없는 확정이 남는다. 그러면 F10처럼 멈춘다. 메모리 저장소는 이 경우를 받아들이고 있었다.
+- **깨지는 것**: 접수 규칙은 확정·해제가 참조하는 예약이 "이미 커밋되어" 있기를 요구한다. 같은 앱 트랜잭션 안에서 예약과 확정을 함께 접수하면 두 명령의 운명이 한 트랜잭션에 묶인다. 그 트랜잭션의 다른 쿼리가 실패해 롤백되면 둘 다 사라지는 것은 괜찮지만, 앱이 저장점(savepoint)으로 예약만 되돌리면 참조할 곳이 없는 확정이 남는다. 그러면 F10처럼 멈춘다. 메모리 저장소는 이 경우를 받아들이고 있었다.
 - **재현**: `LedgerRelayContract` › 같은 앱 트랜잭션에서 예약을 접수하고 이어서 그 예약을 참조하면 › `thePostIsRefused`. 저장소 표시는 `CommandStoreContract` › `aRowIsMarkedAsAcceptedInThisTransactionUntilCommit`.
-- **구조**: 저장소는 사실만 알려 준다. `CommandRecord.acceptedInThisTransaction()`은 그 행을 지금 트랜잭션이 넣었는지를 나타낸다. PostgreSQL에서는 `accepted_xact xid8`과 `pg_current_xact_id_if_assigned()`를 비교한다. 거부는 서비스(`CommandLifecycle`)가 `ReservationNotFoundException`으로 한다(P2b-1·P2b-2).
+- **구조**: 저장소는 사실만 알려 준다. `CommandRecord.acceptedInThisTransaction()`은 그 행을 지금 트랜잭션이 넣었는지를 나타낸다. PostgreSQL에서는 `accepted_xact xid8`과 `pg_current_xact_id_if_assigned()`를 비교한다. 거부는 서비스(`CommandLifecycle`)가 `ReservationNotFoundException`으로 한다.
 - **확인**: 두 테스트 모두 구현 전에 실패했다(표시가 false였고, 거부 예외가 없었다).
 
 ### F12. 잠긴 맨 앞 명령을 건너뛰고 그 키의 다음 명령을 낸다
 
 - **깨지는 것**: 워커 A가 키 order-1의 1번을 잡고 TB에 보내는 중이다. 워커 B가 `lockDue`를 하면서 "맨 앞인가"를 판정할 때 잠긴 1번까지 건너뛰면, 2번이 맨 앞으로 보여 함께 나간다. 키 안의 순서(G4)가 깨진다. 확정이 예약보다 먼저 가는 F9가 동시성으로 다시 생긴다.
 - **재현**: `CommandStoreContract` › 다른 트랜잭션이 행을 잡고 있으면 › `aLockedHeadHidesItsWholeKey`. 다른 트랜잭션(`OtherTransaction`)이 1번을 잠근 채로 두고 `lockDue`를 부른다.
-- **구조**: 후보 행만 `FOR UPDATE OF c SKIP LOCKED`로 잠근다. 맨 앞 판정(`NOT EXISTS` 앞 순번 미완료)은 잠그지 않고 읽으므로, 잠긴 1번도 "미완료"로 보인다(P2b-10).
+- **구조**: 후보 행만 `FOR UPDATE OF c SKIP LOCKED`로 잠근다. 맨 앞 판정(`NOT EXISTS` 앞 순번 미완료)은 잠그지 않고 읽으므로, 잠긴 1번도 "미완료"로 보인다.
 - **확인**: 대조군으로 `NOT EXISTS` 하위 질의에 `FOR UPDATE SKIP LOCKED`를 붙이면 이 테스트만 실패한다.
 
 ### F13. 잠긴 예약 행 때문에 확정이 예약을 "없음"으로 본다
 
 - **깨지는 것**: 다른 트랜잭션이 예약 행을 쓰는 중이라 잠겨 있을 때, 확정 후보가 그 예약을 잠가서 읽으려 하면 예약이 건너뛰어져 "참조 예약 없음"이 된다. 게이트는 F10에 따라 멈춘다(HALTED). 돈은 안전하지만, 멀쩡한 확정이 운영자 조치가 필요한 상태로 빠진다.
 - **재현**: `CommandStoreContract` › `aLockedReservationIsStillReported`.
-- **구조**: 예약은 `LEFT JOIN`으로 잠그지 않고 읽는다. 잠금은 후보 행(`OF c`)에만 건다(P2b-10).
+- **구조**: 예약은 `LEFT JOIN`으로 잠그지 않고 읽는다. 잠금은 후보 행(`OF c`)에만 건다.
 - **확인**: 대조군으로 예약을 `LEFT JOIN LATERAL (… FOR UPDATE SKIP LOCKED)`로 읽게 바꾸면 이 테스트만 실패한다("잠긴 예약을 읽은 결과"가 비어 있다). 단순히 `FOR UPDATE SKIP LOCKED`로 넓히는 실수는 PostgreSQL이 문법 단계에서 거부한다(외부 조인의 nullable 쪽은 잠글 수 없다). 그래서 의미를 보여 주는 대조군으로 쓸 수 없었다.
 
-### F14. 접수 커밋 순서와 순번 순서가 어긋난다 (R12)
+### F14. 접수 커밋 순서와 순번 순서가 어긋난다
 
 - **깨지는 것**: 같은 키에 두 접수가 겹칠 때 순번을 `max(seq)+1`로 내면, 둘이 같은 번호를 보거나 늦게 커밋한 쪽이 작은 번호를 가진다. 워커가 작은 번호를 먼저 처리했다고 믿는 동안 그 번호의 행이 나중에 나타난다. 맨 앞 판정(F12)은 "나보다 앞선 명령이 나중에 생기지 않는다"는 전제에 기대므로 그 전제가 무너진다.
 - **재현**: `CommandStoreContract` › `theKeyLockHoldsUntilCommit`. 첫 접수가 순번 1을 받고 커밋하지 않은 동안 두 번째 접수는 막혀 있어야 하고, 첫 접수가 커밋한 뒤 2를 받아야 한다.
-- **구조**: 키 행(`ledger_ordering_key`)을 upsert해 잠그고 번호를 낸다. 잠금은 커밋까지 유지되므로 같은 키의 접수는 줄을 선다(P2b-8). 잠글 행이 없는 집합 판단을 잠글 행 하나로 바꾼 것이다(4절 "격리 수준과 무관한 이유").
+- **구조**: 키 행(`ledger_ordering_key`)을 upsert해 잠그고 번호를 낸다. 잠금은 커밋까지 유지되므로 같은 키의 접수는 줄을 선다. 잠글 행이 없는 집합 판단을 잠글 행 하나로 바꾼 것이다(4절 "격리 수준과 무관한 이유").
 - **확인**: 대조군으로 `max(seq)+1`로 바꾸면 이 테스트와 `eachKeyCountsFromOne`이 실패한다(두 번째가 막히지 않는다).
 
 ### F15. 같은 commandId의 동시 접수가 앱 트랜잭션을 깬다 (G7)
 
 - **깨지는 것**: 유일성 위반 예외를 잡아 "이미 있다"로 처리하면, PostgreSQL은 그 트랜잭션 전체를 중단 상태로 만든다. 그 뒤의 모든 질의가 `current transaction is aborted`로 실패하고 앱 트랜잭션이 통째로 롤백된다. 재시도한 사용자의 주문 저장이 함께 날아간다.
 - **재현**: `CommandStoreContract` › `aConcurrentDuplicateLeavesTheAppTransactionUsable`. 늦은 쪽은 먼저 커밋된 행을 돌려받고, 이어서 다른 키의 순번을 받을 수 있어야 한다.
-- **구조**: `INSERT … ON CONFLICT (command_id) DO NOTHING RETURNING id`. 넣지 못했으면 같은 트랜잭션에서 기존 행을 읽는다(P2b-9). 에러를 내지 않으므로 트랜잭션이 산다.
+- **구조**: `INSERT … ON CONFLICT (command_id) DO NOTHING RETURNING id`. 넣지 못했으면 같은 트랜잭션에서 기존 행을 읽는다. 에러를 내지 않으므로 트랜잭션이 산다.
 - **확인**: 대조군으로 `ON CONFLICT`를 지우고 `DuplicateKeyException`을 잡게 하면 이 테스트와 `aSecondInsertReturnsTheFirstRow`가 `current transaction is aborted`로 실패한다.
 
-### F16. JPA 트랜잭션에서 접수가 따로 커밋된다 (G1, R16)
+### F16. JPA 트랜잭션에서 접수가 따로 커밋된다 (G1)
 
 - **깨지는 것**: 앱이 `JpaTransactionManager`를 쓰는데 그 트랜잭션이 JDBC 커넥션을 노출하지 않으면, `JdbcClient`는 DataSource에서 별도 커넥션을 받아 auto-commit으로 쓴다. 트랜잭션은 활성으로 보이므로(`requireActive` 통과) 아무 경고도 없다. 앱이 롤백해도 명령은 남는다. 주문은 없는데 원장 이체가 나간다.
 - **재현**: `JpaLedgerRelayTest` › 앱이 JPA로 주문을 저장하는 트랜잭션에서 접수하면 › `anAppEntityAndItsCommandRollBackTogether`. 상속한 서비스 계약 전체도 JPA 매니저 위에서 돈다.
-- **구조**: `JpaTransactionManager`에 같은 DataSource를 주고(`setDataSource`), `HibernateJpaDialect`가 JDBC 커넥션을 노출한다(P2b-13).
-- **확인**: 격리 수준은 받아들이지만 커넥션을 노출하지 않는 dialect로 바꾼 대조군에서 12건이 실패한다(이 대조군은 F18 이전 기록이다. 지금은 그 설정 자체가 접수에서 거부된다). 이 테스트("롤백된 명령"이 남아 있다)와 계약의 롤백 관련 장 11건(G1, G6, P2b-1)이다. 처음에 계획한 대조군 `DefaultJpaDialect`는 격리 수준 지정을 거부해서(P2b-16) 69건 전부가 트랜잭션 시작에서 실패했다. 이 실패는 합류 문제를 보여 주지 않으므로 대조군으로 쓰지 않았다.
+- **구조**: `JpaTransactionManager`에 같은 DataSource를 주고(`setDataSource`), `HibernateJpaDialect`가 JDBC 커넥션을 노출한다.
+- **확인**: 격리 수준은 받아들이지만 커넥션을 노출하지 않는 dialect로 바꾼 대조군에서 12건이 실패한다(이 대조군은 F18 이전 기록이다. 지금은 그 설정 자체가 접수에서 거부된다). 이 테스트("롤백된 명령"이 남아 있다)와 계약의 롤백 관련 장 11건(G1, G6)이다. 처음에 계획한 대조군 `DefaultJpaDialect`는 격리 수준 지정을 거부해서 69건 전부가 트랜잭션 시작에서 실패했다. 이 실패는 합류 문제를 보여 주지 않으므로 대조군으로 쓰지 않았다.
 
 ### F17. 워커가 커넥션 풀의 기본 격리 수준을 따라가 직렬화 실패로 터진다
 
 - **깨지는 것**: 앱이 커넥션 풀 기본값을 REPEATABLE READ로 두면, 워커 단계(claim, 결과 쓰기)도 그 수준으로 열린다. 그러면 다른 워커와 같은 행을 건드릴 때 기다리지 않고 직렬화 실패(40001)로 끝난다. 워커는 이 실패를 예상하지 않으므로, 결과를 쓰지 못한 명령이 lease 만료까지 묶인다.
 - **재현**: `JdbcTransactionsTest` › 커넥션 풀의 기본 격리 수준이 REPEATABLE READ이면 › `aNewTransactionRunsAtReadCommitted`.
-- **구조**: `JdbcTransactions`가 새로 여는 트랜잭션은 READ COMMITTED로 명시한다. 앱 트랜잭션에 합류할 때는 앱의 수준을 바꾸지 않는다(`joiningKeepsTheAppsLevel`, P2b-16).
+- **구조**: `JdbcTransactions`가 새로 여는 트랜잭션은 READ COMMITTED로 명시한다. 앱 트랜잭션에 합류할 때는 앱의 수준을 바꾸지 않는다(`joiningKeepsTheAppsLevel`).
 - **확인**: 격리 수준을 명시하기 전에 이 테스트가 실패했다("repeatable read"를 읽었다).
 
 ### F18. 저장소의 커넥션이 묶이지 않은 트랜잭션에서 접수가 따로 커밋된다 (G1, 리뷰에서 발견)
@@ -145,7 +147,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: 부분 인덱스 `ledger_command_due ON (id) WHERE state IN ('PENDING','CLAIMED')`(02e에서 `ledger_command_ready`로 바뀜. 맨 앞만 담으므로 끝난 이력도 읽지 않는다, F32). `theDueQueryDoesNotFilterThroughFinishedRows`는 새 질의에서도 그대로 지난다.
 - **확인**: 인덱스 전에는 걸러 낸 행이 200,000, 실행 21.8ms였다. 인덱스 뒤에는 테스트가 통과한다(리뷰어 측정: 100만 건에서 151ms → 0.047ms).
 
-### F20. U+0000이 든 문자열이 접수를 SQL 오류로 깨고, 짝 없는 서로게이트가 해시를 충돌시킨다 (1단계 리뷰 M-2)
+### F20. U+0000이 든 문자열이 접수를 SQL 오류로 깨고, 짝 없는 서로게이트가 해시를 충돌시킨다
 
 - **깨지는 것**: PG `text`는 0x00 바이트를 받지 않는다. commandId·순서 키·reservation에 U+0000이 있으면 접수의 INSERT가 SQL 오류로 끝나고, PG에서는 그 앱 트랜잭션 전체가 중단된다. 짝 없는 서로게이트(예: `\uD800`)는 `getBytes(UTF_8)`에서 `?`로 바뀐다. 그래서 `"order-\uD800"`과 `"order-?"`의 내용 해시가 같아져, 다른 명령이 같은 내용으로 인정될 수 있다(G7).
 - **재현**: `LedgerCommandTest` › 규칙을 어긴 명령을 만들면 › "commandId에 U+0000이 있으면", "순서 키에 짝 없는 서로게이트가 있으면", "확정의 reservation에 U+0000이 있으면". 짝이 맞는 서로게이트(이모지)는 `aTransferWithAPairedSurrogateIsAccepted`가 허용함을 확인한다.
@@ -154,35 +156,35 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: `LedgerCommand` 생성자의 `requireWellFormed`가 세 문자열 필드를 검사하고 `InvalidCommandException`으로 거부한다. 같은 판정을 공개 정적 메서드 `LedgerCommand.isAcceptableId`로 내고, 서비스의 `status`는 접수될 수 없는 id면 DB에 묻지 않고 "없음"을, `abandonHalted`는 "접수한 적 없는 명령"을 돌려준다. 판단이 core에 있으므로 저장소는 이런 값을 받지 않는다.
 - **확인**: 검사를 넣기 전에 생성자 세 행이 "예외가 없다"로, 계약 세 테스트가 PG 위에서 6건(SQL 오류, `pay-?`의 상태, 다른 명령의 HALTED 검사) 실패했다.
 
-### F21. submit-timeout 뒤 슬롯을 바로 돌려주면 TB가 멈춘 동안 요청이 끝없이 쌓인다 (03a)
+### F21. submit-timeout 뒤 슬롯을 바로 돌려주면 TB가 멈춘 동안 요청이 끝없이 쌓인다
 
 - **깨지는 것**: TB Java 클라이언트에는 timeout이 없다. 워커가 submit-timeout으로 기다림을 끊어도 요청은 클라이언트 안에 남아 TB가 돌아올 때까지 다시 보내진다. 그때 in-flight 슬롯을 돌려주면 워커는 다음 바퀴에 또 claim하고 또 보낸다. TB가 멈춘 동안 클라이언트 안에 요청이 끝없이 쌓이고, TB가 돌아오는 순간 한꺼번에 몰린다.
 - **재현**: `RelayWorkerTest` › TB가 submit-timeout 안에 답하지 않으면 › `aTimedOutRequestKeepsItsSlotsUntilItEnds`. 슬롯 4에 이체 둘을 보내 timeout이 나면 남은 슬롯이 2여야 하고, 붙잡힌 응답이 끝난 뒤에야 4가 된다. 슬롯을 claim 전에 잡는 것은 `noSlotsMeansNoClaim`이 고정한다. 슬롯이 없으면 claim하지 않으므로 명령은 lease 없이 접수됨으로 남는다.
-- **구조**: `RelayWorker`는 claim 전에 batch-size만큼 슬롯을 잡는다(P3a-2). 보내지 않는 몫은 바로 돌려주고, 보낸 몫은 요청 future의 `whenComplete`에서만 돌려준다.
+- **구조**: `RelayWorker`는 claim 전에 batch-size만큼 슬롯을 잡는다. 보내지 않는 몫은 바로 돌려주고, 보낸 몫은 요청 future의 `whenComplete`에서만 돌려준다.
 - **확인**: 대조군 두 개. 반납을 `whenComplete`에서 "보낸 직후"로 옮기자 `aTimedOutRequestKeepsItsSlotsUntilItEnds`와 `unusedSlotsAreGivenBackAtOnce`가 실패했다. claim 전 슬롯 확인을 끄자 `noSlotsMeansNoClaim`이 실패했다.
 
-### F22. 결과 개수가 요청과 다르면 남의 결과로 끝난다 (03a)
+### F22. 결과 개수가 요청과 다르면 남의 결과로 끝난다
 
 - **깨지는 것**: 워커는 TB 결과를 요청 순서로 명령과 짝짓는다. 결과가 하나 모자라거나 남으면 뒤의 명령들이 앞 명령의 결과를 받는다. 성공한 이체가 거절됨으로 끝나거나 그 반대가 된다. 핸들러는 틀린 결과로 업무를 처리한다.
 - **재현**: `RelayWorkerTest` › TB 요청이 예외로 끝나거나 결과 개수가 틀리면 › `aReplyWithTheWrongCountWritesNothing`. 이체 둘에 결과 하나가 오면 아무것도 쓰지 않고 둘 다 되돌리며, `malformedReply:2:1`을 알린다.
-- **구조**: `RelayWorker`가 결과 개수를 요청 개수와 비교한다(P3a-6). 다르면 모두 `release`한다. 다시 보낼 때는 같은 이체 ID이므로 TB가 이미 기록한 것은 `exists`로 돌아온다. 어댑터는 개수를 검사하지 않는다. 판단은 core에 있다.
+- **구조**: `RelayWorker`가 결과 개수를 요청 개수와 비교한다. 다르면 모두 `release`한다. 다시 보낼 때는 같은 이체 ID이므로 TB가 이미 기록한 것은 `exists`로 돌아온다. 어댑터는 개수를 검사하지 않는다. 판단은 core에 있다.
 - **확인**: 처리를 넣기 전에는 `results.get(i)`가 범위를 벗어나 바퀴가 예외로 끝났다(테스트 실패).
 
-### F23. 응답이 유실된 명령을 새 이체 ID로 다시 보내 돈이 두 번 움직인다 (03a, 열린 장애 O3를 닫음)
+### F23. 응답이 유실된 명령을 새 이체 ID로 다시 보내 돈이 두 번 움직인다 (열린 장애 O3를 닫음)
 
 - **깨지는 것**: TB는 ID당 한 번만 실행한다. 그래서 같은 명령을 다시 보낼 때 이체 ID가 바뀌면 TB는 그것을 새 이체로 기록한다. 응답이 유실된 첫 요청이 이미 기록됐다면 돈이 두 번 나간다.
 - **재현**: `RelayOnTigerBeetleTest` › TB 응답이 유실되면 › `aLostReplyIsRetriedWithTheSameTransferIdAndMovesMoneyOnce`. 첫 요청은 실제 TB에 기록되지만 워커에게는 응답이 가지 않는다(테스트 대역 `ReplyLosingLedger`). 워커가 timeout으로 되돌리고 backoff 뒤 다시 보내면, 두 요청의 이체 ID가 같고, 두 번째 TB 결과는 `Exists`이며, 돈은 500만 움직인다. 연결이 끊긴 경우(`aCutConnectionIsRetriedAfterItIsRestored`, Toxiproxy)도 복구 뒤 적용됨으로 끝나고 돈은 한 번만 움직인다.
-- **구조**: 이체 ID는 접수 때 생성기가 내서 행(`transfer_id`)에 박는다(§5.1-5, D7). 워커는 claim한 행의 ID만 보내고 새 ID를 만들지 않는다. TB 쪽의 같은 ID 재전송은 `exists`(같은 본문, A1·A3)나 `id_already_failed`(일시적 실패, PRIOR_FAILURE 알림)로 돌아온다.
+- **구조**: 이체 ID는 접수 때 생성기가 내서 행(`transfer_id`)에 박는다. 워커는 claim한 행의 ID만 보내고 새 ID를 만들지 않는다. TB 쪽의 같은 ID 재전송은 `exists`(같은 본문, A1·A3)나 `id_already_failed`(일시적 실패, PRIOR_FAILURE 알림)로 돌아온다.
 - **확인**: 대조군으로 두 번째 요청의 이체 ID를 새로 바꾸자 돈이 1000 움직여 테스트가 실패했다.
 
-### F24. 결과를 쓰는 중 한 명령의 저장소 오류가 같은 배치의 나머지 결과를 버린다 (03a, 리뷰에서 발견)
+### F24. 결과를 쓰는 중 한 명령의 저장소 오류가 같은 배치의 나머지 결과를 버린다 (리뷰에서 발견)
 
-- **깨지는 것**: 워커는 TB 결과를 받은 뒤 명령마다 따로 쓴다. 그런데 한 명령의 쓰기가 저장소 예외(DB 연결 끊김 등)로 끝났을 때 바퀴 전체가 멈추면, 뒤 명령들은 받은 결과를 남기지 못한 채 lease가 끝날 때까지 처리 중으로 남는다. lease가 끝나면 같은 이체 ID로 다시 보내진다. TB가 기억하는 거절(`exceeds_credits` 등)은 그때 `id_already_failed`로 돌아와, 원래 사유를 잃고 PRIOR_FAILURE로 끝난다. §5.4와 F3·F4가 막으려던 결과가 다른 길로 생긴다.
+- **깨지는 것**: 워커는 TB 결과를 받은 뒤 명령마다 따로 쓴다. 그런데 한 명령의 쓰기가 저장소 예외(DB 연결 끊김 등)로 끝났을 때 바퀴 전체가 멈추면, 뒤 명령들은 받은 결과를 남기지 못한 채 lease가 끝날 때까지 처리 중으로 남는다. lease가 끝나면 같은 이체 ID로 다시 보내진다. TB가 기억하는 거절(`exceeds_credits` 등)은 그때 `id_already_failed`로 돌아와, 원래 사유를 잃고 PRIOR_FAILURE로 끝난다. F3·F4가 막으려던 결과가 다른 길로 생긴다.
 - **재현**: `RelayWorkerTest` › 결과를 쓰는 중에 저장소가 한 명령에서 실패하면 › `theOtherResultsOfTheBatchAreStillWritten`. 배치는 [pay-1 Created, pay-2 ExceedsCredits]이고, pay-1의 결과를 쓸 때 저장소가 한 번 던진다. pay-2는 `ExceedsCredits`로 거절됨이 되어야 하고, `writeFailed:pay-1`을 알려야 한다.
 - **구조**: `RelayWorker.attempt`가 쓰기(제출 기록, 건너뛰기, 결과, 되돌리기) 하나하나의 `RuntimeException`을 잡아 `WorkerEvents.writeFailed`로 알리고 다음 명령으로 넘어간다. 실패한 명령은 lease 만료 뒤 같은 이체 ID로 다시 잡힌다. Error는 삼키지 않는다.
 - **확인**: 고치기 전에는 바퀴가 예외로 끝나 테스트가 실패했다.
 
-### F25. lease가 응답 기다림보다 짧아 다른 워커가 같은 명령을 다시 보낸다 (03a, 리뷰에서 발견)
+### F25. lease가 응답 기다림보다 짧아 다른 워커가 같은 명령을 다시 보낸다 (리뷰에서 발견)
 
 - **깨지는 것**: lease는 claim에서 시작한다. 그래서 제출 기록, 응답 기다림(submit-timeout), 명령마다의 결과 쓰기를 모두 덮어야 한다. lease가 submit-timeout보다 짧으면 첫 워커가 응답을 기다리는 동안 다른 워커가 같은 명령을 다시 잡아 보낸다. fencing 덕분에 돈이 두 번 움직이지는 않는다. 하지만 두 번째 요청은 TB가 기억하는 거절에 `id_already_failed`를 받고, 첫 워커의 진짜 결과 쓰기는 0행으로 막혀 원래 사유를 잃는다.
 - **재현**: `WorkerSettingsTest` › 잘못 주면 › "lease가 submit-timeout의 두 배보다 짧으면".
@@ -199,7 +201,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
   - 같은 탐침을 3초 뒤에 하면 20번 중 0번이었다.
   - 메모리 부족은 아니다. VM에 5.9GiB가 남아 있었고 dmesg에 OOM 기록이 없었다.
   - 결론: listening 직후의 짧은 구간에 들어온 TCP 접속이 TB를 죽인다. 테스트에서 그 접속을 넣는 쪽은 Docker Desktop의 포트 공개 경로로 보인다. 우리 코드는 그 시점을 정할 수 없다. TB 쪽 버그로 보며, TB 소스로 확인하지는 않았다.
-- **구조(완화)**: `TigerBeetleContainer.start()`는 이번 시도의 로그에 `listening on`이 찍혔는데 기동이 실패하면 새 컨테이너로 다시 띄운다. 모두 3번 시도하므로 다시 띄우기는 최대 2번이다. 어느 단계가 죽음을 먼저 봤는지(Testcontainers의 기동 검사, 로그 대기, 1초 안정 확인)는 따지지 않는다. 처음 넣은 판정은 "안정 확인이 던진 예외"만 봤다. 그래서 listening 직후 바로 죽어 Testcontainers의 기동 검사가 먼저 보면 다시 띄우지 않았다(전체 리뷰 R-tb-I1, `aDeathSeenByTheStartupCheckIsRetried`로 재현). listening까지 못 간 실패(io_uring 등)는 다시 띄우지 않는다. 시도마다 로그에 `--- TB 시작 시도 n ---` 구분선이 들어가고, 다시 띄울 때마다 표준 오류에 `O4: …다시 띄운다(시도 n)`가 남는다. 프록시 구성(`ProxiedTigerBeetle`)의 TB는 포트를 공개하지 않는다. 클라이언트가 프록시로만 붙으므로 원인 경로 자체가 없다.
+- **구조(완화)**: `TigerBeetleContainer.start()`는 이번 시도의 로그에 `listening on`이 찍혔는데 기동이 실패하면 새 컨테이너로 다시 띄운다. 모두 3번 시도하므로 다시 띄우기는 최대 2번이다. 어느 단계가 죽음을 먼저 봤는지(Testcontainers의 기동 검사, 로그 대기, 1초 안정 확인)는 따지지 않는다. 처음 넣은 판정은 "안정 확인이 던진 예외"만 봤다. 그래서 listening 직후 바로 죽어 Testcontainers의 기동 검사가 먼저 보면 다시 띄우지 않았다(`aDeathSeenByTheStartupCheckIsRetried`로 재현). listening까지 못 간 실패(io_uring 등)는 다시 띄우지 않는다. 시도마다 로그에 `--- TB 시작 시도 n ---` 구분선이 들어가고, 다시 띄울 때마다 표준 오류에 `O4: …다시 띄운다(시도 n)`가 남는다. 프록시 구성(`ProxiedTigerBeetle`)의 TB는 포트를 공개하지 않는다. 클라이언트가 프록시로만 붙으므로 원인 경로 자체가 없다.
 - **재현 테스트**: `TigerBeetleContainerGuardTest` › `startRetriesWhenTheServerDiesRightAfterListening`(한 번 죽고 다음엔 사는 가짜 서버. 첫 시도의 panic과 둘째 시도 구분선이 로그에 있다), `aDeathSeenByTheStartupCheckIsRetried`(listening을 찍자마자 죽는 가짜 서버), `startFailsWhenServerDiesRightAfterListening`(매번 죽으면 "3번 시도"와 panic 로그로 실패).
 - **확인**: 시도 횟수를 1로 줄이는 대조군에서 두 테스트가 실패했다. 완화를 넣은 뒤 tigerbeetle 모듈을 5번 돌려 실패 0이었다. 다만 그 5번은 실제 TB의 재시도도 0번이었다(자연 발생 없음). 그래서 실제 panic에 대한 효과는 아직 관찰하지 못했다.
 
@@ -207,21 +209,21 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 
 - **깨지는 것**: HALTED는 접수 상태(PENDING)에서만 들어간다. 그런데 접수 상태에는 한 번 보냈다가 되돌린 명령(submit_count > 0)과 TB 결과를 받았는데 핸들러가 실패한 명령(known_result)도 있다. 이런 명령의 참조 예약 행이 사라지면 다음 claim에서 멈춘다. 운영자가 `abandonHalted`로 포기하면 PG는 SKIPPED(ABANDONED_BY_OPERATOR)가 되고, 핸들러는 "적용 안 됨"을 받는다. TB에서는 이미 확정됐을 수 있으므로 돈과 업무 상태가 어긋난다.
 - **재현**: `LedgerRelayContract` › 이미 TB에 보낸 뒤 멈춘 명령을 포기하려 하면 › `aReleasedCommandIsRefused`, `aCommandWithAKnownResultIsRefused`(메모리, PG DataSource, PG JPA).
-- **구조**: `CommandLifecycle.abandonHalted`는 `submitCount > 0`이거나 `knownResult`가 있으면 `IllegalStateException`("이미 TB에 보낸 적이 있어 포기할 수 없습니다")으로 거부한다. 이런 명령은 TB에서 이체를 확인한 뒤 사람이 정리한다. 운영자 공개 포트(03b)가 이 거부를 그대로 드러낸다.
+- **구조**: `CommandLifecycle.abandonHalted`는 `submitCount > 0`이거나 `knownResult`가 있으면 `IllegalStateException`("이미 TB에 보낸 적이 있어 포기할 수 없습니다")으로 거부한다. 이런 명령은 TB에서 이체를 확인한 뒤 사람이 정리한다. 운영자 공개 포트가 이 거부를 그대로 드러낸다.
 - **확인**: 넣기 전에 여섯 테스트가 "예외가 없다"로 실패했다.
 
 ### F28. 예약이 지워진 뒤 같은 확정을 다시 접수하면 접수증 대신 "예약 없음"이 난다 (전체 리뷰에서 발견)
 
 - **깨지는 것**: `submit`이 참조 검사를 같은 commandId 판정보다 먼저 했다. 보관 작업은 끝난 지 N일 지난 명령을 지운다. 예약은 확정보다 먼저 끝나므로 먼저 지워질 수 있다. 그 뒤 앱이 응답을 놓친 확정을 같은 내용으로 다시 접수하면, 원래 접수증(`LedgerRelay.submit`의 약속) 대신 `ReservationNotFoundException`이 난다. 내용이 다른 재전송도 `CommandConflictException`이 아니라 "예약 없음"이 된다.
 - **재현**: `LedgerRelayContract` › 확정이 끝난 뒤 참조 예약 행이 사라진 상태에서 같은 확정을 다시 접수하면 › `resubmittingAFinishedPostAfterItsReservationIsGoneReturnsTheReceipt`, `resubmittingItWithOtherContentIsAConflict`.
-- **구조**: 순번을 받은 뒤 같은 commandId를 먼저 찾는다. 있으면 접수증이나 충돌로 끝내고 참조 검사는 하지 않는다(스펙 §5.1 단계 3·4, P2d-2). 경쟁 경로(`insertIfAbsent`가 다른 트랜잭션의 행을 돌려줌)는 그대로 해시를 비교한다.
+- **구조**: 순번을 받은 뒤 같은 commandId를 먼저 찾는다. 있으면 접수증이나 충돌로 끝내고 참조 검사는 하지 않는다. 경쟁 경로(`insertIfAbsent`가 다른 트랜잭션의 행을 돌려줌)는 그대로 해시를 비교한다.
 - **확인**: 바꾸기 전에 두 테스트가 `ReservationNotFoundException`으로 실패했다.
 
 ### F29. 데이터가 어긋난 행 하나가 claim 트랜잭션 전체를 던져 릴레이가 멈춘다 (전체 리뷰에서 발견)
 
-- **깨지는 것**: claim은 후보마다 게이트와 상태 기계를 같은 트랜잭션 안에서 돌린다. 한 후보의 데이터가 규칙과 어긋나면 그 판단이 예외를 던진다. 예를 들어 참조 예약이 비어 있는 확정 행(DB 직접 수정)이 있으면 `Optional.orElseThrow`가 던진다. 그러면 claim 전체가 롤백되고 워커는 매 바퀴 같은 예외로 끝나, 모든 키가 멈춘다. "그 키만 막힌다"(§3)에 어긋난다.
+- **깨지는 것**: claim은 후보마다 게이트와 상태 기계를 같은 트랜잭션 안에서 돌린다. 한 후보의 데이터가 규칙과 어긋나면 그 판단이 예외를 던진다. 예를 들어 참조 예약이 비어 있는 확정 행(DB 직접 수정)이 있으면 `Optional.orElseThrow`가 던진다. 그러면 claim 전체가 롤백되고 워커는 매 바퀴 같은 예외로 끝나, 모든 키가 멈춘다. "그 키만 막힌다"에 어긋난다.
 - **재현**: `LedgerRelayContract` › 데이터가 어긋난 행이 claim 후보가 되면 › `aMalformedRowIsHaltedAndOtherKeysKeepFlowing`. 다른 키의 pay-2는 잡히고 이상한 행은 멈춘 명령으로 실린다.
-- **구조**: `CommandLifecycle.claim`이 후보 하나의 판단 예외를 잡아 그 행을 HALTED로 주차한다. 판단은 순수 Java라 PG 트랜잭션은 멀쩡하다. 주차도 못 하면(저장소가 끝난 행을 후보로 낸 경우 등) 그 후보를 건너뛴다. 어느 쪽이든 이유(원래 예외)를 `ClaimBatch.problems`에 싣고, 워커가 `WorkerEvents.malformedCandidate`로 알린다(최종 리뷰에서 보강: 처음에는 예외를 버렸고 건너뛰는 경우는 아무 신호도 없었다. `ClaimIsolationTest`). 저장소가 행을 **읽는** 단계(결과 코드 저장 이름 해석)에서 나는 이상은 이 격리 밖이다. 그래서 `known_result`·`result_code`에 저장 이름 68개만 받는 CHECK를 둔다(`anUnknownResultCodeIsRefused`, `everyWireNameIsAccepted`). 그 밖의 이런 행을 막는 DB CHECK는 F31에 있다. 운영자는 멈춘 명령 목록(03b)으로 찾는다.
+- **구조**: `CommandLifecycle.claim`이 후보 하나의 판단 예외를 잡아 그 행을 HALTED로 주차한다. 판단은 순수 Java라 PG 트랜잭션은 멀쩡하다. 주차도 못 하면(저장소가 끝난 행을 후보로 낸 경우 등) 그 후보를 건너뛴다. 어느 쪽이든 이유(원래 예외)를 `ClaimBatch.problems`에 싣고, 워커가 `WorkerEvents.malformedCandidate`로 알린다(최종 리뷰에서 보강: 처음에는 예외를 버렸고 건너뛰는 경우는 아무 신호도 없었다. `ClaimIsolationTest`). 저장소가 행을 **읽는** 단계(결과 코드 저장 이름 해석)에서 나는 이상은 이 격리 밖이다. 그래서 `known_result`·`result_code`에 저장 이름 68개만 받는 CHECK를 둔다(`anUnknownResultCodeIsRefused`, `everyWireNameIsAccepted`). 그 밖의 이런 행을 막는 DB CHECK는 F31에 있다. 운영자는 멈춘 명령 목록으로 찾는다.
 - **확인**: 넣기 전에는 claim이 `NoSuchElementException`으로 끝나 테스트가 실패했다.
 
 ### F30. 긴 commandId·순서 키가 접수를 SQL 오류로 깬다 (전체 리뷰에서 발견)
@@ -241,16 +243,16 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: ID 컬럼은 `COLLATE "C"`로 둔다. 이름 붙은 제약으로 `ledger_command_transfer_id_key UNIQUE`, `ledger_command_seq_check`, `ledger_command_reference_check`, `ledger_command_claimed_lease_check`, `ledger_command_skipped_reason_check`를 둔다. 질의는 공용 컬럼 목록(`JdbcCommandStore.COLUMNS`)을 쓴다. 계약 테스트의 행 빌더는 키마다 다른 이체 ID를 낸다(`TestTransferIds`).
 - **확인**: 넣기 전에 9건이 실패했다(collation 4, 이체 ID 1, CHECK 3, 컬럼 추가 1).
 
-### F32. claim 폴링 비용이 막힌 키 뒤의 백로그에 비례한다 (02d 전체 리뷰 R-jdbc-I1, 02e)
+### F32. claim 폴링 비용이 막힌 키 뒤의 백로그에 비례한다
 
 - **깨지는 것**: 옛 `lockDue`는 후보마다 "같은 키에 앞선 미완료가 있는가"를 찾았다(`NOT EXISTS`, 실행 계획에서는 Nested Loop Anti Join). 맨 앞이 backoff 중이거나 처리 중인 키 하나 뒤에 대기 명령 10만 건이 쌓이면, 폴링 한 번이 그 10만 건을 하나씩 확인한다. 앞선 미완료 찾기가 10만 번, 약 40만 페이지, 576~680ms였다(기준 0.2ms). 후보가 limit보다 적으면 `LIMIT`이 일찍 멈추지 못하고, 플래너는 대부분 통과한다고 잘못 추정했다. F19의 검사("Rows Removed by Filter")는 이 비용을 보지 못한다. 맨 앞이 backoff 중인 키가 많을 때도 같은 비례가 생긴다. TB 회복 직후 보낼 수 있는 맨 앞이 몰리면 접수 순서(id)로 정렬해야 한다. `FOR UPDATE`가 정렬과 `LIMIT` 사이에 끼어 상위 N개 정렬을 쓰지 못해, 실험에서 21ms가 걸리고 디스크 정렬로 넘어갔다.
 - **재현**: `LockDueBoundedWorkTest`의 세 테스트가 limit 128에서 실행 계획 맨 위 노드의 페이지를 1,000 이하로 본다. `aBacklogBehindABlockedKeyIsNotRead`(막힌 키 뒤 대기 2만 건 + 보낼 수 있는 키 100개), `headsWaitingForTheirRetryAreNotRead`(맨 앞이 1시간 backoff인 키 2만 개 + 100개), `manyReadyHeadsStopAtTheLimit`(끝난 이력 5만 건 뒤에 보낼 수 있는 맨 앞 2만 개). 측정은 `LockDueBacklogMeasurementTest`(`./gradlew :ledger-relay-jdbc:measurement`)의 네 장면이다.
 - **구조**:
-  - 후보 순서는 "보낼 수 있게 된 시각"이다. 접수 명령은 다음 시도 시각, 처리 중 명령은 lease 만료 시각이 그 시각이고, 같으면 접수 순서다(P2e-1). 포트 계약 `CommandStore.lockDue`가 정하고, 메모리와 PG 저장소가 같은 계약 테스트를 지난다. 같은 키 안의 순서는 맨 앞이 하나뿐이라 바뀌지 않는다.
-  - jdbc 어댑터는 `ledger_command.is_head`(키에서 지금 차례인 명령인가)와 `ready_at`(보낼 시각, 생성 컬럼)을 둔다(P2e-2).
-  - 인덱스는 둘이다(P2e-3). `ledger_command_ready ON (ready_at, id) WHERE is_head AND state IN ('PENDING','CLAIMED')`는 claim이 읽는다. 유일 `ledger_command_one_head ON (ordering_key) WHERE is_head`는 키당 맨 앞 둘을 막는다. `ledger_command_due`는 지웠다.
-  - 넣을 때 키에 맨 앞이 없으면 새 명령이 맨 앞이 된다. 명령이 끝나도 표시는 그대로 두고, 다음 claim이 그 키 행을 잡아 다음 미완료로 넘긴다(P2e-7, F33). 처음에는 완료가 키 행의 미완료 개수를 고치며 넘겼으나(P2e-4), 그 잠금이 핸들러와 교착해 바꿨다.
-  - DB를 직접 고친 뒤에는 `rebuild-heads.sql`로 다시 계산한다(P2e-5, docs/development.md).
+  - 후보 순서는 "보낼 수 있게 된 시각"이다. 접수 명령은 다음 시도 시각, 처리 중 명령은 lease 만료 시각이 그 시각이고, 같으면 접수 순서다. 포트 계약 `CommandStore.lockDue`가 정하고, 메모리와 PG 저장소가 같은 계약 테스트를 지난다. 같은 키 안의 순서는 맨 앞이 하나뿐이라 바뀌지 않는다.
+  - jdbc 어댑터는 `ledger_command.is_head`(키에서 지금 차례인 명령인가)와 `ready_at`(보낼 시각, 생성 컬럼)을 둔다.
+  - 인덱스는 둘이다. `ledger_command_ready ON (ready_at, id) WHERE is_head AND state IN ('PENDING','CLAIMED')`는 claim이 읽는다. 유일 `ledger_command_one_head ON (ordering_key) WHERE is_head`는 키당 맨 앞 둘을 막는다. `ledger_command_due`는 지웠다.
+  - 넣을 때 키에 맨 앞이 없으면 새 명령이 맨 앞이 된다. 명령이 끝나도 표시는 그대로 두고, 다음 claim이 그 키 행을 잡아 다음 미완료로 넘긴다(F33). 처음에는 완료가 키 행의 미완료 개수를 고치며 넘겼으나, 그 잠금이 핸들러와 교착해 바꿨다.
+  - DB를 직접 고친 뒤에는 `rebuild-heads.sql`로 다시 계산한다(docs/development.md).
 - **확인**:
   - 옛 질의에서 페이지 테스트 둘이 실패했다(2만 건 백로그 61,097페이지·126ms, backoff 맨 앞 2만 개 1,447페이지).
   - 새 순서 계약 테스트 둘(`aRetriedCommandQueuesAtItsRetryTime`, `anExpiredLeaseQueuesAtItsExpiry`)은 메모리와 PG에서 모두 실패했다.
@@ -263,15 +265,15 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
   - DB를 직접 고치고 `rebuild-heads.sql`을 돌리지 않으면 그 키가 후보에서 빠지거나 맨 앞이 아닌 명령이 나갈 수 있다. 스크립트는 접수·claim과 겹치지 않게 `ledger_ordering_key`를 표 잠금한다(`HeadBookkeepingTest.rebuildWaitsForAnOpenSubmit`).
   - 통계가 오래됐거나 일반 계획(generic plan)으로 바뀌어 플래너가 `ledger_command_ready` 대신 다른 인덱스와 정렬을 고르는 경우는 테스트하지 않았다.
 
-### F33. 결과를 쓰는 트랜잭션이 키 행을 쥔 채 핸들러를 돌려 앱의 접수와 교착한다 (02e 최종 리뷰)
+### F33. 결과를 쓰는 트랜잭션이 키 행을 쥔 채 핸들러를 돌려 앱의 접수와 교착한다
 
-- **깨지는 것**: 02e의 첫 구현(P2e-4)에서 완료는 `compareAndSet` 안에서 그 키의 행(`ledger_ordering_key`)을 고쳐 잠갔다. 그 잠금을 커밋까지 쥔 채 핸들러를 불렀다. 흔한 앱 코드가 반대 순서로 잡는다. 앱은 주문 행을 고친 뒤 같은 트랜잭션에서 그 주문의 키에 접수한다(접수는 순번을 받으며 키 행을 잡는다). 핸들러는 결과를 받아 같은 주문 행을 고친다. 앱은 키 행을, 핸들러는 주문 행을 기다려 PG가 한쪽을 끊는다(40P01). 앱 쪽이 끊기면 사용자 요청이 간헐적으로 실패한다. 완료 쪽이 끊기면 핸들러 실패로 backoff 뒤 다시 돈다. 또 어떤 키에 접수를 연 채 오래 머무는 앱 트랜잭션이 있으면 그 키의 완료가 기다렸고, 워커는 결과를 한 건씩 쓰므로 뒤의 다른 키 결과도 함께 멈췄다. 이 잠금은 `compareAndSet`이라는 이름 뒤에 숨어 core 코드에서 보이지 않았다.
+- **깨지는 것**: 처음 구현에서 완료는 `compareAndSet` 안에서 그 키의 행(`ledger_ordering_key`)을 고쳐 잠갔다. 그 잠금을 커밋까지 쥔 채 핸들러를 불렀다. 흔한 앱 코드가 반대 순서로 잡는다. 앱은 주문 행을 고친 뒤 같은 트랜잭션에서 그 주문의 키에 접수한다(접수는 순번을 받으며 키 행을 잡는다). 핸들러는 결과를 받아 같은 주문 행을 고친다. 앱은 키 행을, 핸들러는 주문 행을 기다려 PG가 한쪽을 끊는다(40P01). 앱 쪽이 끊기면 사용자 요청이 간헐적으로 실패한다. 완료 쪽이 끊기면 핸들러 실패로 backoff 뒤 다시 돈다. 또 어떤 키에 접수를 연 채 오래 머무는 앱 트랜잭션이 있으면 그 키의 완료가 기다렸고, 워커는 결과를 한 건씩 쓰므로 뒤의 다른 키 결과도 함께 멈췄다. 이 잠금은 `compareAndSet`이라는 이름 뒤에 숨어 core 코드에서 보이지 않았다.
 - **재현**: `HeadRaceTest` › 앱과 핸들러가 같은 주문 행을 고치면 › `anAppThatMarksTheOrderThenSubmitsDoesNotDeadlockWithTheHandler`. `KeyLockFreeStoreTest`(다른 트랜잭션이 키 행을 쥐어도 저장소의 넣기·찾기·후보 잠그기·결과 쓰기가 기다리지 않는다). `HeadStatementRaceTest`(문장 사이의 경쟁 셋).
-- **구조** (P2e-7):
+- **구조**:
   - 포트를 나눴다. 키 행을 잡는 호출은 `OrderingKeys`(`lockKeyAndTakeSeq`, `passOnFinishedHeads`)에만 있다. `CommandStore`는 키 행을 잡지 않는다. jdbc에서는 `JdbcOrderingKeys`와 `JdbcCommandStore`가 나눠 맡는다.
   - 핸들러를 부르는 워커 쓰기는 `WorkerWrites`로 뗐고, 이 클래스는 `OrderingKeys`를 받지 않는다. `ArchitectureTest.theHandlerPathCannotLockAKey`가 "`onCompleted`를 부르는 클래스는 `OrderingKeys`에 의존하지 않는다"를 지킨다.
   - 완료는 맨 앞 표시를 끝난 명령에 남긴다. claim이 후보를 잠그기 전에 끝난 맨 앞의 키 행을 `FOR UPDATE SKIP LOCKED`로 잡아 다음 미완료로 넘긴다. 앱이 쥔 키는 기다리지 않고 다음 claim으로 미룬다. 잡은 키 행은 값을 그대로 두고 갱신한다. 그래야 그보다 앞서 스냅숏을 잡은 REPEATABLE READ 이상의 앱이 그 키에서 순번을 받을 때 40001로 끝나 재시도한다. 그러지 않으면 그 앱은 옛 스냅숏에서 맨 앞이 있다고 보고 새 명령을 맨 앞으로 세우지 않아 그 키가 영원히 나가지 않는다.
-  - 맨 앞 표시를 켜는 두 문장(접수의 `MARK_FIRST_UNFINISHED`, 넘기기의 `MARK_NEXT_HEADS`)은 그 키에 맨 앞이 이미 있으면 아무것도 하지 않는다. READ COMMITTED는 문장마다 스냅숏을 새로 잡으므로, 접수가 표시를 끈 뒤 같은 키의 완료가 커밋되면 맨 앞이 둘이 되어 유일 인덱스가 접수를 깨뜨렸다(23505). 넘기기 쪽에도 같은 틈이 있었다. 넘기기 질의가 스냅숏을 잡은 뒤 다른 워커가 같은 키를 넘기고 커밋하면, 늦은 질의는 그 키 행을 그대로 잡는다(`SKIP LOCKED`는 키 행만 최신으로 다시 확인한다). 그다음 켜기가 결과를 쓰는 중인 새 맨 앞 행을 고치려 기다리면 핸들러와 교착했고, 그사이 새 맨 앞이 끝나면 맨 앞이 둘이 되어 claim이 깨졌다. 끝난 맨 앞 행까지 잠그는 방법(`FOR UPDATE OF k, c`)은 쓰지 않았다. 누가 그 행을 쥐면(예: 예약 행, F13) 키 전체의 넘기기가 미뤄지고, 계약 테스트 `aLockedReservationIsStillReported`가 깨졌다. 셋 다 P2e-7 리뷰가 PG 18.6에서 재현했고, `HeadStatementRaceTest`가 문장 사이에 상대를 커밋시켜 본다.
+  - 맨 앞 표시를 켜는 두 문장(접수의 `MARK_FIRST_UNFINISHED`, 넘기기의 `MARK_NEXT_HEADS`)은 그 키에 맨 앞이 이미 있으면 아무것도 하지 않는다. READ COMMITTED는 문장마다 스냅숏을 새로 잡으므로, 접수가 표시를 끈 뒤 같은 키의 완료가 커밋되면 맨 앞이 둘이 되어 유일 인덱스가 접수를 깨뜨렸다(23505). 넘기기 쪽에도 같은 틈이 있었다. 넘기기 질의가 스냅숏을 잡은 뒤 다른 워커가 같은 키를 넘기고 커밋하면, 늦은 질의는 그 키 행을 그대로 잡는다(`SKIP LOCKED`는 키 행만 최신으로 다시 확인한다). 그다음 켜기가 결과를 쓰는 중인 새 맨 앞 행을 고치려 기다리면 핸들러와 교착했고, 그사이 새 맨 앞이 끝나면 맨 앞이 둘이 되어 claim이 깨졌다. 끝난 맨 앞 행까지 잠그는 방법(`FOR UPDATE OF k, c`)은 쓰지 않았다. 누가 그 행을 쥐면(예: 예약 행, F13) 키 전체의 넘기기가 미뤄지고, 계약 테스트 `aLockedReservationIsStillReported`가 깨졌다. 셋 다 리뷰어가 PG 18.6에서 재현했고, `HeadStatementRaceTest`가 문장 사이에 상대를 커밋시켜 본다.
   - `unfinished_count`를 지웠다. 넘길 키는 `ledger_command_finished_head`(끝났는데 맨 앞인 명령)에서 찾는다. 키마다 다음 미완료를 따로 `min(seq)`로 찾는다. 키들을 묶은 `GROUP BY`는 막힌 키 뒤의 백로그를 모두 읽었다(2만 건에 564페이지, 지금 30페이지).
   - 트랜잭션마다 잡는 행은 docs/development.md "트랜잭션과 잠금"에 표로 둔다.
 - **확인**:
@@ -291,7 +293,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
   - REPEATABLE READ 이상의 앱은 claim의 넘기기와 겹친 접수에서 40001을 받을 수 있다. 앱은 이미 같은 키의 동시 접수에서 이 실패를 재시도해야 한다(4절).
   - 앱이 키 행을 오래 쥐면 그 키의 다음 명령은 그 앱이 커밋할 때까지 나가지 않는다. 다른 키는 영향이 없다.
 
-### F34. 워커의 in-flight 슬롯이 새거나, 설정의 상한과 다른 슬롯으로 돈다 (02d 리뷰 I5·I7, 03b)
+### F34. 워커의 in-flight 슬롯이 새거나, 설정의 상한과 다른 슬롯으로 돈다
 
 - **깨지는 것**:
   - `LedgerClient.submit`이 future 대신 `null`을 돌려주면, 그 배치의 슬롯을 future에 맡긴 직후 `NullPointerException`이 나 슬롯이 영영 돌아오지 않았다. 몇 번 반복되면 슬롯이 바닥나 그 프로세스의 claim이 멈춘다.
@@ -300,70 +302,70 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: `null`은 보내는 자리에서 던진 실패와 같은 경로(알리고, 되돌리고, 슬롯 반납)를 탄다. `InFlightLimit`은 만든 슬롯 수(`capacity()`)를 기억하고, `RelayWorker`는 그것이 `maxInFlight`와 다르면 만들어지지 않는다. Spring 자동 설정은 같은 설정값에서 슬롯을 만든다(`LedgerRelayAutoConfigurationTest.slotsFollowMaxInFlight`).
 - **확인**: 고치기 전 null 장은 `NullPointerException`으로, 불일치 장은 "거부가 없음"으로 실패했다. 자동 설정에서 슬롯을 1024로 고정하는 변이는 `slotsFollowMaxInFlight`가 잡는다.
 
-### F35. 핸들러 실패를 기록하는 쓰기마저 실패하면 핸들러 예외가 사라진다 (02d 리뷰 I6, 03b)
+### F35. 핸들러 실패를 기록하는 쓰기마저 실패하면 핸들러 예외가 사라진다
 
-- **깨지는 것**: 핸들러가 던지면 그 트랜잭션을 롤백하고 새 트랜잭션에 "받은 결과와 핸들러 실패"를 남긴다(§5.4). 이 두 번째 쓰기가 DB 오류로 실패하면 워커는 DB 오류만 받았다. 처음 원인인 핸들러 예외는 어디에도 남지 않아 운영자가 핸들러 버그를 볼 수 없었다.
+- **깨지는 것**: 핸들러가 던지면 그 트랜잭션을 롤백하고 새 트랜잭션에 "받은 결과와 핸들러 실패"를 남긴다. 이 두 번째 쓰기가 DB 오류로 실패하면 워커는 DB 오류만 받았다. 처음 원인인 핸들러 예외는 어디에도 남지 않아 운영자가 핸들러 버그를 볼 수 없었다.
 - **재현**: `RelayWorkerTest` › 핸들러가 던지고 그 기록마저 실패하면 › `theHandlersFailureSurvivesAFailedRecord`.
 - **구조**: 두 번째 쓰기의 예외에 핸들러 예외를 `addSuppressed`로 실어 던진다(`WorkerWrites.finish`). 워커 이벤트 `writeFailed`가 둘을 함께 받는다.
 - **확인**: 고치기 전에는 suppressed가 비어 실패했다.
 
-### F36. TB가 끊기면 health가 느려져 앱이 서비스에서 빠진다 (03b 최종 리뷰)
+### F36. TB가 끊기면 health가 느려져 앱이 서비스에서 빠진다
 
 - **깨지는 것**: 첫 health는 요청마다 TB에 조회를 보내고 1초까지 기다렸고, 대기 명령을 모두 셌다. TB가 끊기면 health 한 번이 1초를 넘는다. 오케스트레이터의 probe timeout(Kubernetes 기본 1초)에 걸려 앱이 서비스에서 빠지거나 재시작된다. 그러면 접수까지 멈춘다. TB 없이도 접수를 받는다는 이 라이브러리의 요점과 정반대다. 장애가 길어지면 대기가 커져 health가 더 느려지고, 기다리다 끝난 조회는 TB 클라이언트에 계속 쌓였다.
 - **재현**: `LedgerRelayHealthIndicatorTest` › `healthDoesNotWaitForASilentLedger`, `aSilentLedgerIsProbedOnceAtATime`. `LockDueBoundedWorkTest` › 대기를 세면 › `countingAHugeBacklogReadsABoundedNumberOfPages`.
 - **구조**: TB 확인은 기다리지 않는다. 조회를 한 번에 하나만 보내고, 마지막 답이 5초 안이면 UP이다. 대기 수는 1,000까지만 세고(`Backlog.countsCapped`), 가장 오래된 대기는 새 인덱스 `ledger_command_waiting (id) WHERE state IN ('PENDING','CLAIMED')`의 첫 항목에서 읽는다.
 - **확인**: 고치기 전에는 TB가 답하지 않을 때 health 한 번이 probe 시간만큼 걸렸고, 요청 20번에 조회 20개가 쌓였다. 대기 5만 건에서 세는 질의가 2,856페이지를 읽었다. 상한 없는 세기로 되돌리는 변이는 대기 10만 건에서 7,191페이지로 실패한다(상한 2,500).
 
-### F37. 샘플 앱 두 대가 빈 DB에 동시에 뜨면 한쪽이 스키마를 만들다 죽는다 (03b-2 샘플 쇼핑몰)
+### F37. 샘플 앱 두 대가 빈 DB에 동시에 뜨면 한쪽이 스키마를 만들다 죽는다 (샘플 쇼핑몰)
 
-- **깨지는 것**: compose는 같은 DB를 쓰는 앱 둘을 함께 띄운다. 둘 다 "표가 없으면 만든다"를 하면 같은 순간에 `CREATE TABLE`이 겹친다. 늦은 쪽이 `duplicate key value violates unique constraint "pg_type_typname_nsp_index"`(23505)로 실패해 기동하지 못한다. 면접관이 `docker compose up`을 처음 했을 때 인스턴스 하나가 죽어 있는 장면이 된다(03b 반목표 "처음 띄울 때 실패").
+- **깨지는 것**: compose는 같은 DB를 쓰는 앱 둘을 함께 띄운다. 둘 다 "표가 없으면 만든다"를 하면 같은 순간에 `CREATE TABLE`이 겹친다. 늦은 쪽이 `duplicate key value violates unique constraint "pg_type_typname_nsp_index"`(23505)로 실패해 기동하지 못한다. 저장소를 처음 받은 사람이 `docker compose up`을 했을 때 인스턴스 하나가 죽어 있는 장면이 된다(반목표 "처음 띄울 때 실패").
 - **재현**: `ShopBootstrapTest` › 빈 DB에서 › `twoInstancesStartingTogetherApplyTheSchemaOnce`. 빈 database에 두 스레드가 함께 `ShopSchema.apply`를 부른다.
 - **구조**: `ShopSchema.apply`는 한 트랜잭션에서 `pg_advisory_xact_lock(764)`를 잡은 뒤, `shop_order`가 없을 때만 라이브러리 `schema.sql`과 `shop-schema.sql`을 적용한다. 늦은 쪽은 앞쪽이 커밋할 때까지 lock에서 기다렸다가 표가 있는 것을 보고 지나간다. 적용은 `SmartInitializingSingleton`에서 하므로 워커 루프가 시작하기 전에 끝난다. 라이브러리는 여전히 스키마를 자동 적용하지 않는다. 이것은 샘플 앱만의 편의다.
 - **확인**: lock 줄을 지운 대조군에서 위 테스트가 5번 중 5번 23505로 실패했다.
 
-### F38. 결제 버튼을 두 번 누르면 주문이 둘 생기고 돈이 두 번 묶인다 (03b-2 샘플 쇼핑몰)
+### F38. 결제 버튼을 두 번 누르면 주문이 둘 생기고 돈이 두 번 묶인다 (샘플 쇼핑몰)
 
 - **깨지는 것**: 같은 `Idempotency-Key`로 결제 요청 둘이 동시에 온다. "키로 찾아보고 없으면 넣는다"로 짜면 두 트랜잭션이 모두 "없다"를 보고 둘 다 넣으려 한다. 유일 제약이 있으면 늦은 쪽이 23505로 500을 받고(사용자는 결제가 실패했다고 본다), 유일 제약이 없으면 주문 둘과 예약 둘이 생겨 구매자 돈이 두 번 묶인다. 라이브러리의 멱등성(같은 commandId는 한 번)은 이것을 막지 못한다. 두 요청이 서로 다른 주문, 다른 commandId를 만들기 때문이다.
 - **재현**: `OrderFlowTest` › 결제하면 › `aDoubleClickMakesOneOrderAndOneReservation`(두 스레드가 같은 키로 함께 결제), HTTP로 부르면 › `aRepeatedRequestReturnsTheSameOrder`.
 - **구조**: `shop_order.idempotency_key`에 유일 제약을 두고 `INSERT … ON CONFLICT (idempotency_key) DO NOTHING RETURNING`으로 넣는다. 늦은 쪽은 앞 트랜잭션이 끝날 때까지 유일 인덱스에서 기다렸다가 아무것도 넣지 않는다. 이어서 키로 다시 읽는다. READ COMMITTED는 문장마다 스냅숏을 새로 잡으므로 앞쪽이 커밋한 주문이 보인다. 같은 키에 구매자나 상품이 다르면 422로 거부한다. 예약은 새로 넣은 쪽만 접수한다.
 - **확인**: `ON CONFLICT DO NOTHING`을 지운 대조군에서 4건이 실패했다(더블 클릭, 다른 상품 거부, HTTP 둘).
 
-### F39. TB 클라이언트에 호스트 이름 주소를 주면 앱이 기동하지 못한다 (03b-2 샘플 쇼핑몰)
+### F39. TB 클라이언트에 호스트 이름 주소를 주면 앱이 기동하지 못한다 (샘플 쇼핑몰)
 
 - **깨지는 것**: TB Java 클라이언트(0.17.9)는 `IPv4:포트`만 받는다. compose 안에서 TB 앞의 Toxiproxy는 `toxiproxy:3001`처럼 이름으로만 찾을 수 있다. 이 값을 그대로 넘기면 `Client`를 만드는 순간 `Replica addresses format is invalid`로 실패해 앱이 뜨지 않는다.
 - **재현**: `ShopBootstrapTest` › TB 주소를 정하면 › `theClientRefusesAHostName`(TB의 동작을 고정하는 학습 테스트), `aHostNameBecomesAnIpv4Address`.
 - **구조**: 샘플 앱이 `shop.tigerbeetle.address`를 기동할 때 IPv4로 바꿔 `Client` 빈을 직접 만든다(`TigerBeetleClientConfig`). 라이브러리 자동 설정은 앱이 준 `Client`를 쓴다. 라이브러리의 `ledger-relay.tigerbeetle.addresses`도 같은 제약을 받으므로 그 설정에는 IP를 쓴다(docs/development.md).
 - **확인**: `localhost:<포트>`로 클라이언트를 만들면 위 메시지로 실패하고, 바꾼 `127.0.0.1:<포트>`로는 조회가 된다(2026-10-18, 테스트 컨테이너).
 
-### F40. health를 5초보다 드물게 부르면 TB가 멀쩡해도 TB DOWN으로 알린다 (03b-2에서 발견, 라이브러리)
+### F40. health를 5초보다 드물게 부르면 TB가 멀쩡해도 TB DOWN으로 알린다 (라이브러리)
 
 - **깨지는 것**: F36의 health는 "TB의 마지막 답이 지금부터 5초 안인가"로 판정했다. 그런데 확인 조회는 health를 부를 때만 보낸다. 그래서 health를 5초보다 드물게 부르면, 앞 확인의 답은 늘 5초보다 오래됐고 새 확인의 답은 아직 오지 않아 TB가 멀쩡해도 늘 `ledger: DOWN`이다. Kubernetes probe의 기본 간격은 10초다. 운영자는 TB가 늘 끊겨 있다고 보게 되고, 진짜 장애와 구분할 수 없다. 샘플 앱을 5초 간격 curl로 지켜보다 찾았다(1초 간격이면 UP, 6초 간격이면 계속 DOWN).
 - **재현**: `LedgerRelayHealthIndicatorTest` › `aLedgerThatAnswersIsUpEvenWhenHealthIsCalledRarely`. TB가 조금 늦게 답하는 가짜(`FakeLedger.answerHeldLookups`)와 시계를 돌리는 테스트로, 10초 뒤 health를 부른다.
 - **구조**: 판정을 시각이 아니라 확인의 결과로 한다. 마지막으로 끝난 확인이 성공했고, 가 있는 확인이 `ledgerStaleAfter`(5초)보다 오래 답을 기다리지 않으면 UP이다. F36의 성질은 그대로다. health는 기다리지 않고, 조회는 한 번에 하나만 보낸다. 답 없는 확인이 5초를 넘으면 DOWN이다(`aProbeUnansweredForTooLongIsDown`).
 - **확인**: 고치기 전 규칙에서 위 테스트가 `ledger: DOWN`으로 실패했다. 기존 health 테스트 5건은 그대로 통과한다.
 
-### F41. 앱을 컨테이너로 띄우면 TB 클라이언트가 io_uring을 못 써 앱이 기동하지 못한다 (03b-2 샘플 쇼핑몰)
+### F41. 앱을 컨테이너로 띄우면 TB 클라이언트가 io_uring을 못 써 앱이 기동하지 못한다 (샘플 쇼핑몰)
 
 - **깨지는 것**: TB 서버만 io_uring을 쓰는 줄 알기 쉽다. 그런데 TB Java 클라이언트(0.17.9)도 네이티브 라이브러리 안에서 io_uring을 쓴다. Docker 기본 seccomp 프로필로 띄운 앱 컨테이너는 `Client`를 만드는 순간 `error(io): io_uring is not available` → `thread 7 panic: attempt to unwrap error: PermissionDenied`로 JVM째 죽는다(exit 133). 예외가 아니라 panic이라 앱이 잡을 수도 없다. compose의 `restart`가 다시 띄워도 매번 같다. 처음 compose를 띄웠을 때 앱 둘이 모두 이렇게 재시작을 반복했다. 테스트에서는 앱이 호스트 JVM이라 드러나지 않았다.
 - **재현**: `compose.yaml`의 앱 서비스에서 `security_opt`를 지우고 `docker compose up`. 끝-끝 테스트 `ShopComposeTest`가 기동 대기(`/actuator/health`)에서 실패한다.
 - **구조**: 앱 컨테이너에도 `security_opt: [seccomp=unconfined]`를 준다(TB 서버 컨테이너와 같다). 운영에서는 unconfined 대신 io_uring 시스템 호출만 더 허용한 seccomp 프로필을 쓰는 편이 낫다. docs/development.md에 적었다.
 - **확인**: 옵션 없이 띄운 앱 둘이 위 panic으로 재시작을 반복했고, 옵션을 준 뒤 둘 다 떠 health가 UP이었다(2026-10-18, Docker Desktop).
 
-### F42. 앱 둘이 같은 이미지를 동시에 빌드해 `docker compose up`이 가끔 실패한다 (03b-2 샘플 쇼핑몰)
+### F42. 앱 둘이 같은 이미지를 동시에 빌드해 `docker compose up`이 가끔 실패한다 (샘플 쇼핑몰)
 
-- **깨지는 것**: 처음 compose는 `shop-a`와 `shop-b`에 모두 `build`와 같은 `image` 이름을 줬다. `docker compose up --build`는 둘을 동시에 빌드하고, 늦게 끝난 쪽이 이미지 이름을 붙이다 `image "docker.io/library/ledger-relay-shop:local": already exists`로 실패해 `up` 전체가 끝난다. 빌드 캐시 상태에 따라 날 때도 안 날 때도 있다. 면접관이 처음 띄울 때 나면 데모가 시작조차 하지 않는다(03b 반목표).
+- **깨지는 것**: 처음 compose는 `shop-a`와 `shop-b`에 모두 `build`와 같은 `image` 이름을 줬다. `docker compose up --build`는 둘을 동시에 빌드하고, 늦게 끝난 쪽이 이미지 이름을 붙이다 `image "docker.io/library/ledger-relay-shop:local": already exists`로 실패해 `up` 전체가 끝난다. 빌드 캐시 상태에 따라 날 때도 안 날 때도 있다. 처음 받은 사람이 띄울 때 나면 데모가 시작조차 하지 않는다(반목표).
 - **재현**: 전체 `./gradlew check --rerun-tasks`에서 `ShopComposeTest`가 `compose up -d --build` 단계에서 위 메시지로 실패했다(2026-10-18). 그전 두 번은 통과했다.
 - **구조**: 이미지는 `shop-a`만 빌드한다. `shop-b`는 같은 이미지 이름을 쓰고 `pull_policy: never`라 레지스트리에서 찾지 않는다. compose는 컨테이너를 만들기 전에 빌드를 끝내므로 `shop-b`는 `shop-a`가 빌드한 이미지로 뜬다.
 - **확인**: 고친 뒤 이미지를 지운 상태(처음 띄우는 상황)와 캐시가 있는 상태에서 `ShopComposeTest`를 차례로 돌려 둘 다 통과했다.
 
-### F43. 화면의 대사가 늦게 끝난 명령을 영영 건너뛰어 정합성 칸이 일부만 보고 초록이 된다 (03b-2 최종 리뷰)
+### F43. 화면의 대사가 늦게 끝난 명령을 영영 건너뛰어 정합성 칸이 일부만 보고 초록이 된다
 
 - **깨지는 것**: 처음 정합성 칸은 대사를 "지난 위치부터 이어서" 했다. 라이브러리의 대사는 끝난 명령을 행 순서(id)로 읽는다. 그런데 명령은 행 순서대로 끝나지 않는다. 멈췄다 포기된 확정과 그 뒤 예약(장면 3), 워커 둘의 묶음, 늦게 커밋된 트랜잭션이 그렇다. 위치가 아직 안 끝난 행을 지나가면, 그 행은 끝난 뒤에도 다시 읽히지 않는다. 그래서 장면 3의 바로 그 명령들이 대사에서 빠졌다. 거기서 어긋남이 있어도 칸은 초록이었다. 반목표 "가짜 숫자 없음"에 어긋난다.
 - **재현**: `DemoScenarioTest` › 대사를 돌리면 › `theRunningReconciliationCountsCommandsThatFinishLate`. 잘못된 확정이 멈춘 동안 다른 주문이 끝나고, 그 뒤 포기한다. 고치기 전에는 끝난 명령 22건 중 18건만 대사했다.
-- **구조**: `LedgerSnapshot`이 갱신마다 처음부터 전부 대사하고 누계를 새로 쓴다(5만 건까지. 데모 크기에서는 늘 전부다). 운영 규모의 대사는 03c 이후 "아직 안 끝난 가장 작은 id"를 넘지 않는 위치로 다시 설계한다(열린 장애 목록의 대사 커서와 같은 문제).
+- **구조**: `LedgerSnapshot`이 갱신마다 처음부터 전부 대사하고 누계를 새로 쓴다(5만 건까지. 데모 크기에서는 늘 전부다). 운영 규모의 대사는 나중에 "아직 안 끝난 가장 작은 id"를 넘지 않는 위치로 다시 설계한다(열린 장애 목록의 대사 커서와 같은 문제).
 - **확인**: 위 테스트가 고치기 전 `expected: 22L but was: 18L`로 실패했고, 고친 뒤 통과한다.
 
-### F44. `docker compose down` 뒤 다시 띄우면 원장만 남아 화면에 거짓 중복 이체가 보인다 (03b-2 최종 리뷰)
+### F44. `docker compose down` 뒤 다시 띄우면 원장만 남아 화면에 거짓 중복 이체가 보인다
 
 - **깨지는 것**: 처음 compose는 TB 데이터를 이름 붙은 볼륨(`tigerbeetle-data`)에 두고, PG는 이미지의 이름 없는 볼륨을 썼다. 가장 흔한 끄기인 `docker compose down`(-v 없이)은 컨테이너와 함께 PG 데이터를 버리지만 TB 볼륨은 남긴다. 다음 `up`에서 PG는 비었는데 원장은 옛 이체를 그대로 갖는다. 주문 id가 1부터 다시 시작해 옛 확정(user_data = 옛 주문 id)이 새 주문과 엇갈린다. 화면의 중복 이체가 0보다 커지고, 가맹점 잔액과 결제 완료 합이 달라 정합성 칸이 계속 빨강이 된다. 돈이 정확히 한 번 움직인다는 것을 보여 주려는 데모가 거꾸로 보인다.
 - **재현**: `ComposeFileTest` › `neitherStoreOutlivesTheOther`(compose.yaml에 맨 위 `volumes:`가 없다). 손으로는 결제·출고 → `docker compose down` → `up`.
@@ -374,7 +376,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 
 | # | 장애 | 막을 곳 |
 |---|---|---|
-| O2 | 워커가 어느 지점에서 죽어도 중복 없이 복구되는가(kill -9) | 4단계 E1 |
+| O2 | 워커가 어느 지점에서 죽어도 중복 없이 복구되는가(kill -9) | 장애 실험(아직 없음) |
 | O7 | 덤프·복원이나 다른 클러스터로 옮긴 DB에서는 옮겨 온 `accepted_xact`가 새 트랜잭션 ID와 우연히 같아져, 이미 커밋된 예약을 참조한 정상 확정이 `ReservationNotFoundException`으로 거부될 수 있다. 재현 테스트는 두지 않았다. 클러스터 이전을 재현하는 비용이 절차 한 줄보다 크다 | 이전 절차: 복원 직후 `UPDATE ledger_command SET accepted_xact = '0'`(docs/development.md) |
 
 닫힌 열린 장애: O1(행 잠금 동시성)은 F11~F15로, O3(응답 유실 뒤 재전송)은 F23으로, O4(TB 기동 panic)는 F26으로 옮겼다(F26은 완화). O6(연결이 묶이지 않은 접수)은 F18로 막았다. O5(멈춘 명령을 볼 방법이 없음)는 03b의 운영자 포트 `LedgerRelayOperator.haltedCommands`(멈춘 이유와 시각 포함)로 닫았다.
@@ -387,7 +389,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 |---|---|---|
 | 성격 | 규칙 위반, 버그 신호 | 일시적일 수 있음 |
 | 처리 | 바로 멈춤, 재시도 없음 | backoff로 계속 재시도. 그동안 그 키는 막힘 |
-| 드러내는 지표 | 멈춘 키 수 | `handler_failures` |
+| 드러내는 곳 | health의 `halted`, 운영자 포트 `haltedCommands` | 행의 `handler_failures` 열, 워커 로그 |
 | 사람이 할 일 | 원인 수정 후 `abandonHalted`로 포기 | 핸들러 수정 |
 
 ## 4. 격리 수준과 무관한 이유
@@ -411,9 +413,9 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 
 **높은 수준에서 바뀌는 것은 기다림이 에러가 된다는 것뿐이다.**
 
-- 워커 단계는 우리가 새로 여는 트랜잭션이라 READ COMMITTED로 명시한다(F17, P2b-16).
-- 접수는 앱 트랜잭션에 합류하므로 앱의 수준을 따른다(P2b-17). REPEATABLE READ·SERIALIZABLE에서 같은 키나 같은 commandId의 동시 접수는 늦은 쪽이 직렬화 실패(SQLSTATE 40001)로 끝난다. 행은 하나만 남고 순번은 꼬이지 않는다. 앱은 40001을 보고 재시도한다. 확인: `HigherIsolationSubmitTest`의 세 장, 두 수준. 모두 6건이다(셋째 장은 02c에 더한 "다른 순서 키의 같은 commandId"). READ COMMITTED의 같은 경우는 `ReadCommittedSubmitTest`가 본다(02d). claim이 끝난 맨 앞을 넘긴 키에 그보다 앞선 스냅숏으로 접수해도 40001이다(`HeadRaceTest`, 02e F33).
-- 대조군(02b, 앞의 두 장 4건 기준): 순번을 키 잠금 없이 `max(seq)+1`로 내면 4건 중 1건(같은 키, REPEATABLE READ)만 실패한다. 늦은 쪽이 재시도 가능한 40001이 아니라 유일성 위반(23505)으로 끝난다. 나머지 3건이 통과하는 이유는 `UNIQUE (ordering_key, seq)`가 순번 공유를 막고, SERIALIZABLE에서는 PostgreSQL이 동시 트랜잭션의 유일성 위반을 40001로 바꾸기 때문이다. 높은 수준에서는 키 잠금 말고 방어선이 하나 더 있는 셈이다. READ COMMITTED에서 키 잠금이 빠진 것은 F14가 잡는다.
+- 워커 단계는 우리가 새로 여는 트랜잭션이라 READ COMMITTED로 명시한다(F17).
+- 접수는 앱 트랜잭션에 합류하므로 앱의 수준을 따른다. REPEATABLE READ·SERIALIZABLE에서 같은 키나 같은 commandId의 동시 접수는 늦은 쪽이 직렬화 실패(SQLSTATE 40001)로 끝난다. 행은 하나만 남고 순번은 꼬이지 않는다. 앱은 40001을 보고 재시도한다. 확인: `HigherIsolationSubmitTest`의 세 장, 두 수준. 모두 6건이다(셋째 장은 02c에 더한 "다른 순서 키의 같은 commandId"). READ COMMITTED의 같은 경우는 `ReadCommittedSubmitTest`가 본다. claim이 끝난 맨 앞을 넘긴 키에 그보다 앞선 스냅숏으로 접수해도 40001이다(`HeadRaceTest`, F33).
+- 대조군(앞의 두 장 4건 기준): 순번을 키 잠금 없이 `max(seq)+1`로 내면 4건 중 1건(같은 키, REPEATABLE READ)만 실패한다. 늦은 쪽이 재시도 가능한 40001이 아니라 유일성 위반(23505)으로 끝난다. 나머지 3건이 통과하는 이유는 `UNIQUE (ordering_key, seq)`가 순번 공유를 막고, SERIALIZABLE에서는 PostgreSQL이 동시 트랜잭션의 유일성 위반을 40001로 바꾸기 때문이다. 높은 수준에서는 키 잠금 말고 방어선이 하나 더 있는 셈이다. READ COMMITTED에서 키 잠금이 빠진 것은 F14가 잡는다.
 
 모든 트랜잭션을 SERIALIZABLE로 강제하지 않는 이유: 워커끼리 부딪힐 때마다 재시도가 생겨 처리량이 떨어진다. 이미 잠금으로 막은 문제를 비싸게 한 번 더 막는 셈이다.
 - 교착: 한 앱 트랜잭션이 키 K1, K2 순서로 접수하고 다른 트랜잭션이 K2, K1 순서로 접수하면, 두 트랜잭션이 `ledger_ordering_key`의 행 잠금을 서로 기다려 교착(40P01)한다. READ COMMITTED에서도 같다. 한 트랜잭션에서 여러 키를 접수하면 키를 정해진 순서(예: 문자열 순)로 접수한다. 또 긴 앱 트랜잭션은 커밋할 때까지 그 키의 다른 접수를 모두 기다리게 한다(lock_timeout을 앱이 정한다).

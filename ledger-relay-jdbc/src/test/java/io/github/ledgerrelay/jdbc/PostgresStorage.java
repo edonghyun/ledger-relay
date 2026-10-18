@@ -30,7 +30,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * PostgreSQL 저장소 한 벌. 컨테이너는 JVM에 하나이며 처음 쓸 때 띄우고 스키마를 한 번 적용한다(P2b-15).
+ * PostgreSQL 저장소 한 벌. 컨테이너는 JVM에 하나이며 처음 쓸 때 띄우고 스키마를 한 번 적용한다.
  * 커넥션 풀은 기본 격리 수준마다 하나씩 만들어 재사용한다. 격리는 테스트마다 {@link #clear()}로 한다.
  */
 final class PostgresStorage implements StorageUnderTest {
@@ -63,7 +63,7 @@ final class PostgresStorage implements StorageUnderTest {
     }
 
     /**
-     * 풀의 기본 격리 수준을 정한 경우(P2b-16 확인용). 값은 Hikari의 {@code transactionIsolation} 이름이다(예:
+     * 풀의 기본 격리 수준을 정한 경우. 값은 Hikari의 {@code transactionIsolation} 이름이다(예:
      * {@code TRANSACTION_REPEATABLE_READ}).
      */
     static PostgresStorage withDataSourceTransactions(String poolIsolation) {
@@ -74,7 +74,7 @@ final class PostgresStorage implements StorageUnderTest {
     }
 
     /**
-     * 앱이 JPA 트랜잭션 매니저를 쓰는 경우(R16, P2b-13). 같은 DataSource 위의 Hibernate와 {@link JpaTransactionManager}다.
+     * 앱이 JPA 트랜잭션 매니저를 쓰는 경우. 같은 DataSource 위의 Hibernate와 {@link JpaTransactionManager}다.
      * 매니저가 DataSource를 알고 {@code HibernateJpaDialect}가 JDBC 커넥션을 노출해야 {@code JdbcClient}가 같은 트랜잭션에
      * 합류한다. 앱 테이블 {@code orders}와 엔터티 하나를 둔다.
      */
@@ -185,7 +185,7 @@ final class PostgresStorage implements StorageUnderTest {
     }
 
     /**
-     * 맨 앞 표시와 키 행을 행에서 다시 계산한다(02e P2e-5). 직접 SQL로 행을 바꾼 준비 뒤에 부른다. 스크립트의 표 잠금은
+     * 맨 앞 표시와 키 행을 행에서 다시 계산한다. 직접 SQL로 행을 바꾼 준비 뒤에 부른다. 스크립트의 표 잠금은
      * 트랜잭션 안에서만 되므로 트랜잭션을 열거나, 열린 것에 합류한다.
      */
     void rebuildHeads() {
@@ -193,7 +193,7 @@ final class PostgresStorage implements StorageUnderTest {
     }
 
     /**
-     * 키마다 표시가 행과 맞는지 본다(02e P2e-7f): 표시는 0~1개다. 미완료가 있으면 표시가 있고, 그것은 가장 앞 미완료이거나
+     * 키마다 표시가 행과 맞는지 본다: 표시는 0~1개다. 미완료가 있으면 표시가 있고, 그것은 가장 앞 미완료이거나
      * 그보다 앞 순번의 끝난 명령(다음 claim이 넘길 것)이다. 미완료가 없으면 표시가 없거나 끝난 명령이다. 명령이 있는 키는
      * 키 행이 있다(넘기기가 그 행을 잡는다). 어긋난 키를 모두 담아 던진다.
      */

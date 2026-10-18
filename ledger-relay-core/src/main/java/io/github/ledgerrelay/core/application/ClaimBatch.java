@@ -6,7 +6,7 @@ import java.util.List;
  * claim 한 번의 결과.
  *
  * @param halted 게이트가 멈춘(HALT) 명령의 commandId. 행은 HALTED로 바뀌어 다시 후보가 되지 않으므로 한 번만 실린다.
- *               워커가 알린다(§5.2, docs/failure-modes.md F9)
+ *               워커가 알린다(docs/failure-modes.md F9)
  * @param problems 판단이 예외를 던진 후보와 그 이유(F29). 멈춤으로 세운 후보는 {@code halted}에도 실린다
  */
 public record ClaimBatch(List<ClaimedCommand> claimed, List<String> halted, List<Problem> problems) {

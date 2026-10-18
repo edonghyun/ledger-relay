@@ -28,10 +28,10 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 /**
- * 키마다 지금 차례인 명령의 표시(is_head). 넣을 때 키에 맨 앞이 없으면 켜고, 명령이 끝나면 다음 claim이 넘긴다(02e P2e-7).
+ * 키마다 지금 차례인 명령의 표시(is_head). 넣을 때 키에 맨 앞이 없으면 켜고, 명령이 끝나면 다음 claim이 넘긴다.
  * claim 질의가 막힌 키의 백로그를 훑지 않고 맨 앞만 읽으려면 이 표시가 행과 늘 맞아야 한다.
  */
-@DisplayName("키마다 맨 앞 표시 — 02e P2e-5·P2e-7")
+@DisplayName("키마다 맨 앞 표시")
 class HeadBookkeepingTest {
 
     static final Duration LEASE = Duration.ofSeconds(30);
@@ -191,7 +191,7 @@ class HeadBookkeepingTest {
     class AfterHandEdits {
 
         @Test
-        @DisplayName("다시 계산하면 행에서 맨 앞을 되찾는다 — P2e-5")
+        @DisplayName("다시 계산하면 맨 앞을 되찾는다")
         void rebuildRepairsHandEditedRows() {
             // given
             submit(transfer("pay-1"));

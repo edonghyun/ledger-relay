@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 장면 3의 "잘못된 확정"을 라이브러리 표에 직접 넣는다(03b §7.4). <b>정상 API로는 만들 수 없는 행이다. 데모 전용이다.</b>
+ * 장면 3의 "잘못된 확정"을 라이브러리 표에 직접 넣는다. <b>정상 API로는 만들 수 없는 행이다. 데모 전용이다.</b>
  * 라이브러리의 접수 검사는 예약보다 앞 순번의 확정을 거부한다(F9). 그래서 버그나 DB 직접 수정으로 생긴 행을 흉내 내려고 검사를
  * 거치지 않고 넣는다. 스키마 CHECK는 지킨다.
  *

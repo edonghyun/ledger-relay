@@ -7,7 +7,7 @@ import java.util.Optional;
 public sealed interface Step {
 
     /**
-     * claim(§5.2). 토큰을 내밀지 않는다.
+     * claim. 토큰을 내밀지 않는다.
      *
      * @param gate         접수된(PENDING) 명령에 대한 게이트 결정
      * @param leaseExpired 처리 중(CLAIMED) 명령의 lease가 끝났는가. 저장소가 PG 시각으로 판단한다

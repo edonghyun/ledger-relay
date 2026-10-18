@@ -16,7 +16,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
-@DisplayName("조회 결과 — 스펙 §6 status(), 결과 반영 핸들러가 받는 값")
+@DisplayName("조회 결과 — status(), 결과 반영 핸들러가 받는 값")
 class CommandStatusTest {
 
     static final Instant ACCEPTED_AT = Instant.parse("2026-10-16T00:00:00Z");

@@ -1,7 +1,7 @@
 package io.github.ledgerrelay.core.spi;
 
 /**
- * 워커 한 바퀴에서 일어난 일을 바깥에 알리는 나가는 포트(03a P3a-7). 지표와 로그는 03b가 이것으로 붙인다.
+ * 워커 한 바퀴에서 일어난 일을 바깥에 알리는 나가는 포트. 로그(spring-boot 모듈의 {@code LoggingWorkerEvents})와 지표를 이것으로 붙인다.
  * 모든 메서드는 아무것도 하지 않는 기본 구현을 갖는다. 구현은 빨리 돌아와야 하고 던지지 않아야 한다.
  */
 public interface WorkerEvents {
@@ -10,7 +10,7 @@ public interface WorkerEvents {
     WorkerEvents NONE = new WorkerEvents() {
     };
 
-    /** 게이트가 멈춘 명령. 다시 후보가 되지 않으므로 명령마다 한 번만 온다(§5.2 HALT). */
+    /** 게이트가 멈춘 명령. 다시 후보가 되지 않으므로 명령마다 한 번만 온다. */
     default void halted(String commandId) {
     }
 
@@ -32,7 +32,7 @@ public interface WorkerEvents {
     default void writeFailed(String commandId, RuntimeException cause) {
     }
 
-    /** 결과 반영 핸들러가 던졌다. 받은 결과를 남기고 backoff 뒤 다시 잡힌다(§5.4). */
+    /** 결과 반영 핸들러가 던졌다. 받은 결과를 남기고 backoff 뒤 다시 잡힌다. */
     default void handlerFailed(String commandId, RuntimeException cause) {
     }
 

@@ -8,7 +8,7 @@ import java.util.Optional;
  * 토큰까지 다루는 상태 기계. 애플리케이션 서비스가 실행하며, 무작위 검증(E6a)의 오라클이기도 하다.
  *
  * <p>claim은 토큰을 받는다. 나머지 쓰기는 claim 때 받은 토큰을 내밀고, 행이 처리 중(CLAIMED)이며 토큰이 같을
- * 때만 반영된다. 아니면 0행이다(G5). 반영되는 쓰기의 목적지와 효과는 전이표(§4.3)의 CLAIMED 줄이 정한다.
+ * 때만 반영된다. 아니면 0행이다(G5). 반영되는 쓰기의 목적지와 효과는 전이표의 CLAIMED 줄이 정한다.
  * 전이표가 "불가"나 "해당 없음"으로 적은 칸에 닿으면 모듈의 버그이므로 {@link IllegalStateException}을 던진다.
  */
 public final class CommandStateMachine {
@@ -45,7 +45,7 @@ public final class CommandStateMachine {
             case Step.MarkSubmitted submitted -> {
                 if (row.knownResult().isPresent()) {
                     throw bug("이미 아는 결과(" + row.knownResult().get() + ")가 있는 명령을 TB에 다시 보내려 한다. "
-                            + "다시 보내면 원래 사유가 IdAlreadyFailed로 덮인다(§5.4)");
+                            + "다시 보내면 원래 사유가 IdAlreadyFailed로 덮인다");
                 }
                 yield CommandEvent.SUBMITTING;
             }
@@ -69,7 +69,7 @@ public final class CommandStateMachine {
             case UNCHANGED -> new StepResult.Unchanged();
             case ZERO_ROWS -> new StepResult.Fenced();
             case IMPOSSIBLE, NOT_APPLICABLE ->
-                    throw bug(row.state() + " 상태에서 " + event + " 사건은 일어날 수 없다(§4.3 " + transition.outcome() + ")");
+                    throw bug(row.state() + " 상태에서 " + event + " 사건은 일어날 수 없다(전이표: " + transition.outcome() + ")");
         };
     }
 

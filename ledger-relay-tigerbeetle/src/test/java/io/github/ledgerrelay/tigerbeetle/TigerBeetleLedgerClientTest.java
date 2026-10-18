@@ -36,7 +36,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("TB 어댑터 — 명령 종류를 TB flags로, 결과를 결과 코드로 (03a P3a-9·P3a-10)")
+@DisplayName("TB 어댑터 — 명령 종류를 TB flags로, 결과를 결과 코드로")
 class TigerBeetleLedgerClientTest {
 
     static final TigerBeetleContainer TB = new TigerBeetleContainer();
@@ -135,7 +135,7 @@ class TigerBeetleLedgerClientTest {
         }
 
         @Test
-        @DisplayName("user_data_128에는 명령의 행 id가 저장된다 — TB에서 PG를 역참조한다 (§5.6)")
+        @DisplayName("user_data_128에는 명령의 행 id가 저장된다 — TB에서 PG를 역참조한다")
         void userData128CarriesTheRowId() {
             // when
             Submission payment = new Submission(nextTransferId(), BigInteger.valueOf(42), body(CommandKind.TRANSFER,
@@ -216,7 +216,7 @@ class TigerBeetleLedgerClientTest {
 
     @Nested
     @Order(5)
-    @DisplayName("이체를 ID로 조회하면 — 대사 (03b)")
+    @DisplayName("이체를 ID로 조회하면 — 대사")
     class Lookup {
 
         @Test
@@ -282,7 +282,7 @@ class TigerBeetleLedgerClientTest {
     class ClosedClient {
 
         @Test
-        @DisplayName("다시 써도 회복되지 않는 실패(LedgerUnavailableException)로 알린다 — 일시적 실패와 구분되게 (P2d-8)")
+        @DisplayName("다시 써도 회복되지 않는 실패(LedgerUnavailableException)로 알린다 — 일시적 실패와 구분되게")
         void aClosedClientIsReportedAsUnavailable() {
             // given
             com.tigerbeetle.Client closed = TB.newClient();

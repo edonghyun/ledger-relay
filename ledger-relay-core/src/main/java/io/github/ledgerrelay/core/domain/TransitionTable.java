@@ -8,7 +8,7 @@ import static io.github.ledgerrelay.core.domain.Transition.Effect.RECORD_SUBMISS
 import static io.github.ledgerrelay.core.domain.Transition.Effect.RUN_HANDLER;
 
 /**
- * 스펙 §4.3 전이표. 상태는 앞으로만 진행하고(G5), 최종 상태로 들어갈 때 핸들러를 같은 트랜잭션에서 실행한다(G6).
+ * 전이표. 상태는 앞으로만 진행하고(G5), 최종 상태로 들어갈 때 핸들러를 같은 트랜잭션에서 실행한다(G6).
  * 모든 칸은 {@code TransitionTableTest}의 표와 1:1로 대응한다.
  */
 public final class TransitionTable {
@@ -67,7 +67,7 @@ public final class TransitionTable {
         };
     }
 
-    /** 멈춘 명령은 claim 후보가 아니고, 운영자의 포기만 받는다(§5.2 HALT). */
+    /** 멈춘 명령은 claim 후보가 아니고, 운영자의 포기만 받는다. */
     private static Transition fromHalted(CommandEvent event) {
         return switch (event) {
             case ABANDONED_BY_OPERATOR -> Transition.moveTo(StoredState.SKIPPED, RUN_HANDLER);

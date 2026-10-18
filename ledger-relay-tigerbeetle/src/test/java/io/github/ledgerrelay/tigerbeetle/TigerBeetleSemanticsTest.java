@@ -39,7 +39,7 @@ import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
 /** 근거: docs.tigerbeetle.com/reference/requests/create_transfers (exists, exists_with_different_*, id_already_failed). */
-@DisplayName("TigerBeetle 0.17.9 결과 규칙 — 스펙 §4.4 분류표의 근거")
+@DisplayName("TigerBeetle 0.17.9 결과 규칙 — 분류표의 근거")
 class TigerBeetleSemanticsTest {
 
     static final TigerBeetleContainer TB = new TigerBeetleContainer();
@@ -180,7 +180,7 @@ class TigerBeetleSemanticsTest {
         }
 
         @Test
-        @DisplayName("충전한 뒤에도 같은 ID는 실패로 남고, 새 ID로 보내야 결제된다 (D7: 재시도는 새 명령)")
+        @DisplayName("충전한 뒤에도 같은 ID는 실패로 남고, 새 ID로 보내야 결제된다 (재시도는 새 명령)")
         void onlyANewIdSucceedsAfterTopUp() {
             // given: 결제가 한 번 실패했고, 그 뒤 100원을 충전했다
             ledger.rejected(payment, ExceedsCredits);
@@ -199,7 +199,7 @@ class TigerBeetleSemanticsTest {
 
     @Nested
     @Order(3)
-    @DisplayName("존재하지 않는 계좌에서 출금하면 (P4)")
+    @DisplayName("존재하지 않는 계좌에서 출금하면")
     class PayingFromAnUnknownAccount {
 
         Account unknown;

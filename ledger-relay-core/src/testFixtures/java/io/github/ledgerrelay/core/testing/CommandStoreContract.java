@@ -34,7 +34,7 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link CommandStore} 구현이 지켜야 할 계약(스펙 §5.1~§5.4, §5.6). 저장소는 판단하지 않으므로, 이 계약은 넣기·찾기·
+ * {@link CommandStore} 구현이 지켜야 할 계약. 저장소는 판단하지 않으므로, 이 계약은 넣기·찾기·
  * 잠그고 읽기·조건부 쓰기·트랜잭션의 의미만 다룬다. 업무 규칙은 {@code LedgerRelayContract}가 다룬다.
  * 구현마다 이 클래스를 상속한 테스트 하나를 둔다.
  */
@@ -42,7 +42,7 @@ public abstract class CommandStoreContract {
 
     protected static final Duration LEASE = Duration.ofSeconds(30);
     protected static final Duration BACKOFF = Duration.ofSeconds(5);
-    /** "막혀 있다"를 보는 고정 관찰 시간(P2b-4, docs/testing.md §8) */
+    /** "막혀 있다"를 보는 고정 관찰 시간(docs/testing.md) */
     protected static final Duration BLOCKED = Duration.ofMillis(300);
 
     protected StorageUnderTest storage;
@@ -61,7 +61,7 @@ public abstract class CommandStoreContract {
 
     @Nested
     @Order(1)
-    @DisplayName("순번을 내면 — §5.1-2")
+    @DisplayName("순번을 내면")
     class IssuingSequenceNumbers {
 
         @Test
@@ -81,7 +81,7 @@ public abstract class CommandStoreContract {
 
     @Nested
     @Order(2)
-    @DisplayName("넣고 찾으면 — §5.1-4, §5.6")
+    @DisplayName("넣고 찾으면")
     class InsertingAndFinding {
 
         @Test
@@ -170,7 +170,7 @@ public abstract class CommandStoreContract {
         }
 
         @Test
-        @DisplayName("같은 트랜잭션에서는 방금 넣은 행으로 표시되고, 커밋한 뒤에는 그렇지 않다 — P2b-2")
+        @DisplayName("같은 트랜잭션에서는 방금 넣은 행으로 표시되고, 커밋한 뒤에는 그렇지 않다")
         void aRowIsMarkedAsAcceptedInThisTransactionUntilCommit() {
             // when
             boolean insideTheInsertingTransaction = inTx(() -> {
@@ -254,7 +254,7 @@ public abstract class CommandStoreContract {
 
     @Nested
     @Order(4)
-    @DisplayName("claim 후보를 잠그면 — §5.2")
+    @DisplayName("claim 후보를 잠그면")
     class LockingDueCommands {
 
         @Test
@@ -420,7 +420,7 @@ public abstract class CommandStoreContract {
         }
 
         @Test
-        @DisplayName("되돌린 명령은 다시 시도할 시각에 줄을 선다 — 그동안 접수된 다른 키의 명령이 앞선다 (02e P2e-1)")
+        @DisplayName("되돌린 명령은 다시 시도할 시각에 줄을 선다 — 그동안 접수된 다른 키의 명령이 앞선다")
         void aRetriedCommandQueuesAtItsRetryTime() {
             // given
             inserted(newTransfer("pay-1", "order-1", 1));
@@ -434,7 +434,7 @@ public abstract class CommandStoreContract {
         }
 
         @Test
-        @DisplayName("lease가 끝난 명령은 끝난 시각에 줄을 선다 — 그동안 접수된 다른 키의 명령이 앞선다 (02e P2e-1)")
+        @DisplayName("lease가 끝난 명령은 끝난 시각에 줄을 선다 — 그동안 접수된 다른 키의 명령이 앞선다")
         void anExpiredLeaseQueuesAtItsExpiry() {
             // given
             inserted(newTransfer("pay-1", "order-1", 1));
@@ -636,12 +636,12 @@ public abstract class CommandStoreContract {
 
     @Nested
     @Order(7)
-    @DisplayName("다른 트랜잭션이 행을 잡고 있으면 — R12, G4, G7 (F11~F15)")
+    @DisplayName("다른 트랜잭션이 행을 잡고 있으면 — G4, G7 (F11~F15)")
     class WhileAnotherTransactionHoldsRows {
 
         @BeforeEach
         void givenAStoreWithRowLocks() {
-            assumeTrue(storage.supportsRowLocks(), "행 잠금이 없는 저장소: 동시성 장을 건너뛴다(P2b-3)");
+            assumeTrue(storage.supportsRowLocks(), "행 잠금이 없는 저장소: 동시성 장을 건너뛴다");
         }
 
         @Test
@@ -686,7 +686,7 @@ public abstract class CommandStoreContract {
         }
 
         @Test
-        @DisplayName("같은 키의 순번을 받은 트랜잭션이 커밋할 때까지 다음 순번은 기다린다 — seq 순서가 커밋 순서와 같게(R12)")
+        @DisplayName("같은 키의 순번을 받은 트랜잭션이 커밋할 때까지 다음 순번은 기다린다 — seq 순서가 커밋 순서와 같게")
         void theKeyLockHoldsUntilCommit() {
             // given: 첫 접수가 order-1의 순번 1을 받고 아직 커밋하지 않았다
             try (OtherTransaction<Long> first = OtherTransaction.start(storage.transactions(),
@@ -733,7 +733,7 @@ public abstract class CommandStoreContract {
 
     @Nested
     @Order(8)
-    @DisplayName("멈추면 — 03b 운영자 포트")
+    @DisplayName("멈추면 — 운영자 포트")
     class HaltRecord {
 
         @Test
@@ -769,7 +769,7 @@ public abstract class CommandStoreContract {
 
     @Nested
     @Order(9)
-    @DisplayName("멈춘 명령을 찾으면 — 03b 운영자 포트(O5)")
+    @DisplayName("멈춘 명령을 찾으면 — 운영자 포트(O5)")
     class FindingHalted {
 
         @Test
@@ -820,7 +820,7 @@ public abstract class CommandStoreContract {
 
     @Nested
     @Order(10)
-    @DisplayName("대기를 세면 — 03b health")
+    @DisplayName("대기를 세면 — health")
     class CountingTheBacklog {
 
         @Test
@@ -884,7 +884,7 @@ public abstract class CommandStoreContract {
     // ── 전제와 확인의 말 ────────────────────────────────────────────
 
     /**
-     * claim이 하는 대로 후보를 잠근다: 끝난 명령이 쥔 맨 앞을 먼저 넘기고(02e P2e-7) 후보를 잠근다. 열린 트랜잭션 안에서
+     * claim이 하는 대로 후보를 잠근다: 끝난 명령이 쥔 맨 앞을 먼저 넘기고 후보를 잠근다. 열린 트랜잭션 안에서
      * 부른다.
      */
     protected List<DueCommand> lockCandidates(int limit) {

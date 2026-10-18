@@ -3,7 +3,7 @@ package io.github.ledgerrelay.shop;
 import java.util.List;
 import java.util.Optional;
 
-/** 파는 상품. 재고는 비목표라 다루지 않는다(03b §3). 가격은 사탕(1/100 바트) 단위다. */
+/** 파는 상품. 재고는 비목표라 다루지 않는다. 가격은 사탕(1/100 바트) 단위다. */
 public final class Catalog {
 
     public record Product(String code, String name, String emoji, long priceSatang) {

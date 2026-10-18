@@ -83,7 +83,7 @@ public final class LedgerAssertions {
         }
     }
 
-    /** "아무 일도 없어야 한다"를 관찰하므로 고정된 관찰 시간을 쓴다(docs/testing.md §8). */
+    /** "아무 일도 없어야 한다"를 관찰하므로 고정된 관찰 시간을 쓴다(docs/testing.md). */
     public static void assertStillWaitingAfter(PendingTransfer pending, Duration window) {
         try {
             Thread.sleep(window.toMillis());

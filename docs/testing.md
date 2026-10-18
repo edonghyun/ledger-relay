@@ -4,16 +4,16 @@ ledger-relay의 테스트는 **읽으면 스펙이 되는 문서**다. 테스트
 
 ## 1. 테스트 트리 = 스펙 목차
 
-- 테스트 클래스는 대상 하나를 맡는다. `@DisplayName`에는 무엇의 규칙인지와 스펙 근거를 적는다.
+- 테스트 클래스는 대상 하나를 맡는다. `@DisplayName`에는 무엇의 규칙인지와, 있으면 보장 번호를 적는다.
 - `@Nested` 클래스에는 `@Order(n)`으로 목차 번호를 붙인다. JUnit에는 선언 순서 정렬기가 없어서, 번호가 없으면 결과 트리의 장 순서가 뒤섞인다(core는 `src/test/resources/junit-platform.properties`로 `OrderAnnotation`을 기본값으로 둔다).
 - `@Nested` 클래스는 **상황**이다. 이름은 "…한 상태에서", "…하면"으로 끝난다. 그 상황의 공통 전제는 해당 `@Nested`의 `@BeforeEach`에 둔다.
 - `@Test`는 **행동과 효과**다. 이름은 "~하면 ~이고, ~한다" 형태의 문장으로 쓴다.
-- 스펙 ID(§4.4, G7, P4 …)는 그 규칙의 근거가 되는 가장 바깥 단계에 한 번만 붙인다.
+- 보장 번호(G1~G7, [design.md](design.md))와 장애 번호(F1~, [failure-modes.md](failure-modes.md))는 그 규칙의 근거가 되는 가장 바깥 단계에 한 번만 붙인다.
 
 테스트 결과 화면에서는 이렇게 읽혀야 한다.
 
 ```
-TigerBeetle 0.17.9 결과 규칙 — 스펙 §4.4 분류표의 근거
+TigerBeetle 0.17.9 결과 규칙 — 분류표의 근거
 ├─ 500원 결제가 이미 기록된 상태에서
 │   ├─ 같은 결제를 다시 보내면 이미 기록된 것으로 인정되고, 돈은 한 번만 움직인다
 │   └─ 같은 ID에 금액만 바꿔 보내면 내용 충돌로 거부되고, 처음 금액만 남는다
@@ -119,13 +119,13 @@ class AfterAPaymentIsRecorded {
 
 ## 6. 어휘를 어디에 두는가
 
-- **여러 테스트 파일이 함께 쓰는 말**: `src/testFixtures` (`TigerBeetleTestLedger`, `LedgerAssertions`, 값 객체). 이것이 나중에 공개 테스트 키트(스펙 §8.4)가 된다.
+- **여러 테스트 파일이 함께 쓰는 말**: `src/testFixtures` (`TigerBeetleTestLedger`, `LedgerAssertions`, 값 객체). 이것이 나중에 공개 테스트 키트가 된다.
 - **한 파일에서만 쓰는 말**: 그 테스트 파일 위쪽의 private 메서드.
 - **어휘 자체도 테스트한다.** assert 메서드와 전제 메서드가 틀린 입력에서 제대로 실패하는지 확인하는 테스트를 둔다(`LedgerAssertionsTest`, `TigerBeetleTestLedgerTest`). 검증 도구가 틀리면 모든 테스트가 거짓말을 하기 때문이다.
 
 ## 6-1. 표를 그대로 옮긴 테스트 (core)
 
-스펙의 표(§4.3 전이표, §4.4 분류표)는 테스트 안에 **표 모양 그대로** 둔다.
+스펙의 표(전이표, 분류표)는 테스트 안에 **표 모양 그대로** 둔다.
 
 - 표는 `static final String` text block 상수로 두고 `@CsvSource(textBlock = 상수)`로 읽는다. `#` 줄은 표 안의 소제목이다.
 - `@ParameterizedTest`에는 `quoteTextArguments = false`를 붙인다. JUnit 6은 글자 인자를 따옴표로 감싸서 `"PENDING" + "TB_APPLIED"`처럼 보이게 하기 때문이다.
@@ -152,7 +152,7 @@ core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다
 |---|---|
 | `OtherTransaction.start(transactions, () -> …)` | 다른 스레드에서 트랜잭션을 열어 일을 한다. 일을 마쳐도 커밋하지 않고 기다린다. 그래서 잡은 행 잠금이 살아 있다 |
 | `awaitWork()` | 일이 끝나기를 기다려 결과를 받는다(최대 10초). 일이 던졌으면 그 예외가 나온다 |
-| `assertStillWorkingAfter(BLOCKED)` | 300ms 동안 일이 끝나지 않았다 = 무언가에 막혀 있다. "아무 일도 없어야 한다"를 볼 때만 고정 관찰 시간을 쓴다(§8) |
+| `assertStillWorkingAfter(BLOCKED)` | 300ms 동안 일이 끝나지 않았다 = 무언가에 막혀 있다. "아무 일도 없어야 한다"를 볼 때만 고정 관찰 시간을 쓴다 |
 | `commit()` / `rollback()` | 그 트랜잭션을 끝내고, 끝날 때까지 기다린다 |
 | `try (…)` | 닫을 때 아직 열려 있으면 롤백한다. 실패한 테스트가 잠금을 남기지 않게 |
 
@@ -172,7 +172,7 @@ core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다
 | `storage.elapse(LEASE.plusSeconds(1))` | 저장소 시계를 돌린다(lease 만료, backoff 경과). sleep하지 않는다 |
 | `handler.failNextCalls(1)` | 다음 핸들러 호출이 기록 전에 던진다 |
 | `handler.crashNextCall()` | 다음 핸들러 호출이 기록 전에 `Error`를 던진다(JVM 수준 실패 흉내) |
-| `assertQueryState(id, State.X)` | 조회 상태(§4.2) |
+| `assertQueryState(id, State.X)` | 조회 상태 |
 | `assertClaimed(batch, ids…)` / `assertNothingClaimed(batch)` | 정확히 이 명령들이 보낼 수 있게 된 순서로 잡힘 / 아무것도 안 잡힘 |
 | `assertWritten(r)` / `assertFenced(r)` / `assertHandlerFailed(r)` | 쓰기가 반영됨 / 0행으로 막힘 / 핸들러가 던져 취소됨 |
 | `assertHandlerRanOnceFor(id, State.X)` / `assertHandlerNeverRanFor(id)` | 핸들러가 끝까지 한 번 실행됨 / 한 번도 끝까지 실행되지 않음 |
@@ -192,7 +192,7 @@ core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다
 | `fake.requests()` | 받은 요청(이체 묶음)을 순서대로 본다 |
 | `RecordingWorkerEvents.events()` | 워커가 알린 일을 `"halted:capture-1"`, `"submitted:3"`처럼 받은 순서대로 본다 |
 
-- 응답을 기다리는 일은 `holdReplies`와 future로 결정적으로 만든다. submit-timeout은 짧게(200ms) 주고, "아무 일도 없다"를 볼 때만 그 시간을 관찰 시간으로 쓴다(§8).
+- 응답을 기다리는 일은 `holdReplies`와 future로 결정적으로 만든다. submit-timeout은 짧게(200ms) 주고, "아무 일도 없다"를 볼 때만 그 시간을 관찰 시간으로 쓴다.
 
 ## 7. 리팩터링 규칙
 
@@ -200,7 +200,7 @@ core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다
 - 뽑은 이름은 도메인의 말이어야 한다(`recorded`, `assertMovedExactly`). 기술의 말(`createAndCheckBatch`)은 쓰지 않는다.
 - 테스트 리팩터링은 동작을 바꾸지 않는다. 바꾸기 전후 전체 스위트가 같은 결과인지 확인한다. 새 경우를 추가하는 작업은 별도로 한다.
 
-## 8. TDD 규율 (스펙 §8.1)
+## 8. TDD 규율
 
 - 실패 테스트를 먼저 쓰고, **의도한 이유로** 실패하는지 확인한다. 컴파일 오류는 Red로 인정하지 않는다.
 - 외부 시스템(TB)의 동작을 고정하는 특성화 테스트는 처음부터 통과할 수 있다. 그 대신 기대값 하나를 일부러 틀리게 바꿔 실패하는지 확인한다.

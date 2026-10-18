@@ -17,7 +17,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
-@DisplayName("순서 게이트 — 스펙 G4, §5.2")
+@DisplayName("순서 게이트 — G4")
 class OrderingGateTest {
 
     @Nested
@@ -102,7 +102,7 @@ class OrderingGateTest {
         }
 
         @Test
-        @DisplayName("seq에 빈 번호(2·3·5·6)가 있어도 제출한다 (§5.1)")
+        @DisplayName("seq에 빈 번호(2·3·5·6)가 있어도 제출한다")
         void seqGapsDoNotMatter() {
             // given
             List<QueuedCommand> sameKey = sameKey(
@@ -243,7 +243,7 @@ class OrderingGateTest {
         @EnumSource(value = StoredState.class, names = {"PENDING", "CLAIMED"})
         @DisplayName("참조한 예약이 자기보다 뒤 seq에서 아직 끝나지 않았으면 제출하지 않고 멈춘 뒤 알린다")
         void haltsWhenTheReservationComesLater(StoredState unfinished) {
-            // given: 예약 hold-1(seq 3)이 확정(seq 2)보다 뒤에 있다. 접수 검사(§5.1-3)가 막았어야 하는 순서다
+            // given: 예약 hold-1(seq 3)이 확정(seq 2)보다 뒤에 있다. 접수 검사가 막았어야 하는 순서다
             List<QueuedCommand> sameKey = sameKey(queued("hold-1", 3, unfinished));
 
             // when
@@ -266,7 +266,7 @@ class OrderingGateTest {
                 CLOSED, CLAIM_WITH_GATE_CLOSED
                 HALT,   CLAIM_WITH_GATE_HALTED
                 """)
-        @DisplayName("전이표의 claim 사건이 된다 — 건너뛸 명령도 먼저 claim하고, 멈출 명령은 멈춤 사건이 된다 (§5.2 → §4.3)")
+        @DisplayName("전이표의 claim 사건이 된다 — 건너뛸 명령도 먼저 claim하고, 멈출 명령은 멈춤 사건이 된다 (→)")
         void becomesAClaimEvent(GateDecision decision, CommandEvent expected) {
             // when
             CommandEvent event = decision.claimEvent();
@@ -291,7 +291,7 @@ class OrderingGateTest {
 
     @Nested
     @Order(8)
-    @DisplayName("멈춘 이유를 물으면 — 운영자가 무엇을 고칠지 알게 (03b)")
+    @DisplayName("멈춘 이유를 물으면 — 운영자가 무엇을 고칠지 알게")
     class WhyHalted {
 
         @Test

@@ -56,36 +56,42 @@ docker compose up --build        # 처음에는 이미지 빌드로 몇 분 걸�
 
 ## 앱에서 쓰기 (Spring Boot)
 
-1. 의존성 `io.github.ledgerrelay:ledger-relay-spring-boot`를 더하고, `schema.sql`(jdbc jar의 `io/github/ledgerrelay/jdbc/schema.sql`)을 마이그레이션 도구로 적용한다. 라이브러리는 스키마를 자동 적용하지 않는다.
-2. 설정:
+1. 의존성을 더한다. 아직 Maven Central에 올리지 않았으므로 이 저장소에서 `./gradlew publishToMavenLocal`로 로컬 Maven 저장소에 올린 뒤, 앱에서 `mavenLocal()`과 `io.github.ledgerrelay:ledger-relay-spring-boot:0.1.0-SNAPSHOT`을 쓴다. 조립 예시는 `examples/shop`에 있다.
+2. `schema.sql`(jdbc jar의 `io/github/ledgerrelay/jdbc/schema.sql`)을 앱의 마이그레이션 도구로 적용한다. 라이브러리는 스키마를 자동 적용하지 않는다.
+3. 설정:
 
 ```yaml
 ledger-relay:
-  tigerbeetle: { cluster-id: 0, addresses: "127.0.0.1:3000" }   # 또는 com.tigerbeetle.Client 빈
+  tigerbeetle: { cluster-id: 0, addresses: "127.0.0.1:3000" }   # IP:포트만 된다(F39). 또는 com.tigerbeetle.Client 빈
   worker: { concurrency: 4, batch-size: 128, max-in-flight: 1024, lease-duration: 30s, submit-timeout: 5s }
   backoff: { initial: 200ms, max: 30s }
 ```
 
-3. 명령이 끝났을 때 앱의 데이터에 결과를 반영하는 `LedgerOutcomeHandler` 빈을 하나 등록한다. 핸들러는 결과 쓰기와 같은 트랜잭션에서 돈다. 핸들러 안에서 다시 접수할 때는 **앱의 행을 먼저 고친 뒤 접수한다**(`docs/development.md` "트랜잭션과 잠금").
-4. 앱 트랜잭션 안에서 `LedgerRelay.submit(...)`으로 접수한다. 업무 데이터와 함께 커밋되거나 함께 롤백된다.
+4. 명령이 끝났을 때 앱의 데이터에 결과를 반영하는 `LedgerOutcomeHandler` 빈을 하나 등록한다. 핸들러는 결과 쓰기와 같은 트랜잭션에서 돈다. 핸들러 안에서 다시 접수할 때는 **앱의 행을 먼저 고친 뒤 접수한다**(`docs/development.md` "트랜잭션과 잠금").
+5. 앱 트랜잭션 안에서 `LedgerRelay.submit(...)`으로 접수한다. 업무 데이터와 함께 커밋되거나 함께 롤백된다.
+
+앱을 컨테이너로 띄울 때는 TB Java 클라이언트가 io_uring을 쓰므로 seccomp가 그것을 허용해야 한다(F41, `docs/development.md`).
 
 ## 아직 안 되는 것
 
-- Micrometer 지표와 대시보드(3c 단계)
-- 장애 실험(E1~E10), 보관 작업
+- Micrometer 지표와 대시보드
+- 워커를 처리 도중 강제로 죽이는 장애 실험(열린 장애 O2)
+- 끝난 명령의 보관·정리 작업
+- Maven Central 배포
 
 ## 문서
 
-- `docs/failure-modes.md`: 막은 장애마다 깨지는 것, 재현 테스트, 구조, 확인(대조군)
-- `docs/testing.md`: 테스트 작성 규칙(테스트 트리 = 스펙 목차, given/when/then, 효과 이름 assert)
-- `docs/development.md`: 개발 환경, 테스트 컨테이너, 알려진 문제, 운영 메모
+- [docs/design.md](docs/design.md): 보장(G1~G7), 핵심 개념, 모듈 구성
+- [docs/failure-modes.md](docs/failure-modes.md): 막은 장애마다 깨지는 것, 재현 테스트, 구조, 확인(대조군)
+- [docs/development.md](docs/development.md): 트랜잭션과 잠금 순서, 운영 메모, 샘플 앱 구성, 알려진 문제
+- [docs/testing.md](docs/testing.md): 테스트 작성 규칙(테스트 트리 = 스펙 목차, given/when/then, 효과 이름 assert)
 
 ## 빌드와 테스트
 
-JDK 21이 필요하다. PG와 TB 테스트는 Docker(Testcontainers)를 쓴다.
+JDK 21이 필요하다(없으면 Gradle toolchain이 내려받는다). PG와 TB 테스트는 Docker(Testcontainers)를 쓴다.
 
 ```bash
-./gradlew test                          # 전체(빠른 테스트)
+./gradlew test                          # 끝-끝 테스트를 뺀 전체
 ./gradlew :ledger-relay-core:test       # Docker 없이 도는 core만
 ./gradlew check                         # 위에 더해 샘플 앱 끝-끝 테스트(compose.yaml로 이미지 빌드부터)
 ```

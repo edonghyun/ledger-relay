@@ -27,8 +27,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-/** 실제 PostgreSQL과 TigerBeetle 위에서 자동 설정한 릴레이가 이체 하나를 끝까지 처리한다(03b, 상위 스펙 §10 3b 완료 증거). */
-@DisplayName("Spring Boot로 띄운 릴레이 — PG와 TB 위에서 이체 하나가 끝까지 간다 (03b)")
+/** 실제 PostgreSQL과 TigerBeetle 위에서 자동 설정한 릴레이가 이체 하나를 끝까지 처리한다(3b 완료 증거). */
+@DisplayName("Spring Boot로 띄운 릴레이 — PG와 TB 위에서 이체 하나가 끝까지 간다")
 class SpringBootRelayIntegrationTest {
 
     static final PostgreSQLContainer PG = PostgresTestDatabase.container();

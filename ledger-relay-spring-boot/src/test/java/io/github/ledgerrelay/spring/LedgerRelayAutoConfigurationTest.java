@@ -23,10 +23,10 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
- * 자동 설정이 무엇을 만들고 언제 기동을 막는지(03b). DB와 TB에는 연결하지 않는다: 빈을 만드는 것만으로는 연결하지 않고,
+ * 자동 설정이 무엇을 만들고 언제 기동을 막는지. DB와 TB에는 연결하지 않는다: 빈을 만드는 것만으로는 연결하지 않고,
  * 워커는 끈다(켜는 장은 연결 실패를 로그로 남기며 돈다).
  */
-@DisplayName("자동 설정 — 의존성 하나와 ledger-relay.* 설정으로 릴레이를 쓴다 (03b)")
+@DisplayName("자동 설정 — 의존성 하나와 ledger-relay.* 설정으로 릴레이를 쓴다")
 class LedgerRelayAutoConfigurationTest {
 
     /** 연결할 수 없는 주소다. 빈을 만드는 데에는 연결이 필요 없다. */
@@ -69,7 +69,7 @@ class LedgerRelayAutoConfigurationTest {
         }
 
         @Test
-        @DisplayName("in-flight 슬롯 수는 설정의 max-in-flight다 (02d I5)")
+        @DisplayName("in-flight 슬롯 수는 설정의 max-in-flight다")
         void slotsFollowMaxInFlight() {
             app.withBean(LedgerOutcomeHandler.class, RecordingHandler::new)
                     .withPropertyValues("ledger-relay.worker.enabled=true", "ledger-relay.worker.max-in-flight=512")

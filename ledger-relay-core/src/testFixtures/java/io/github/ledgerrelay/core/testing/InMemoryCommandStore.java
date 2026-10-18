@@ -36,7 +36,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
     private Map<String, Long> rowIdByCommandId = new HashMap<>();
     private Map<String, Long> lastSeqByKey = new HashMap<>();
     private long lastRowId;
-    /** 바깥 트랜잭션을 열 때마다 오른다. 롤백해도 되돌리지 않는다(P2b-2) */
+    /** 바깥 트랜잭션을 열 때마다 오른다. 롤백해도 되돌리지 않는다 */
     private long transactionNumber;
 
     public InMemoryCommandStore(Supplier<Instant> clock) {
@@ -167,7 +167,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
     public List<DueCommand> lockDue(int limit) {
         requireTransaction();
         Instant now = clock.get();
-        // 순서 키마다 맨 앞(가장 작은 seq)의 미완료 명령(P2a-19)
+        // 순서 키마다 맨 앞(가장 작은 seq)의 미완료 명령
         Map<String, Long> headSeqByKey = new HashMap<>();
         for (Row row : rows.values()) {
             CommandRecord r = row.record();
@@ -175,7 +175,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
                 headSeqByKey.merge(r.orderingKey(), r.seq(), Math::min);
             }
         }
-        // 보낼 수 있게 된 시각 순서, 같으면 접수 순서(02e P2e-1)
+        // 보낼 수 있게 된 시각 순서, 같으면 접수 순서
         List<Row> heads = new ArrayList<>();
         for (Row row : rows.values()) {
             CommandRecord r = row.record();
@@ -266,7 +266,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
      */
     private record Row(CommandRecord record, Instant leaseExpiresAt, Instant nextAttemptAt, long acceptedIn) {
 
-        /** claim 후보가 될 시각이 됐는가(§5.2). 접수 상태는 다음 시도 시각이 됐을 때, 처리 중은 lease가 끝났을 때. */
+        /** claim 후보가 될 시각이 됐는가. 접수 상태는 다음 시도 시각이 됐을 때, 처리 중은 lease가 끝났을 때. */
         boolean isDue(Instant now) {
             return switch (record.row().state()) {
                 case PENDING -> !nextAttemptAt.isAfter(now);

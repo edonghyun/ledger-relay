@@ -54,7 +54,7 @@ import org.junit.jupiter.params.provider.MethodSource;
  * (L4078-4250)와 exists 비교(L4337-4372). 문서 create_transfers#exists의 post 금액 설명은 소스와 다르다
  * ("예약 금액 이상"이 아니라 "AMOUNT_MAX이거나 저장된 금액과 같음"). 판단 근거는 소스와 이 테스트로 삼는다.
  */
-@DisplayName("TigerBeetle 0.17.9 예약·확정·해제 규칙 — 스펙 §3.4 A2·A3, §4.4, P1-3의 근거")
+@DisplayName("TigerBeetle 0.17.9 예약·확정·해제 규칙 — A2·A3, 근거")
 class ReservationSemanticsTest {
 
     static final TigerBeetleContainer TB = new TigerBeetleContainer();
@@ -149,7 +149,7 @@ class ReservationSemanticsTest {
         }
 
         @Test
-        @DisplayName("0원으로 확정하면 전액 확정이 아니라 0원 확정이고, 예약 금액 전부가 풀린다 (P1-3: core가 0원 확정을 막는 근거)")
+        @DisplayName("0원으로 확정하면 전액 확정이 아니라 0원 확정이고, 예약 금액 전부가 풀린다 (core가 0원 확정을 막는)")
         void aZeroPostCapturesNothingAndReleasesAll() {
             // when
             CreateTransferStatus result = ledger.submit(postOf(hold).withAmount(0));
@@ -385,7 +385,7 @@ class ReservationSemanticsTest {
         /**
          * 만료 시각은 TB가 예약을 적용한 timestamp에 timeout을 더한 값이다(state_machine.zig L3978,
          * {@code expires_at = timestamp_actual + timeout_ns}). 기준은 TB 클러스터 시계이고 PG {@code now()}가 아니다.
-         * 테스트는 TB의 적용 시각을 정할 수 없으므로 저장된 timeout만 확인한다(계획 P2c-3).
+         * 테스트는 TB의 적용 시각을 정할 수 없으므로 저장된 timeout만 확인한다(계획).
          */
         @Test
         @DisplayName("예약은 받은 timeout(초)을 그대로 저장한다 — 만료는 TB 클러스터 시계로 잰다")

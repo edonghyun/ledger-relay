@@ -17,8 +17,8 @@ import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * PostgreSQL 명령 저장소(스펙 §5.1~§5.6). SQL 네 묶음(넣기, 찾기, 잠그고 읽기, 조건부 쓰기)이며 판단하지 않는다.
- * 순서 키 행은 잡지 않는다. 그 SQL은 {@link JdbcOrderingKeys}에 있다(02e P2e-7).
+ * PostgreSQL 명령 저장소. SQL 네 묶음(넣기, 찾기, 잠그고 읽기, 조건부 쓰기)이며 판단하지 않는다.
+ * 순서 키 행은 잡지 않는다. 그 SQL은 {@link JdbcOrderingKeys}에 있다.
  * {@link JdbcClient}는 Spring이 묶어 둔 트랜잭션 커넥션을 쓰므로 앱 트랜잭션에 합류한다(G1).
  */
 public final class JdbcCommandStore implements CommandStore {
@@ -40,14 +40,14 @@ public final class JdbcCommandStore implements CommandStore {
             c.submit_count, c.known_result, c.result_code, c.handler_failures, c.skip_reason, c.accepted_at,
             c.completed_at, c.halt_reason, c.halted_at""";
 
-    /** 이 행을 지금 트랜잭션이 넣었는가(P2b-2). 아직 쓰기를 하지 않은 트랜잭션은 ID가 없으므로 false다. */
+    /** 이 행을 지금 트랜잭션이 넣었는가. 아직 쓰기를 하지 않은 트랜잭션은 ID가 없으므로 false다. */
     private static final String ACCEPTED_HERE =
             "coalesce(c.accepted_xact = pg_current_xact_id_if_assigned(), false) AS accepted_in_this_transaction";
 
     /**
-     * 넣는다. 같은 commandId가 이미 있으면 {@code ON CONFLICT DO NOTHING}으로 넘기고 있던 행을 읽는다(P2b-9).
+     * 넣는다. 같은 commandId가 이미 있으면 {@code ON CONFLICT DO NOTHING}으로 넘기고 있던 행을 읽는다.
      * 유일성 위반 예외를 잡는 방식은 PostgreSQL 트랜잭션 전체를 중단시켜 앱 트랜잭션을 깨뜨린다(G7).
-     * 넣었으면 그 키의 맨 앞을 다시 정한다. 키 행은 잡지 않는다: 접수는 이미 순번을 받으며 키 행을 잡았다(02e P2e-7).
+     * 넣었으면 그 키의 맨 앞을 다시 정한다. 키 행은 잡지 않는다: 접수는 이미 순번을 받으며 키 행을 잡았다.
      */
     @Override
     public Optional<CommandRecord> insertIfAbsent(NewCommand command) {
@@ -118,7 +118,7 @@ public final class JdbcCommandStore implements CommandStore {
     }
 
     /** 쌓인 일을 센다(health). 미완료 인덱스({@code ledger_command_unfinished})의 행만 읽는다. */
-    /** 대기를 셀 때 이 수까지만 센다(health). 넘으면 "이 이상"으로 알린다. 정확한 수는 지표(03c)가 맡는다. */
+    /** 대기를 셀 때 이 수까지만 센다(health). 넘으면 "이 이상"으로 알린다. 정확한 수는 지표가 맡는다. */
     static final int BACKLOG_COUNT_CAP = 1_000;
 
     /**
@@ -152,7 +152,7 @@ public final class JdbcCommandStore implements CommandStore {
                 .query((rs, rowNum) -> CommandRows.read(rs)).list();
     }
 
-    /** 멈춘 명령을 행 순서로 읽는다. {@code ledger_command_halted} 인덱스만 읽는다(03b). */
+    /** 멈춘 명령을 행 순서로 읽는다. {@code ledger_command_halted} 인덱스만 읽는다. */
     @Override
     public List<CommandRecord> findHalted(long afterRowId, int limit) {
         return sql.sql("SELECT " + COLUMNS + ", " + ACCEPTED_HERE
@@ -163,7 +163,7 @@ public final class JdbcCommandStore implements CommandStore {
 
     /**
      * {@link #lockDue}의 질의. 실행 계획 테스트가 같은 질의를 본다. 맨 앞 표시와 보낼 시각 인덱스({@code ledger_command_ready})로
-     * 지금 보낼 수 있는 맨 앞만 시각 순서로 읽는다(02e P2e-1·P2e-3). 마지막 조건은 lease가 끝나는 바로 그 시각의 처리 중
+     * 지금 보낼 수 있는 맨 앞만 시각 순서로 읽는다. 마지막 조건은 lease가 끝나는 바로 그 시각의 처리 중
      * 명령을 아직 후보로 보지 않는다({@code ready_at <= now()}만으로는 그 시각이 들어온다).
      */
     static final String LOCK_DUE = """
@@ -179,7 +179,7 @@ public final class JdbcCommandStore implements CommandStore {
             """.formatted(COLUMNS, ACCEPTED_HERE);
 
     /**
-     * claim 후보를 잠그고 읽는다(P2b-10). 후보 행만 {@code FOR UPDATE OF c SKIP LOCKED}로 잠근다. 맨 앞 판정은 표시
+     * claim 후보를 잠그고 읽는다. 후보 행만 {@code FOR UPDATE OF c SKIP LOCKED}로 잠근다. 맨 앞 판정은 표시
      * ({@code is_head})로 하므로 다른 워커가 잡은 맨 앞을 건너뛰어도 그 뒤 명령은 후보가 아니다(G4). 참조 예약은 잠그지 않고
      * 읽는다. 예약까지 잠그면 예약을 쓰는 중인 확정이 후보에서 빠진다(F10).
      */
@@ -192,8 +192,8 @@ public final class JdbcCommandStore implements CommandStore {
     }
 
     /**
-     * 상태와 토큰이 기대와 같을 때만 바꾼다(G5). 시각은 PG {@code now()} 하나로 찍는다(§5.2). 최종 상태로 바꿔도 맨 앞
-     * 표시는 그대로 둔다. 다음 claim이 넘긴다(02e P2e-7): 여기서 넘기려면 키 행을 잡아야 하고, 이 트랜잭션은 이어서
+     * 상태와 토큰이 기대와 같을 때만 바꾼다(G5). 시각은 PG {@code now()} 하나로 찍는다. 최종 상태로 바꿔도 맨 앞
+     * 표시는 그대로 둔다. 다음 claim이 넘긴다: 여기서 넘기려면 키 행을 잡아야 하고, 이 트랜잭션은 이어서
      * 핸들러를 부른다.
      */
     @Override

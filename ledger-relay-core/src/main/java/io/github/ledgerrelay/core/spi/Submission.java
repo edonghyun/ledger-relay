@@ -4,9 +4,9 @@ import java.math.BigInteger;
 import java.util.Objects;
 
 /**
- * TB 이체 하나로 보낼 내용(§5.3).
+ * TB 이체 하나로 보낼 내용.
  *
- * @param userData128 명령 행 ID. TB에서 PG를 역참조한다(§5.6)
+ * @param userData128 명령 행 ID. TB에서 PG를 역참조한다
  */
 public record Submission(BigInteger transferId, BigInteger userData128, TransferBody body) {
 

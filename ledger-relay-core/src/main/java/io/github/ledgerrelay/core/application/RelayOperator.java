@@ -27,7 +27,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
- * 운영자 포트의 구현(03b). 순서 키 행을 잡지 않으므로 {@link io.github.ledgerrelay.core.spi.OrderingKeys}를 받지 않는다.
+ * 운영자 포트의 구현. 순서 키 행을 잡지 않으므로 {@link io.github.ledgerrelay.core.spi.OrderingKeys}를 받지 않는다.
  * 포기는 핸들러를 부르는 {@link CommandLifecycle#abandonHalted}에 맡긴다(F33).
  */
 public final class RelayOperator implements LedgerRelayOperator {

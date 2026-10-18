@@ -31,7 +31,7 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 @ActiveProfiles("demo")
-@DisplayName("데모 조작 — 장애를 일부러 내고 운영자가 수습한다 (03b §7.3, §7.4)")
+@DisplayName("데모 조작 — 장애를 일부러 내고 운영자가 수습한다")
 class DemoScenarioTest extends ShopSpringTest {
 
     @Autowired

@@ -14,7 +14,7 @@ import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 
 /**
- * 릴레이의 health(03b). TB가 끊겨도 상태는 UP이다: 접수는 TB 없이도 되는 것이 이 라이브러리의 요점이고, health가 DOWN이면
+ * 릴레이의 health. TB가 끊겨도 상태는 UP이다: 접수는 TB 없이도 되는 것이 이 라이브러리의 요점이고, health가 DOWN이면
  * 부하 분산기나 오케스트레이터가 접수까지 막는다. TB 상태는 세부 항목 {@code ledger}로만 알린다. 저장소를 읽을 수 없을 때만
  * DOWN이다(PG 없이는 접수도 못 한다).
  *

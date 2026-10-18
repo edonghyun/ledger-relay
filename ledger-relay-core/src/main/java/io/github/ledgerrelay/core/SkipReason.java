@@ -1,6 +1,6 @@
 package io.github.ledgerrelay.core;
 
-/** 명령이 TB에 가지 않고 건너뜀(SKIPPED)으로 끝난 이유(스펙 §5.2, docs/failure-modes.md F9). */
+/** 명령이 TB에 가지 않고 건너뜀(SKIPPED)으로 끝난 이유(docs/failure-modes.md F9). */
 public enum SkipReason {
     /** 확정·해제가 참조한 예약이 적용되지 않고 끝났다. */
     RESERVATION_NOT_APPLIED,

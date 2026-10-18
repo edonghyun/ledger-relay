@@ -1,4 +1,4 @@
-# ledger-relay 샘플 쇼핑몰 데모(03b §7.5). 준비물은 Docker뿐이다.
+# ledger-relay 샘플 쇼핑몰 데모. 준비물은 Docker뿐이다.
 #   docker compose up --build   →   http://localhost:8090
 # 끄기: docker compose down   (데모는 매번 빈 DB와 빈 원장에서 시작한다)
 # 멈췄다 다시 켜면(Ctrl-C 뒤 up, stop/start) 둘 다 그대로 이어진다. PG와 TB는 늘 함께 남고 함께 사라진다.

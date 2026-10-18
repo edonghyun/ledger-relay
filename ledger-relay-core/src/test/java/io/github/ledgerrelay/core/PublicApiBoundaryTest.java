@@ -7,7 +7,7 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("공개 API의 경계 — 앱이 import하는 패키지에는 앱이 쓸 타입만 둔다 (스펙 §6, §7)")
+@DisplayName("공개 API의 경계 — 앱이 import하는 패키지에는 앱이 쓸 타입만 둔다")
 class PublicApiBoundaryTest {
 
     /** 공개 패키지의 최상위 공개 타입. 늘리거나 줄이는 것은 공개 API를 바꾸는 일이므로 손으로 고친다. */

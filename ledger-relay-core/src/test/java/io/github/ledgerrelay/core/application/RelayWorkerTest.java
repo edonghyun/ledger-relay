@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("워커 한 바퀴 — 스펙 §5.3 제출과 전이, 03a")
+@DisplayName("워커 한 바퀴 — 제출과 전이")
 class RelayWorkerTest {
 
     static final Duration BACKOFF_MAX = Duration.ofSeconds(1);
@@ -124,7 +124,7 @@ class RelayWorkerTest {
         }
 
         @Test
-        @DisplayName("보낸 이체의 user_data_128에는 그 명령의 행 id가 실린다 — TB에서 PG를 역참조한다 (§5.6)")
+        @DisplayName("보낸 이체의 user_data_128에는 그 명령의 행 id가 실린다 — TB에서 PG를 역참조한다")
         void theSubmissionCarriesTheRowIdAsUserData128() {
             // given
             accepted(transfer("pay-1", "order-1"));
@@ -161,7 +161,7 @@ class RelayWorkerTest {
         }
 
         @Test
-        @DisplayName("핸들러가 실패해 결과를 아는 명령은 TB 요청 없이 그 결과로 끝난다 (§5.4)")
+        @DisplayName("핸들러가 실패해 결과를 아는 명령은 TB 요청 없이 그 결과로 끝난다")
         void aKnownResultCompletesWithoutARequest() {
             // given: 첫 바퀴에서 TB는 기록했지만 핸들러가 실패했다
             handler.failNextCalls(1);
@@ -178,7 +178,7 @@ class RelayWorkerTest {
         }
 
         @Test
-        @DisplayName("예약보다 앞 순번의 확정은 멈춘 명령으로 한 번 알리고, 다음 바퀴에는 다시 알리지 않는다 (§5.2 HALT)")
+        @DisplayName("예약보다 앞 순번의 확정은 멈춘 명령으로 한 번 알리고, 다음 바퀴에는 다시 알리지 않는다")
         void aHaltedPostIsReportedOnce() {
             // given: 접수 검사를 지나칠 수 없는 순서라 저장소에 직접 넣는다(LedgerRelayContract와 같은 값)
             insertedPastTheChecks(new NewCommand("hold-1", "order-1", 2, Optional.empty(), BigInteger.valueOf(102),
@@ -260,7 +260,7 @@ class RelayWorkerTest {
         }
 
         @Test
-        @DisplayName("backoff 뒤 다시 보낼 때도 같은 이체 ID로 보내고, 그 결과로 끝난다 (D7)")
+        @DisplayName("backoff 뒤 다시 보낼 때도 같은 이체 ID로 보내고, 그 결과로 끝난다")
         void theRetryUsesTheSameTransferId() {
             // given: 첫 요청이 timeout으로 되돌려졌고, 이제 TB가 답한다
             BigInteger transferId = accepted(transfer("pay-1", "order-1")).transferId();
@@ -473,7 +473,7 @@ class RelayWorkerTest {
     class WhenAWriteFails {
 
         @Test
-        @DisplayName("그 명령만 알리고 나머지 명령의 결과는 그대로 쓴다 — 받은 거절 사유가 IdAlreadyFailed로 덮이지 않게 (§5.3-3)")
+        @DisplayName("그 명령만 알리고 나머지 명령의 결과는 그대로 쓴다 — 받은 거절 사유가 IdAlreadyFailed로 덮이지 않게")
         void theOtherResultsOfTheBatchAreStillWritten() {
             // given: pay-1의 결과를 쓸 때 저장소가 한 번 실패한다(제출 기록 때의 조회는 지나간다)
             FlakyStore flaky = new FlakyStore(storage.store(), "pay-1", 1);
@@ -521,7 +521,7 @@ class RelayWorkerTest {
     class WhenTheHandlerFailureCannotBeRecorded {
 
         @Test
-        @DisplayName("저장소 예외에 핸들러 예외가 함께 실린다 — 운영자가 처음 원인을 잃지 않게 (02d I6)")
+        @DisplayName("저장소 예외에 핸들러 예외가 함께 실린다 — 운영자가 처음 원인을 잃지 않게")
         void theHandlersFailureSurvivesAFailedRecord() {
             // given: 핸들러가 한 번 던지고, 그 실패를 기록하는 조회에서 저장소가 한 번 실패한다
             //        (pay-1 조회: 제출 기록 1, 결과 쓰기 2, 핸들러에 줄 상태 3, 실패 기록 4)
@@ -619,7 +619,7 @@ class RelayWorkerTest {
     class WhenSlotsDisagreeWithSettings {
 
         @Test
-        @DisplayName("워커를 만들 수 없다 — 설정의 max-in-flight가 실제 상한이 아닌 채로 돌지 않게 (02d I5)")
+        @DisplayName("워커를 만들 수 없다 — 설정의 max-in-flight가 실제 상한이 아닌 채로 돌지 않게")
         void aWorkerRefusesSlotsThatDisagreeWithMaxInFlight() {
             // when
             Throwable refused = org.assertj.core.api.Assertions.catchThrowable(
@@ -637,7 +637,7 @@ class RelayWorkerTest {
     class WhenTheClientReturnsNull {
 
         @Test
-        @DisplayName("요청 실패로 보고 명령을 되돌리며, 슬롯은 모두 돌아온다 (02d I7)")
+        @DisplayName("요청 실패로 보고 명령을 되돌리며, 슬롯은 모두 돌아온다")
         void aNullReplyGivesTheSlotsBackAndReleasesTheBatch() {
             // given
             fake.replyWithNull();

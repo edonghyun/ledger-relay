@@ -19,7 +19,7 @@ class ProxiedTigerBeetleCleanupTest {
     }
 
     @Test
-    @DisplayName("§8.2 자원 정리: Toxiproxy 기동이 실패하면 이미 띄운 TB 컨테이너를 정리하고 원래 예외를 그대로 전한다")
+    @DisplayName("자원 정리: Toxiproxy 기동이 실패하면 이미 띄운 TB 컨테이너를 정리하고 원래 예외를 그대로 전한다")
     void stopsTigerBeetleWhenToxiproxyFailsToStart() {
         int before = runningTigerBeetleContainers();
 

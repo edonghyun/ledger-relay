@@ -17,11 +17,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
-@DisplayName("상태 전이 — 스펙 §4.3 전이표, G5·G6")
+@DisplayName("상태 전이 — 전이표, G5·G6")
 class TransitionTableTest {
 
     /**
-     * 스펙 §4.3 전이표를 칸 하나에 한 줄로 옮긴 것. 기대값 표기는 이렇다.
+     * 전이표를 칸 하나에 한 줄로 옮긴 것. 기대값 표기는 이렇다.
      * 상태 이름(+토큰 +핸들러 +backoff +결과보존 +제출기록 +실패집계) = 그 상태로 이동하며 해당 효과를 낸다.
      * 그대로 = 게이트가 닫혀 아무 일도 없다. 0행 = fenced UPDATE가 0행을 갱신한다.
      * 불가(모듈 버그) = 모듈이 이 사건을 만들면 버그다. 해당없음(생길 수 없는 사건) = 이 상태에서는 개념상 생길 수 없다.
@@ -110,7 +110,7 @@ class TransitionTableTest {
             SKIPPED, LEASE_EXPIRED,                      해당없음(생길 수 없는 사건)
             SKIPPED, STALE_TOKEN_WRITE,                  0행
             SKIPPED, ABANDONED_BY_OPERATOR,              불가(모듈 버그)
-            # HALTED: claim 후보가 아니다. 운영자의 포기만 받는다(§5.2 HALT, docs/failure-modes.md F9)
+            # HALTED: claim 후보가 아니다. 운영자의 포기만 받는다(docs/failure-modes.md F9)
             HALTED, CLAIM_WITH_GATE_OPEN,                불가(모듈 버그)
             HALTED, CLAIM_WITH_GATE_CLOSED,              불가(모듈 버그)
             HALTED, CLAIM_WITH_GATE_HALTED,              불가(모듈 버그)
@@ -224,7 +224,7 @@ class TransitionTableTest {
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(ResultCategory.class)
-        @DisplayName("분류표(§4.4)가 정한 최종 상태와 전이표(§4.3)가 보내는 상태가 같다 — 두 표가 따로 고쳐져 어긋나지 않게")
+        @DisplayName("분류표가 정한 최종 상태와 전이표가 보내는 상태가 같다 — 두 표가 따로 고쳐져 어긋나지 않게")
         void classificationAndTransitionAgreeOnTheFinalState(ResultCategory category) {
             // when
             Transition next = TransitionTable.next(StoredState.CLAIMED, CommandEvent.of(category));
@@ -249,7 +249,7 @@ class TransitionTableTest {
                 PRIOR_FAILURE, TB_REJECTED
                 INVALID,       TB_REJECTED
                 """)
-        @DisplayName("전이표의 TB 사건 셋 중 하나가 된다 (§4.4 → §4.3)")
+        @DisplayName("전이표의 TB 사건 셋 중 하나가 된다 (→)")
         void becomesATigerBeetleEvent(ResultCategory category, CommandEvent expected) {
             // when
             CommandEvent event = CommandEvent.of(category);

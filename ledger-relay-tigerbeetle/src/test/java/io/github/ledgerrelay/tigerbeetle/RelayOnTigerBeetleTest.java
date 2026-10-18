@@ -42,8 +42,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-/** 메모리 저장소 + 실제 TB 위에서 접수부터 결과까지(03a P3a-11). PG와 TB를 함께 띄우는 확인은 03b 샘플 앱에서 한다. */
-@DisplayName("실제 TB 위의 워커 한 바퀴 — 스펙 §5.3, D7, F23")
+/** 메모리 저장소 + 실제 TB 위에서 접수부터 결과까지. PG와 TB를 함께 띄우는 확인은 spring-boot 모듈의 통합 테스트와 샘플 앱에서 한다. */
+@DisplayName("실제 TB 위의 워커 한 바퀴 —, F23")
 class RelayOnTigerBeetleTest {
 
     static final Duration BACKOFF_MAX = Duration.ofSeconds(1);
@@ -152,7 +152,7 @@ class RelayOnTigerBeetleTest {
         }
 
         @Test
-        @DisplayName("이체·예약·확정·거절이 섞여 처리된 뒤 대사하면 어긋남이 없다 (03b)")
+        @DisplayName("이체·예약·확정·거절이 섞여 처리된 뒤 대사하면 어긋남이 없다")
         void reconcilingAfterRealTrafficFindsNoMismatch() {
             // given
             Account wallet = ledger.openAccountThatCannotOverdraw("지갑");

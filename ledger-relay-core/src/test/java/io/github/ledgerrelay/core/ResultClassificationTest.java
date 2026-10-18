@@ -11,10 +11,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-@DisplayName("TB 결과 분류 — 스펙 §4.4 분류표")
+@DisplayName("TB 결과 분류 — 분류표")
 class ResultClassificationTest {
 
-    /** 스펙 §4.4 분류표를 그대로 옮긴 것. 기대값은 손으로 쓴다. */
+    /** 분류표를 그대로 옮긴 것. 기대값은 손으로 쓴다. */
     static final String CLASSIFICATION_TABLE = """
             # 적용됨
             Created, APPLIED

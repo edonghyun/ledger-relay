@@ -10,7 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /** 저장소 루트의 compose.yaml이 지켜야 하는 것. 띄우지 않고 파일만 읽는다(띄워서 보는 것은 ShopComposeTest). */
-@DisplayName("compose.yaml — 데모가 다시 띄워도 거짓 숫자를 보이지 않는다 (03b §7.5)")
+@DisplayName("compose.yaml — 데모가 다시 띄워도 거짓 숫자를 보이지 않는다")
 class ComposeFileTest {
 
     static final Path COMPOSE = Path.of("../../compose.yaml");

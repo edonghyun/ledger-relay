@@ -35,7 +35,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
- * ledger-relay 자동 설정(03b). 앱은 {@code DataSource}, {@code PlatformTransactionManager}, {@link LedgerOutcomeHandler}
+ * ledger-relay 자동 설정. 앱은 {@code DataSource}, {@code PlatformTransactionManager}, {@link LedgerOutcomeHandler}
  * 빈을 준다. 모든 빈은 앱이 같은 타입을 주면 만들지 않는다.
  *
  * <p>저장소 셋(트랜잭션, 순서 키, 명령)에는 트랜잭션 매니저가 쥔 것과 같은 {@code DataSource} 객체를 준다. 다르면 접수가 앱
@@ -139,7 +139,7 @@ public class LedgerRelayAutoConfiguration {
         }
     }
 
-    /** 워커: 같은 maxInFlight에서 슬롯을 만들어 설정과 실제 상한이 어긋날 수 없다(02d I5). */
+    /** 워커: 같은 maxInFlight에서 슬롯을 만들어 설정과 실제 상한이 어긋날 수 없다. */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnProperty(prefix = "ledger-relay.worker", name = "enabled", havingValue = "true", matchIfMissing = true)
     static class Workers {

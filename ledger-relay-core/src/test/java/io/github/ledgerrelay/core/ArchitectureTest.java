@@ -12,14 +12,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * 헥사고날 의존 방향(스펙 §7). 안쪽은 바깥을 모른다.
+ * 헥사고날 의존 방향. 안쪽은 바깥을 모른다.
  *
  * <pre>
  * 공개 API ◀── domain ◀── spi ◀── application
  *    ▲______________________________│
  * </pre>
  */
-@DisplayName("헥사고날 경계 — 의존은 안쪽으로만 향한다 (스펙 §7)")
+@DisplayName("헥사고날 경계 — 의존은 안쪽으로만 향한다")
 class ArchitectureTest {
 
     /**
@@ -73,7 +73,7 @@ class ArchitectureTest {
     }
 
     @Test
-    @DisplayName("핸들러를 부르는 클래스는 순서 키 포트를 모른다 — 키 행을 쥔 채 핸들러가 주문 행을 기다려 앱의 접수와 교착하지 않게 (02e P2e-7)")
+    @DisplayName("핸들러를 부르는 클래스는 순서 키 포트를 모른다 — 키 행을 쥔 채 핸들러가 주문 행을 기다려 앱의 접수와 교착하지 않게")
     void theHandlerPathCannotLockAKey() {
         // then
         noClasses().that(callTheOutcomeHandler())

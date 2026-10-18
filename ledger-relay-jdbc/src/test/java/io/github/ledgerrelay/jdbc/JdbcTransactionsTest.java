@@ -20,7 +20,7 @@ import org.springframework.jdbc.datasource.DelegatingDataSource;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.support.TransactionTemplate;
 
-@DisplayName("트랜잭션 어댑터 — 격리 수준(P2b-16, P2b-17)과 접수할 트랜잭션의 확인(F18)")
+@DisplayName("트랜잭션 어댑터 — 격리 수준과 접수할 트랜잭션의 확인(F18)")
 class JdbcTransactionsTest {
 
     static final String TRANSACTION_REPEATABLE_READ = "TRANSACTION_REPEATABLE_READ";

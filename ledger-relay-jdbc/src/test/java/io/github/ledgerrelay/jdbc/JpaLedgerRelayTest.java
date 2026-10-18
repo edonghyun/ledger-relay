@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("PostgreSQL 저장소 위의 서비스 — LedgerRelay 계약 (JPA 트랜잭션 매니저, R16)")
+@DisplayName("PostgreSQL 저장소 위의 서비스 — LedgerRelay 계약 (JPA 트랜잭션 매니저)")
 class JpaLedgerRelayTest extends LedgerRelayContract {
 
     @Override
@@ -21,7 +21,7 @@ class JpaLedgerRelayTest extends LedgerRelayContract {
         return PostgresStorage.withJpaTransactions();
     }
 
-    /** 어느 장이 끝나도 맨 앞 표시와 미완료 개수가 행과 맞다(02e P2e-4). */
+    /** 어느 장이 끝나도 맨 앞 표시와 미완료 개수가 행과 맞다. */
     @AfterEach
     void theHeadsStayConsistent() {
         ((PostgresStorage) storage).assertHeadsConsistent();
@@ -29,7 +29,7 @@ class JpaLedgerRelayTest extends LedgerRelayContract {
 
     @Nested
     @Order(20)
-    @DisplayName("앱이 JPA로 주문을 저장하는 트랜잭션에서 접수하면 — G1, R16")
+    @DisplayName("앱이 JPA로 주문을 저장하는 트랜잭션에서 접수하면 — G1")
     class InsideAJpaTransaction {
 
         @Test

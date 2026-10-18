@@ -1,6 +1,6 @@
 package io.github.ledgerrelay.core;
 
-/** TB 결과 코드의 분류(스펙 §4.4). 분류가 알림 여부를 정한다. 분류가 보내는 최종 저장 상태는 domain의 StoredState.finalStateFor가 정한다. */
+/** TB 결과 코드의 분류. 분류가 알림 여부를 정한다. 분류가 보내는 최종 저장 상태는 domain의 StoredState.finalStateFor가 정한다. */
 public enum ResultCategory {
     /** created, exists */
     APPLIED(false),
@@ -15,7 +15,7 @@ public enum ResultCategory {
     PRIOR_FAILURE(true),
     /** 잘못된 요청: 앱 버그 또는 설정 오류. */
     INVALID(true),
-    /** v1이 쓰지 않는 기능(linked, imported)의 코드. CONFLICT로 다룬다(스펙 §4.4, P1-5). */
+    /** v1이 쓰지 않는 기능(linked, imported)의 코드. CONFLICT로 다룬다. */
     UNSUPPORTED(true);
 
     private final boolean alerts;

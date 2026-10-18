@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("in-flight 슬롯 — 스펙 §5.3-2, 03a P3a-2")
+@DisplayName("in-flight 슬롯")
 class InFlightLimitTest {
 
     @Nested
@@ -34,7 +34,7 @@ class InFlightLimitTest {
     }
 
     @Test
-    @DisplayName("만든 슬롯 수를 기억한다 — 워커가 설정과 맞는지 확인할 수 있게 (02d I5)")
+    @DisplayName("만든 슬롯 수를 기억한다 — 워커가 설정과 맞는지 확인할 수 있게")
     void capacityIsTheSlotCountGiven() {
         // when
         InFlightLimit slots = new InFlightLimit(64);

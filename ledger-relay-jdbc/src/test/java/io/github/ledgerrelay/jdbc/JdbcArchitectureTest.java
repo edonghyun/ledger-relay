@@ -11,8 +11,8 @@ import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/** 저장소 어댑터는 판단하지 않는다(02a P2a-16). 판단은 core의 서비스와 도메인 규칙에만 있다. */
-@DisplayName("jdbc 어댑터의 경계 — 판단은 core에만 (스펙 §7)")
+/** 저장소 어댑터는 판단하지 않는다. 판단은 core의 서비스와 도메인 규칙에만 있다. */
+@DisplayName("jdbc 어댑터의 경계 — 판단은 core에만")
 class JdbcArchitectureTest {
 
     static final JavaClasses MAIN = new ClassFileImporter()

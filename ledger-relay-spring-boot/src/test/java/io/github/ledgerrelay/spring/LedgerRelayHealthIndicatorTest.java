@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.Status;
 
-@DisplayName("health — TB 연결과 대기를 알리되, TB가 끊겨도 앱은 UP이다 (03b)")
+@DisplayName("health — TB 연결과 대기를 알리되, TB가 끊겨도 앱은 UP이다")
 class LedgerRelayHealthIndicatorTest {
 
     static final Duration LEDGER_STALE_AFTER = Duration.ofSeconds(5);

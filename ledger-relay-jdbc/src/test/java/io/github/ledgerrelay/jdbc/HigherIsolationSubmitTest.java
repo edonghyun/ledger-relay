@@ -25,10 +25,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * 앱 트랜잭션이 READ COMMITTED보다 높을 때의 동시 접수(P2b-17). 접수는 앱의 격리 수준을 따른다. 높은 수준에서는 기다림이
+ * 앱 트랜잭션이 READ COMMITTED보다 높을 때의 동시 접수. 접수는 앱의 격리 수준을 따른다. 높은 수준에서는 기다림이
  * 직렬화 실패(SQLSTATE 40001)로 바뀌고 재시도는 앱이 한다. 어느 수준에서도 행이 둘 생기거나 순번이 꼬이지 않는다.
  */
-@DisplayName("높은 격리 수준의 앱 트랜잭션에서 동시 접수 — P2b-17")
+@DisplayName("높은 격리 수준의 앱 트랜잭션에서 동시 접수")
 class HigherIsolationSubmitTest {
 
     static final Duration BLOCKED = Duration.ofMillis(300);

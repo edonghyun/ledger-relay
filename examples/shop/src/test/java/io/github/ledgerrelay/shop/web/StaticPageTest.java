@@ -23,7 +23,7 @@ import org.springframework.web.util.ServletRequestPathUtils;
 
 /** demo 프로필로 띄운다. 화면은 Scenarios 탭의 데모 경로까지 부른다. */
 @ActiveProfiles("demo")
-@DisplayName("화면 — 정적 파일과 API 경로가 어긋나지 않는다 (03b §7.1)")
+@DisplayName("화면 — 정적 파일과 API 경로가 어긋나지 않는다")
 class StaticPageTest extends ShopSpringTest {
 
     /** shop.js 맨 위 {@code const API = { … };} 블록의 한 줄: {@code getStatus: '/api/status',} */

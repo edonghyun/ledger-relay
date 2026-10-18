@@ -3,7 +3,7 @@ package io.github.ledgerrelay.core.domain;
 import io.github.ledgerrelay.core.CommandStatus;
 import io.github.ledgerrelay.core.ResultCategory;
 
-/** 저장 상태(스펙 §4.1, D7). 앱이 보는 조회 상태(§4.2)는 공개 CommandStatus.State다. "미확정"은 상태가 아니라 submit_count로 파생한다. */
+/** 저장 상태. 앱이 보는 조회 상태는 공개 CommandStatus.State다. "미확정"은 상태가 아니라 submit_count로 파생한다. */
 public enum StoredState {
     PENDING,
     CLAIMED,
@@ -11,7 +11,7 @@ public enum StoredState {
     REJECTED,
     CONFLICT,
     SKIPPED,
-    /** 정상 경로에서 나올 수 없는 입력이라 멈췄다(§5.2 HALT). 최종 상태가 아니므로 그 키는 막힌다. 운영자만 풀 수 있다. */
+    /** 정상 경로에서 나올 수 없는 입력이라 멈췄다. 최종 상태가 아니므로 그 키는 막힌다. 운영자만 풀 수 있다. */
     HALTED;
 
     /** 최종 상태는 다시 바뀌지 않는다(G5). */
@@ -19,7 +19,7 @@ public enum StoredState {
         return this == APPLIED || this == REJECTED || this == CONFLICT || this == SKIPPED;
     }
 
-    /** TB 결과 분류(§4.4)를 받은 처리 중 명령이 끝나는 상태. */
+    /** TB 결과 분류를 받은 처리 중 명령이 끝나는 상태. */
     public static StoredState finalStateFor(ResultCategory category) {
         return switch (category) {
             case APPLIED -> APPLIED;
@@ -28,7 +28,7 @@ public enum StoredState {
         };
     }
 
-    /** 조회 상태(스펙 §4.2). 접수·처리 중은 TB에 보낸 적이 있는지로 나뉜다. 응답이 유실된 미확정도 처리 중이다. */
+    /** 조회 상태. 접수·처리 중은 TB에 보낸 적이 있는지로 나뉜다. 응답이 유실된 미확정도 처리 중이다. */
     public CommandStatus.State queryState(long submitCount) {
         if (submitCount < 0) {
             throw new IllegalArgumentException("submitCount는 0 이상이어야 합니다: " + submitCount);

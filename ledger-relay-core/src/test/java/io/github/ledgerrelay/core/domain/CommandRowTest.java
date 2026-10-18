@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-@DisplayName("명령 행 — 스펙 §5.6")
+@DisplayName("명령")
 class CommandRowTest {
 
     @Nested

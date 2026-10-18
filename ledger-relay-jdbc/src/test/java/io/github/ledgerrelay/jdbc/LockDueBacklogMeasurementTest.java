@@ -6,12 +6,12 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * 측정용(02d Task 9, 전체 리뷰 R-jdbc-I1, 02e F32). 막힌 키 하나 뒤에 대기 명령이 쌓였을 때, 맨 앞이 backoff 중인 키가 많을
+ * 측정용(F32). 막힌 키 하나 뒤에 대기 명령이 쌓였을 때, 맨 앞이 backoff 중인 키가 많을
  * 때, 보낼 수 있는 맨 앞이 몰렸을 때 claim 질의의 비용을 잰다. 판정하지 않고 실행 계획만 남긴다. 판정은
  * {@link LockDueBoundedWorkTest}가 한다. 기본 실행에서 빠지며 {@code ./gradlew :ledger-relay-jdbc:measurement}로 돌린다.
  */
 @Tag("measurement")
-@DisplayName("측정: 막힌 키의 백로그와 claim 질의 비용 — R-jdbc-I1")
+@DisplayName("측정: 막힌 키의 백로그와 claim 질의 비용")
 class LockDueBacklogMeasurementTest {
 
     static final int BACKLOG = 100_000;
@@ -84,7 +84,7 @@ class LockDueBacklogMeasurementTest {
         dueKeys(OTHER_KEYS);
     }
 
-    /** 보낼 수 있는 키 n개를 넣고, 직접 넣은 행의 맨 앞 표시를 정한 뒤(02e P2e-5) 통계를 갱신한다. */
+    /** 보낼 수 있는 키 n개를 넣고, 직접 넣은 행의 맨 앞 표시를 정한 뒤 통계를 갱신한다. */
     private void dueKeys(int n) {
         storage.sql().sql("""
                 INSERT INTO ledger_command (command_id, transfer_id, ordering_key, seq, kind, debit_account_id,

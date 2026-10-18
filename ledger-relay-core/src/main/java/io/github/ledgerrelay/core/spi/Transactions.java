@@ -3,7 +3,7 @@ package io.github.ledgerrelay.core.spi;
 import java.util.function.Supplier;
 
 /**
- * 트랜잭션 경계(스펙 G1, G6, §5.4). jdbc는 Spring 트랜잭션으로, 메모리 저장소는 스냅샷으로 구현한다.
+ * 트랜잭션 경계(G1, G6). jdbc는 Spring 트랜잭션으로, 메모리 저장소는 스냅샷으로 구현한다.
  * 서비스는 이 포트로만 트랜잭션을 다룬다. {@link CommandStore}의 메서드는 늘 트랜잭션 안에서 불린다.
  */
 public interface Transactions {

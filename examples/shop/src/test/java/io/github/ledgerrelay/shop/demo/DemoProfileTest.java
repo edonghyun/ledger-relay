@@ -9,7 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 
-@DisplayName("데모 조작은 demo 프로필에서만 열린다 (03b §7.4)")
+@DisplayName("데모 조작은 demo 프로필에서만 열린다")
 class DemoProfileTest extends ShopSpringTest {
 
     @Autowired

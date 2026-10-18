@@ -26,10 +26,10 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 /**
- * 맨 앞을 정하는 SQL 문장 사이에 다른 트랜잭션이 커밋할 때(02e P2e-7 리뷰). READ COMMITTED는 문장마다 새 스냅숏을 잡으므로,
+ * 맨 앞을 정하는 SQL 문장 사이에 다른 트랜잭션이 커밋할 때. READ COMMITTED는 문장마다 새 스냅숏을 잡으므로,
  * 트랜잭션 경계만 엇갈리는 {@code HeadRaceTest}로는 보이지 않는 경쟁이다. 문장을 하나씩 실행해 그 사이에 상대를 커밋시킨다.
  */
-@DisplayName("맨 앞을 정하는 문장 사이에 다른 트랜잭션이 커밋하면 — 02e P2e-7")
+@DisplayName("맨 앞을 정하는 문장 사이에 다른 트랜잭션이 커밋하면")
 class HeadStatementRaceTest {
 
     static final Duration BLOCKED = Duration.ofMillis(300);

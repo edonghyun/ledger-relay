@@ -9,7 +9,7 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("이체 ID 생성기 — TB의 시간순 ID, 0과 최댓값은 거부 (03b)")
+@DisplayName("이체 ID 생성기 — TB의 시간순 ID, 0과 최댓값은 거부")
 class TigerBeetleTransferIdsTest {
 
     static final BigInteger U128_MAX = BigInteger.ONE.shiftLeft(128).subtract(BigInteger.ONE);

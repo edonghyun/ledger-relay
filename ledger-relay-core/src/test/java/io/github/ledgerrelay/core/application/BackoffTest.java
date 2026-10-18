@@ -12,10 +12,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-@DisplayName("다시 시도할 때까지의 대기 — 스펙 §6 worker.backoff")
+@DisplayName("다시 시도할 때까지의 대기 — worker.backoff")
 class BackoffTest {
 
-    /** 스펙 §6의 기본값. */
+    /** 기본값. */
     static final Backoff DEFAULT = new Backoff(Duration.ofMillis(200), Duration.ofSeconds(30));
 
     @Nested

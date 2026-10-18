@@ -11,7 +11,7 @@ import java.util.Optional;
  * {@code complete}한다. 둘 다 아니면 {@code markSubmitted} 뒤 TB에 보낸다.
  *
  * @param leaseToken 이 claim이 받은 토큰. 이후의 모든 쓰기에 내민다
- * @param skip       post·void가 참조한 예약이 적용되지 않고 끝났다(§5.2)
+ * @param skip       post·void가 참조한 예약이 적용되지 않고 끝났다
  */
 public record ClaimedCommand(
         long rowId,

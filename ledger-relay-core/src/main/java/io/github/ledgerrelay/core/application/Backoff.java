@@ -3,7 +3,7 @@ package io.github.ledgerrelay.core.application;
 import java.time.Duration;
 import java.util.Objects;
 
-/** 다시 시도할 때까지의 대기(스펙 §6 worker.backoff, P2a-24). 실패할 때마다 두 배로 늘고 max에서 멈춘다. */
+/** 다시 시도할 때까지의 대기(worker.backoff). 실패할 때마다 두 배로 늘고 max에서 멈춘다. */
 public record Backoff(Duration initial, Duration max) {
 
     public Backoff {

@@ -1,6 +1,6 @@
 package io.github.ledgerrelay.core.domain;
 
-/** 순서 게이트의 결정(스펙 §5.2). */
+/** 순서 게이트의 결정. */
 public enum GateDecision {
     /** 제출한다. */
     OPEN,
@@ -11,7 +11,7 @@ public enum GateDecision {
     /** 정상 경로에서 나올 수 없는 입력이다. 제출하지 않고 멈추며 알린다. */
     HALT;
 
-    /** 전이표(§4.3)의 claim 사건으로 바꾼다. */
+    /** 전이표의 claim 사건으로 바꾼다. */
     public CommandEvent claimEvent() {
         return switch (this) {
             // 건너뛸 명령도 먼저 claim한다. 건너뜀(RESERVATION_NOT_APPLIED)은 claim 뒤의 사건이다.

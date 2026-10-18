@@ -18,7 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("TigerBeetle 테스트 컨테이너 — 스펙 §10 0단계·§12")
+@DisplayName("TigerBeetle 테스트 컨테이너")
 class TigerBeetleContainerTest {
 
     static final TigerBeetleContainer TB = new TigerBeetleContainer();

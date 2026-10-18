@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("대사 — PG의 최종 상태와 TB에 실제로 있는 이체를 맞춘다 (03b)")
+@DisplayName("대사 — PG의 최종 상태와 TB에 실제로 있는 이체를 맞춘다")
 class ReconciliationTest {
 
     static final WorkerSettings SETTINGS =

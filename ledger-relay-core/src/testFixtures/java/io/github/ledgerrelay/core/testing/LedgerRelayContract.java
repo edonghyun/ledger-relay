@@ -46,7 +46,7 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 /**
- * 서비스 {@link CommandLifecycle}의 행동 계약(스펙 §5.1~§5.4, G1·G4~G7). 어떤 저장소 위에서 돌려도 같아야 한다.
+ * 서비스 {@link CommandLifecycle}의 행동 계약(G1·G4~G7). 어떤 저장소 위에서 돌려도 같아야 한다.
  * 구현마다 이 클래스를 상속한 테스트 하나를 둔다. 메모리 저장소(core)와 PostgreSQL 저장소(jdbc)가 같은 장을 읽는다.
  */
 public abstract class LedgerRelayContract {
@@ -70,7 +70,7 @@ public abstract class LedgerRelayContract {
 
     @Nested
     @Order(1)
-    @DisplayName("명령을 접수하면 — §5.1")
+    @DisplayName("명령을 접수하면")
     class Accepting {
 
         @Test
@@ -174,7 +174,7 @@ public abstract class LedgerRelayContract {
 
     @Nested
     @Order(3)
-    @DisplayName("예약을 참조하는 확정·해제를 접수하면 — §5.1-3, P2")
+    @DisplayName("예약을 참조하는 확정·해제를 접수하면")
     class AcceptingAReference {
 
         @BeforeEach
@@ -237,7 +237,7 @@ public abstract class LedgerRelayContract {
         }
 
         @Test
-        @DisplayName("자기 자신을 참조하면 명령을 만들 수 없어 접수까지 가지 않는다 (P2c-9)")
+        @DisplayName("자기 자신을 참조하면 명령을 만들 수 없어 접수까지 가지 않는다")
         void aCommandCannotReferenceItself() {
             // when
             ThrowingCallable referencingItself = () -> submit(post("capture-1", "order-1", "capture-1"));
@@ -298,7 +298,7 @@ public abstract class LedgerRelayContract {
 
     @Nested
     @Order(5)
-    @DisplayName("claim하면 — §5.2, G4")
+    @DisplayName("claim하면 —, G4")
     class Claiming {
 
         @Test
@@ -415,7 +415,7 @@ public abstract class LedgerRelayContract {
 
     @Nested
     @Order(6)
-    @DisplayName("잡은 명령에 결과를 쓰면 — §5.3")
+    @DisplayName("잡은 명령에 결과를 쓰면")
     class WritingResults {
 
         ClaimedCommand pay1;
@@ -525,7 +525,7 @@ public abstract class LedgerRelayContract {
 
     @Nested
     @Order(7)
-    @DisplayName("lease가 끝나 다른 워커가 잡은 뒤 앞 워커가 쓰면 — G5, E3")
+    @DisplayName("lease가 끝나 다른 워커가 잡은 뒤 앞 워커가 쓰면 — G5")
     class LateWorker {
 
         ClaimedCommand byWorker1;
@@ -604,7 +604,7 @@ public abstract class LedgerRelayContract {
 
     @Nested
     @Order(8)
-    @DisplayName("결과 반영 핸들러가 실패하면 — §5.4, G6")
+    @DisplayName("결과 반영 핸들러가 실패하면 —, G6")
     class HandlerFails {
 
         ClaimedCommand pay1;
@@ -697,7 +697,7 @@ public abstract class LedgerRelayContract {
 
     @Nested
     @Order(9)
-    @DisplayName("결과 반영 핸들러가 Error를 던지면 — §5.4, G6")
+    @DisplayName("결과 반영 핸들러가 Error를 던지면 —, G6")
     class HandlerCrashes {
 
         ClaimedCommand pay1;
@@ -1241,7 +1241,7 @@ public abstract class LedgerRelayContract {
 
     @Nested
     @Order(19)
-    @DisplayName("보낸 명령을 되돌리기를 거듭하면 — §5.3-4, backoff")
+    @DisplayName("보낸 명령을 되돌리기를 거듭하면 —, backoff")
     class ReleasingAgainAndAgain {
 
         @Test
@@ -1372,7 +1372,7 @@ public abstract class LedgerRelayContract {
 
     @Nested
     @Order(16)
-    @DisplayName("같은 앱 트랜잭션에서 예약을 접수하고 이어서 그 예약을 참조하면 — §5.1-3, P2b-1")
+    @DisplayName("같은 앱 트랜잭션에서 예약을 접수하고 이어서 그 예약을 참조하면")
     class ReferencingAReservationOfTheSameTransaction {
 
         @Test

@@ -23,7 +23,7 @@ import java.util.Set;
 /**
  * 잡은 명령에 대한 워커의 쓰기와, 최종 상태로 바꾼 같은 트랜잭션에서의 핸들러 실행(G6). 명령 행만 다루고 순서 키 행은
  * 잡지 않는다. 그래서 키 포트({@link io.github.ledgerrelay.core.spi.OrderingKeys})를 받지 않는다: 앱은 주문 행을 쥔 채
- * 접수하며 키 행을 기다릴 수 있으므로, 여기서 키 행을 쥔 채 핸들러가 주문 행을 기다리면 교착한다(02e P2e-7).
+ * 접수하며 키 행을 기다릴 수 있으므로, 여기서 키 행을 쥔 채 핸들러가 주문 행을 기다리면 교착한다.
  * {@code ArchitectureTest}가 이 경계를 지킨다.
  */
 final class WorkerWrites {
@@ -98,7 +98,7 @@ final class WorkerWrites {
 
     /**
      * 최종 쓰기. 핸들러가 던지면 그 트랜잭션은 롤백되어 결과 쓰기도 없던 일이 된다(G6). 그다음 새 트랜잭션에서
-     * 받은 결과를 남기고 backoff 뒤 다시 잡히게 한다(§5.4, P2a-22).
+     * 받은 결과를 남기고 backoff 뒤 다시 잡히게 한다.
      */
     private WriteResult finish(ClaimedCommand claimed, Step.Write step, Optional<LedgerResultCode> result) {
         try {
@@ -107,12 +107,12 @@ final class WorkerWrites {
             try {
                 transactions.inTransaction(() -> write(claimed, new Step.HandlerFailed(claimed.leaseToken(), result)));
             } catch (RuntimeException | Error recordFailed) {
-                // 기록마저 실패하면 이 예외가 워커로 간다. 처음 원인인 핸들러 예외를 함께 실어 잃지 않는다(02d I6)
+                // 기록마저 실패하면 이 예외가 워커로 간다. 처음 원인인 핸들러 예외를 함께 실어 잃지 않는다
                 recordFailed.addSuppressed(failed.getCause());
                 throw recordFailed;
             }
             // Error(메모리 부족 등)는 삼키지 않는다. 그래도 받은 결과는 위에서 남겼으므로, 다시 TB에 보내
-            // 원래 사유를 IdAlreadyFailed로 잃지 않는다(§5.4)
+            // 원래 사유를 IdAlreadyFailed로 잃지 않는다
             if (failed.getCause() instanceof Error error) {
                 throw error;
             }
@@ -136,7 +136,7 @@ final class WorkerWrites {
 
     /**
      * 상태 기계가 계산한 행을 조건부로 쓰고, 최종 상태면 같은 트랜잭션에서 핸들러를 실행한다. 상태 기계가 이미
-     * 막았지만, 읽은 뒤 다른 워커가 바꿨을 수 있으므로 저장소에서 한 번 더 막는다(P2a-7).
+     * 막았지만, 읽은 뒤 다른 워커가 바꿨을 수 있으므로 저장소에서 한 번 더 막는다.
      */
     private WriteResult land(CommandRecord current, StoredState expectedState, long expectedToken,
             StepResult.Moved moved) {
@@ -157,7 +157,7 @@ final class WorkerWrites {
         return new WriteResult.Written();
     }
 
-    /** 전이가 함께 바꿀 시각 컬럼(§5.2~§5.4). */
+    /** 전이가 함께 바꿀 시각 컬럼. */
     private RowChange.Stamp stampFor(StepResult.Moved moved) {
         CommandRow next = moved.row();
         Set<Transition.Effect> effects = moved.effects();
@@ -187,7 +187,7 @@ final class WorkerWrites {
         }
     }
 
-    /** 저장된 행을 앱이 보는 조회 결과로 바꾼다(§4.2, §6). */
+    /** 저장된 행을 앱이 보는 조회 결과로 바꾼다. */
     static CommandStatus statusOf(CommandRecord record) {
         CommandRow row = record.row();
         Optional<Rejection> rejection = row.state() == StoredState.REJECTED || row.state() == StoredState.CONFLICT

@@ -18,10 +18,10 @@ import org.testcontainers.utility.DockerImageName;
 /**
  * 개발 모드 단일 레플리카 TigerBeetle 컨테이너.
  *
- * <p>TB는 io_uring을 쓰므로 Docker 기본 seccomp 프로필에서는 기동하지 못한다(스펙 §12).
+ * <p>TB는 io_uring을 쓰므로 Docker 기본 seccomp 프로필에서는 기동하지 못한다.
  * format과 start를 한 컨테이너에서 실행하려고 엔트리포인트를 셸로 바꾼다.
  *
- * <p>TB 클라이언트는 timeout이 없어 서버가 죽으면 요청이 영원히 대기한다(스펙 §1.2). 그래서 이 픽스처는
+ * <p>TB 클라이언트는 timeout이 없어 서버가 죽으면 요청이 영원히 대기한다. 그래서 이 픽스처는
  * 컨테이너 로그를 항상 보관하고, 기동 직후 크래시(docs/development.md "알려진 문제")와 기동 후 사망을
  * 로그와 함께 즉시 실패로 드러낸다.
  */
@@ -103,7 +103,7 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
                 return;
             } catch (RuntimeException e) {
                 // 어느 단계(Testcontainers의 기동 검사, 로그 대기, 안정 확인)가 죽음을 먼저 봤는지가 아니라, 이번 시도가
-                // listening까지 갔는지로 판단한다(02d P2d-9). Testcontainers는 실패한 컨테이너를 이미 지웠다
+                // listening까지 갔는지로 판단한다. Testcontainers는 실패한 컨테이너를 이미 지웠다
                 boolean listenedThenDied = listenedSince(attemptStart);
                 if (!listenedThenDied || attempt == START_ATTEMPTS) {
                     String tries = listenedThenDied ? attempt + "번 시도 모두 listening 직후 종료. " : "";

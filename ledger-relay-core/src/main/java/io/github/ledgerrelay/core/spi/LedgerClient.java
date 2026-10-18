@@ -5,7 +5,7 @@ import java.math.BigInteger;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-/** TB에 이체를 묶어 보낸다(§5.3). 3단계에 tigerbeetle 모듈이 구현한다. */
+/** TB에 이체를 묶어 보낸다. 구현은 ledger-relay-tigerbeetle의 {@code TigerBeetleLedgerClient}다. */
 public interface LedgerClient {
 
     /**

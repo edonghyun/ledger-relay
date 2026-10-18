@@ -22,7 +22,7 @@ import java.util.Optional;
 
 /**
  * {@code ledger_command} 행과 core 기록 사이의 변환. 이름은 컬럼 이름과 같다. 부호 없는 값은 TB와 같은 숫자로 저장한다
- * (P2b-5): u64는 {@code Long.toUnsignedString}, u32는 {@code Integer.toUnsignedLong}. 열거값은 P2b-6.
+ *: u64는 {@code Long.toUnsignedString}, u32는 {@code Integer.toUnsignedLong}. 열거값은 Java 상수 이름이다.
  */
 final class CommandRows {
 

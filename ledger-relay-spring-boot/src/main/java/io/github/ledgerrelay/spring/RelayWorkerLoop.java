@@ -10,7 +10,7 @@ import org.apache.commons.logging.LogFactory;
 import org.springframework.context.SmartLifecycle;
 
 /**
- * 워커 바퀴를 스레드로 반복한다(스펙 §5.5). 바퀴 자체(claim, 제출, 결과 쓰기)는 core의
+ * 워커 바퀴를 스레드로 반복한다. 바퀴 자체(claim, 제출, 결과 쓰기)는 core의
  * {@link io.github.ledgerrelay.core.application.RelayWorker#runOnce()}가 하고, 여기는 스레드와 종료만 맡는다.
  *
  * <p>종료: 새 바퀴를 막고, 돌고 있는 바퀴가 끝나기를 {@code stopTimeout}까지 기다린다. 바퀴는 TB 응답을 submit-timeout까지

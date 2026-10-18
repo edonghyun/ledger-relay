@@ -15,7 +15,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-@DisplayName("워커 설정 — 스펙 §6 worker.*, 03a P3a-3·P3a-8")
+@DisplayName("워커 설정 — worker.*")
 class WorkerSettingsTest {
 
     static final Duration S30 = Duration.ofSeconds(30);
@@ -28,7 +28,7 @@ class WorkerSettingsTest {
     class Valid {
 
         @Test
-        @DisplayName("스펙 기본값(128, 1024, 30s, 5s)과 poll-timeout 1s로 만들어진다")
+        @DisplayName("기본값(128, 1024, 30s, 5s)과 poll-timeout 1s로 만들어진다")
         void theSpecDefaultsAreAccepted() {
             // when
             WorkerSettings settings = new WorkerSettings(128, 1024, S30, S5, S1);

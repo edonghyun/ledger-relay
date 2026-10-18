@@ -28,7 +28,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("운영자 포트 — 멈춘 명령 목록과 포기 (03b, O5)")
+@DisplayName("운영자 포트 — 멈춘 명령 목록과 포기 (O5)")
 class RelayOperatorTest {
 
     static final Duration LEASE = Duration.ofSeconds(30);

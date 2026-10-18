@@ -26,10 +26,10 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.ComposeContainer;
 
 /**
- * 저장소 루트의 {@code compose.yaml}을 그대로 띄우고 README의 장면 1~5를 HTTP로 돈다(03b §7.6). 앱 이미지 빌드, 인스턴스 둘,
- * TB 기동까지 함께 검증한다. 면접관이 {@code docker compose up}을 처음 했을 때 실패하지 않게 하려는 테스트다.
+ * 저장소 루트의 {@code compose.yaml}을 그대로 띄우고 README의 장면 1~5를 HTTP로 돈다. 앱 이미지 빌드, 인스턴스 둘,
+ * TB 기동까지 함께 검증한다. 저장소를 처음 받은 사람이 {@code docker compose up}을 했을 때 실패하지 않게 하려는 테스트다.
  */
-@DisplayName("docker compose up 한 번으로 뜬 샘플 쇼핑몰 — 장면 1~5 (03b §7.3, §7.6)")
+@DisplayName("docker compose up 한 번으로 뜬 샘플 쇼핑몰 — 장면 1~5")
 class ShopComposeTest {
 
     static final Duration SETTLE = Duration.ofSeconds(30);

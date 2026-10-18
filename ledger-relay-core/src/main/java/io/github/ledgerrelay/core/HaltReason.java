@@ -1,6 +1,6 @@
 package io.github.ledgerrelay.core;
 
-/** 명령이 멈춘(HALTED) 이유(스펙 §5.2 HALT). 운영자가 무엇을 고칠지 고른다. */
+/** 명령이 멈춘(HALTED) 이유. 운영자가 무엇을 고칠지 고른다. */
 public enum HaltReason {
     /** post·void가 참조한 예약이 같은 키 명령들 속에 없다. 버그나 DB 직접 수정이다(F10). */
     RESERVATION_MISSING,

@@ -31,7 +31,7 @@ class JdbcCommandStoreTest extends CommandStoreContract {
         return PostgresStorage.withDataSourceTransactions();
     }
 
-    /** 어느 장이 끝나도 맨 앞 표시와 미완료 개수가 행과 맞다(02e P2e-4). */
+    /** 어느 장이 끝나도 맨 앞 표시와 미완료 개수가 행과 맞다. */
     @AfterEach
     void theHeadsStayConsistent() {
         ((PostgresStorage) storage).assertHeadsConsistent();
@@ -39,7 +39,7 @@ class JdbcCommandStoreTest extends CommandStoreContract {
 
     @Nested
     @Order(100)
-    @DisplayName("jdbc 전용: u128 컬럼에 TB 범위를 벗어난 값을 직접 넣으면 (P2c-12)")
+    @DisplayName("jdbc 전용: u128 컬럼에 TB 범위를 벗어난 값을 직접 넣으면")
     class OutOfRangeU128 {
 
         PostgresStorage storage;

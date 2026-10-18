@@ -27,7 +27,7 @@ class TigerBeetleContainerGuardTest {
     }
 
     @Test
-    @DisplayName("§12 TB Docker: seccomp가 기본값이면 기동에 실패하고, 예외 메시지에 원인 io_uring 오류가 담긴다")
+    @DisplayName("TB Docker: seccomp가 기본값이면 기동에 실패하고, 예외 메시지에 원인 io_uring 오류가 담긴다")
     void failsWithIoUringErrorWithoutUnconfinedSeccomp() {
         try (TigerBeetleContainer tb = new TigerBeetleContainer(false)) {
             assertThatThrownBy(tb::start)
@@ -37,7 +37,7 @@ class TigerBeetleContainerGuardTest {
     }
 
     @Test
-    @DisplayName("§12 TB 크래시(O4): listening 직후 한 번 죽어도 새 컨테이너로 다시 띄워 기동에 성공한다")
+    @DisplayName("TB 크래시(O4): listening 직후 한 번 죽어도 새 컨테이너로 다시 띄워 기동에 성공한다")
     void startRetriesWhenTheServerDiesRightAfterListening() {
         try (TigerBeetleContainer tb = new TigerBeetleContainer(true, List.of(crashingServer("0.2"), healthyServer()))) {
             // when
@@ -51,7 +51,7 @@ class TigerBeetleContainerGuardTest {
     }
 
     @Test
-    @DisplayName("§12 TB 크래시(O4): listening을 찍자마자 죽어 Testcontainers의 기동 검사가 먼저 봐도 다시 띄운다")
+    @DisplayName("TB 크래시(O4): listening을 찍자마자 죽어 Testcontainers의 기동 검사가 먼저 봐도 다시 띄운다")
     void aDeathSeenByTheStartupCheckIsRetried() {
         try (TigerBeetleContainer tb = new TigerBeetleContainer(true, List.of(instantlyCrashingServer(), healthyServer()))) {
             // when
@@ -63,7 +63,7 @@ class TigerBeetleContainerGuardTest {
     }
 
     @Test
-    @DisplayName("§12 TB 크래시: 다시 띄워도 매번 listening 직후 죽으면 start()가 실패하고, 시도 횟수와 panic 로그가 담긴다")
+    @DisplayName("TB 크래시: 다시 띄워도 매번 listening 직후 죽으면 start()가 실패하고, 시도 횟수와 panic 로그가 담긴다")
     void startFailsWhenServerDiesRightAfterListening() {
         try (TigerBeetleContainer tb = new TigerBeetleContainer(true, crashingServer("0.2"))) {
             assertThatThrownBy(tb::start)
@@ -74,7 +74,7 @@ class TigerBeetleContainerGuardTest {
     }
 
     @Test
-    @DisplayName("§12 TB 크래시: 기동 후 서버가 죽으면 assertAlive()가 즉시 실패하고 panic 로그를 보여준다 — 다음 테스트가 2분씩 매달리지 않게")
+    @DisplayName("TB 크래시: 기동 후 서버가 죽으면 assertAlive()가 즉시 실패하고 panic 로그를 보여준다 — 다음 테스트가 2분씩 매달리지 않게")
     void assertAliveFailsAfterServerDies() throws Exception {
         try (TigerBeetleContainer tb = new TigerBeetleContainer(true, crashingServer("3"))) {
             tb.start();
@@ -89,7 +89,7 @@ class TigerBeetleContainerGuardTest {
     }
 
     @Test
-    @DisplayName("§12 TB 클라이언트 주소: localhost는 127.0.0.1로 바뀐다")
+    @DisplayName("TB 클라이언트 주소: localhost는 127.0.0.1로 바뀐다")
     void localhostBecomesLoopbackIpv4() {
         assertThat(TigerBeetleContainer.ipv4("localhost")).isEqualTo("127.0.0.1");
     }

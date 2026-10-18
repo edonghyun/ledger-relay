@@ -6,7 +6,7 @@ import org.apache.commons.logging.LogFactory;
 
 /**
  * 워커 사건을 로그로 남긴다. 사람이 봐야 하는 사건(멈춤, 이상 후보, 쓰기 실패, 핸들러 실패, TB를 쓸 수 없음)은 WARN, 나머지는
- * DEBUG다. 지표는 03c에서 따로 붙인다.
+ * DEBUG다. 지표는 아직 없다.
  */
 public final class LoggingWorkerEvents implements WorkerEvents {
 

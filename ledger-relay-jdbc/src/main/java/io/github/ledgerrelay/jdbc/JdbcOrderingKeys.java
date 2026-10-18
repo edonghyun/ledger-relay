@@ -7,7 +7,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * PostgreSQL 순서 키 저장소. {@code ledger_ordering_key} 행을 잠그는 SQL은 모두 여기에 있다. {@link JdbcCommandStore}는
- * 이 행을 잠그지 않는다(02e P2e-7).
+ * 이 행을 잠그지 않는다.
  */
 public final class JdbcOrderingKeys implements OrderingKeys {
 
@@ -18,8 +18,8 @@ public final class JdbcOrderingKeys implements OrderingKeys {
     }
 
     /**
-     * 키 행을 upsert해 잠그고 다음 순번을 낸다(P2b-8). 잠금은 커밋까지 유지되므로 같은 키의 다음 접수는 이 트랜잭션이
-     * 끝날 때까지 기다린다. 그래서 seq 순서가 커밋 순서와 같다(R12).
+     * 키 행을 upsert해 잠그고 다음 순번을 낸다. 잠금은 커밋까지 유지되므로 같은 키의 다음 접수는 이 트랜잭션이
+     * 끝날 때까지 기다린다. 그래서 seq 순서가 커밋 순서와 같다.
      */
     @Override
     public long lockKeyAndTakeSeq(String orderingKey) {
@@ -47,7 +47,7 @@ public final class JdbcOrderingKeys implements OrderingKeys {
             """;
 
     /**
-     * 끝난 명령이 쥔 맨 앞을 다음 미완료로 넘긴다(02e P2e-7). 잡은 키 행은 값을 그대로 두고 갱신한다. 새 행 버전이 생기므로,
+     * 끝난 명령이 쥔 맨 앞을 다음 미완료로 넘긴다. 잡은 키 행은 값을 그대로 두고 갱신한다. 새 행 버전이 생기므로,
      * 이보다 앞서 스냅숏을 잡은 REPEATABLE READ 이상의 앱 트랜잭션은 이 키에서 순번을 받을 때 직렬화 실패(40001)로 끝나
      * 재시도한다. 그러지 않으면 그 앱은 옛 스냅숏에서 아직 맨 앞이 있다고 보고 새 명령을 맨 앞으로 세우지 않아, 그 키가
      * 영원히 나가지 않는다. 다음 미완료를 접수하는 중인 트랜잭션은 순번을 받으며 키 행을 쥐었으므로 그 키는 건너뛰고, 그 접수가

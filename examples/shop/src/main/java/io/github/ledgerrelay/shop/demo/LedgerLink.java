@@ -12,7 +12,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
- * 앱과 TB 사이의 Toxiproxy를 끊고 잇는다(03b §7.4). 앱은 TB에 이 프록시로만 붙는다. Docker 소켓을 앱에 주지 않고 장애를
+ * 앱과 TB 사이의 Toxiproxy를 끊고 잇는다. 앱은 TB에 이 프록시로만 붙는다. Docker 소켓을 앱에 주지 않고 장애를
  * 낸다. 끊으면 이미 열린 연결도 닫힌다.
  */
 @Component

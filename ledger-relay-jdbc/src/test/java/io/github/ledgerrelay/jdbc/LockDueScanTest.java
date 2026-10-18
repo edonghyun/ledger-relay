@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-/** 워커는 짧은 간격으로 계속 claim한다. 한 번의 claim이 끝난 이력의 크기에 비례해 일하면 안 된다(§5.2, F19). */
+/** 워커는 짧은 간격으로 계속 claim한다. 한 번의 claim이 끝난 이력의 크기에 비례해 일하면 안 된다(F19). */
 @DisplayName("claim 후보 질의의 비용 — 끝난 이력이 쌓여도 미완료 행만 읽는다")
 class LockDueScanTest {
 

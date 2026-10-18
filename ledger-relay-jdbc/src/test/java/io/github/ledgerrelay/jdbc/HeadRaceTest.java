@@ -38,11 +38,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * 같은 키에서 맨 앞의 완료와 뒤 명령의 접수가 겹칠 때(02e P2e-7). 완료는 순서 키 행을 잡지 않으므로 둘은 서로 기다리지
+ * 같은 키에서 맨 앞의 완료와 뒤 명령의 접수가 겹칠 때. 완료는 순서 키 행을 잡지 않으므로 둘은 서로 기다리지
  * 않는다. 끝난 맨 앞은 다음 claim이 키 행을 잡아 넘기며, 앱이 그 키 행을 쥐고 있으면 그 키만 미룬다. 어느 격리 수준에서도
  * 맨 앞이 사라져 그 키가 영원히 안 나가는 일은 없다.
  */
-@DisplayName("같은 키의 완료와 접수가 겹치면 — 02e P2e-7")
+@DisplayName("같은 키의 완료와 접수가 겹치면")
 class HeadRaceTest {
 
     static final Duration BLOCKED = Duration.ofMillis(300);
@@ -229,7 +229,7 @@ class HeadRaceTest {
         }
 
         @Test
-        @DisplayName("주문 행을 고친 뒤 접수해도 교착하지 않는다 — 결과를 쓰는 쪽은 키 행을 쥐지 않고 주문 행만 기다린다 (P2e-7)")
+        @DisplayName("주문 행을 고친 뒤 접수해도 교착하지 않는다 — 결과를 쓰는 쪽은 키 행을 쥐지 않고 주문 행만 기다린다")
         void anAppThatMarksTheOrderThenSubmitsDoesNotDeadlockWithTheHandler() throws Exception {
             CountDownLatch orderMarked = new CountDownLatch(1);
             CountDownLatch submitNow = new CountDownLatch(1);

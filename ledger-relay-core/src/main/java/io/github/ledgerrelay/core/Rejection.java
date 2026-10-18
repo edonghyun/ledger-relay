@@ -2,7 +2,7 @@ package io.github.ledgerrelay.core;
 
 import java.util.Objects;
 
-/** 거절·충돌로 끝난 명령의 사유(스펙 §6 {@code rejection() = {category, tbCode}}). 분류는 코드가 정한다. */
+/** 거절·충돌로 끝난 명령의 사유({@code rejection() = {category, tbCode}}). 분류는 코드가 정한다. */
 public record Rejection(ResultCategory category, LedgerResultCode tbCode) {
 
     public Rejection {

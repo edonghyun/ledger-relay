@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-@DisplayName("DB에 쓰는 결과 반영 핸들러 — G6 (스펙 §8.3)")
+@DisplayName("DB에 쓰는 결과 반영 핸들러 — G6")
 class HandlerAtomicityTest {
 
     static final Duration LEASE = Duration.ofSeconds(30);

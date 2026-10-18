@@ -11,7 +11,7 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("미분류 가드 — 스펙 §4.4: TB 클라이언트의 결과 코드와 core가 분류하는 코드는 정확히 같다")
+@DisplayName("미분류 가드 — TB 클라이언트의 결과 코드와 core가 분류하는 코드는 정확히 같다")
 class ResultCodeGuardTest {
 
     @Test
@@ -46,7 +46,7 @@ class ResultCodeGuardTest {
 
     private static void assertEveryTigerBeetleCodeClassified(Set<String> unclassified) {
         assertThat(unclassified)
-                .as("TB에 core가 분류하지 않는 결과 코드가 있다 — 스펙 §4.4 분류표, LedgerResultCode, "
+                .as("TB에 core가 분류하지 않는 결과 코드가 있다 — 분류표, LedgerResultCode, "
                         + "ResultClassificationTest.CLASSIFICATION_TABLE에 추가할 것")
                 .isEmpty();
     }

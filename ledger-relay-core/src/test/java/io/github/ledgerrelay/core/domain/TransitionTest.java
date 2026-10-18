@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("전이표 한 칸 — 스펙 §4.3")
+@DisplayName("전이표 한 칸")
 class TransitionTest {
 
     @Nested

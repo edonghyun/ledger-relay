@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("Toxiproxy 뒤의 TigerBeetle — 스펙 §1.2·§8.2")
+@DisplayName("Toxiproxy 뒤의 TigerBeetle")
 class ProxiedTigerBeetleTest {
 
     static ProxiedTigerBeetle tb;

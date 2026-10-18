@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("가짜 TB와 이벤트 기록 — 워커 테스트가 믿는 도구 (docs/testing.md §6)")
+@DisplayName("가짜 TB와 이벤트 기록 — 워커 테스트가 믿는 도구 (docs/testing.md)")
 class FakeLedgerTest {
 
     FakeLedger ledger;

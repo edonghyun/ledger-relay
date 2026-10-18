@@ -1,6 +1,6 @@
 package io.github.ledgerrelay.core;
 
-/** 명령 종류(스펙 §6). */
+/** 명령 종류. */
 public enum CommandKind {
     TRANSFER,
     RESERVE,

@@ -12,7 +12,7 @@ import org.testcontainers.toxiproxy.ToxiproxyContainer;
 
 /**
  * Toxiproxy를 앞에 둔 TigerBeetle. 클라이언트는 프록시로만 접속하므로, 프록시를 끊으면
- * "요청은 보냈지만 응답이 없는" 상황을 결정적으로 만들 수 있다(스펙 §9 E2의 기반).
+ * "요청은 보냈지만 응답이 없는" 상황을 결정적으로 만들 수 있다(기반).
  */
 public final class ProxiedTigerBeetle implements AutoCloseable {
 

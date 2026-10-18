@@ -1,4 +1,4 @@
--- 샘플 쇼핑몰의 표(03b §7.2). 라이브러리 표(ledger_command 등)와 같은 DB에 둔다. 앱이 기동할 때 ShopSchema가 적용한다.
+-- 샘플 쇼핑몰의 표. 라이브러리 표(ledger_command 등)와 같은 DB에 둔다. 앱이 기동할 때 ShopSchema가 적용한다.
 
 -- 주문 하나. 결제 요청의 멱등 키마다 하나만 생긴다(더블 클릭, F38)
 CREATE TABLE shop_order (

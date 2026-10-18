@@ -37,7 +37,7 @@ import java.util.Optional;
 /**
  * 명령의 일생을 맡는 서비스. 업무 판단은 모두 여기와 domain에서 한다. 저장소는 저장만 한다.
  *
- * <p>트랜잭션마다 잡는 행(커밋까지 유지, 02e P2e-7):
+ * <p>트랜잭션마다 잡는 행(커밋까지 유지):
  * <ul>
  *   <li>{@link #submit}(앱 트랜잭션): 순서 키 행 → 새 명령 행. 앱은 그 앞뒤로 주문 행을 잡는다.
  *   <li>{@link #claim}: 끝난 명령이 맨 앞을 쥔 키 행(쥔 쪽이 있으면 건너뜀) → 후보 명령 행(건너뜀). 핸들러는 돌지 않는다.
@@ -65,19 +65,19 @@ public final class CommandLifecycle implements LedgerRelay {
     @Override
     public CommandReceipt submit(LedgerCommand command) {
         transactions.requireActive(); // G1: 앱 트랜잭션에 묶인다
-        // §5.1-2: 키를 잠그고 순번을 받는다. 같은 키의 동시 접수는 여기서 줄을 서므로 순번 순서가 커밋 순서와 같다
+        // 키를 잠그고 순번을 받는다. 같은 키의 동시 접수는 여기서 줄을 서므로 순번 순서가 커밋 순서와 같다
         long seq = keys.lockKeyAndTakeSeq(command.orderingKey());
-        // §5.1-3: 같은 commandId가 있으면 내용을 견준다. 참조 검사보다 먼저 한다. 보관 작업이 예약을 지운 뒤 같은
+        // 같은 commandId가 있으면 내용을 견준다. 참조 검사보다 먼저 한다. 보관 작업이 예약을 지운 뒤 같은
         // 확정을 다시 보내도 처음 접수증을 돌려줘야 하기 때문이다(F28)
         String hash = ContentHash.of(command);
         Optional<CommandRecord> existing = store.find(command.commandId());
         if (existing.isPresent()) {
             return sameOrConflict(existing.get(), hash);
         }
-        // §5.1-4: 참조 검사. 예약의 이체 ID는 영구히 바뀌지 않으므로 지금 정해 둔다(P2a-20)
+        // 참조 검사. 예약의 이체 ID는 영구히 바뀌지 않으므로 지금 정해 둔다
         Optional<BigInteger> pendingTransferId = command.reservation()
                 .map(reservationId -> reservationTransferId(command, reservationId));
-        // §5.1-5: 이체 ID를 내고 넣는다. 그사이 다른 트랜잭션이 같은 commandId를 넣었다면 저장소가 그 행을 돌려준다
+        // 이체 ID를 내고 넣는다. 그사이 다른 트랜잭션이 같은 commandId를 넣었다면 저장소가 그 행을 돌려준다
         BigInteger transferId = transferIds.next();
         NewCommand row = new NewCommand(command.commandId(), command.orderingKey(), seq, command.reservation(),
                 transferId, hash, TransferBody.of(command, pendingTransferId));
@@ -95,7 +95,7 @@ public final class CommandLifecycle implements LedgerRelay {
     }
 
     /**
-     * 게이트(§5.2)를 통과한 명령을 limit개까지 잡는다. 보낼 수 있게 된 시각이 이른 것부터, 같으면 접수 순서로 잡는다
+     * 게이트를 통과한 명령을 limit개까지 잡는다. 보낼 수 있게 된 시각이 이른 것부터, 같으면 접수 순서로 잡는다
      * ({@link io.github.ledgerrelay.core.spi.CommandStore#lockDue}). 트랜잭션 밖에서 부른다.
      */
     public ClaimBatch claim(int limit, Duration lease) {
@@ -186,7 +186,7 @@ public final class CommandLifecycle implements LedgerRelay {
     }
 
     /**
-     * 운영자가 멈춘(HALTED) 명령을 포기한다(§5.2 HALT, docs/failure-modes.md F9). TB에 보내지 않고 건너뜀으로 끝내며,
+     * 운영자가 멈춘(HALTED) 명령을 포기한다(docs/failure-modes.md F9). TB에 보내지 않고 건너뜀으로 끝내며,
      * 같은 트랜잭션에서 핸들러가 '운영자 포기' 사유를 받는다. 핸들러가 실패하면 멈춘 그대로 남는다. 트랜잭션 밖에서 부른다.
      *
      * @throws io.github.ledgerrelay.core.CommandNotFoundException 접수한 적 없는 명령
