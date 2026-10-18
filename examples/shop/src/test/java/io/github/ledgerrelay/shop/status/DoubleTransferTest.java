@@ -6,9 +6,11 @@ import com.jayway.jsonpath.JsonPath;
 import com.tigerbeetle.Client;
 import com.tigerbeetle.CreateTransferResultBatch;
 import com.tigerbeetle.CreateTransferStatus;
+import com.tigerbeetle.IdBatch;
 import com.tigerbeetle.TransferBatch;
 import com.tigerbeetle.TransferFlags;
 import com.tigerbeetle.UInt128;
+import io.github.ledgerrelay.core.LedgerRelay;
 import io.github.ledgerrelay.shop.Accounts;
 import io.github.ledgerrelay.shop.ShopProbe;
 import io.github.ledgerrelay.shop.ShopTestEnvironment;
@@ -56,6 +58,26 @@ class DoubleTransferTest {
     Client client;
     @Autowired
     DataSource dataSource;
+    @Autowired
+    LedgerRelay relay;
+
+    @Test
+    @DisplayName("A shipped order's post carries the order id in TB — the post sets no user_data and TB copies it from "
+            + "the reservation, which is how double transfers are counted per order")
+    void thePostCarriesTheOrderIdOfItsReservation() throws Exception {
+        // given
+        ShopProbe probe = new ShopProbe(orders, client, dataSource);
+        ShopOrder order = shop.checkout("inherit-1", 1002, "mouse").order();
+        probe.awaitState(order.id(), OrderState.AUTHORIZED);
+
+        // when
+        shop.ship(order.id());
+        probe.awaitState(order.id(), OrderState.PAID);
+
+        // then
+        assertThat(userData64OfTransfer(ShopOrder.commandId(order.id(), "post"))).as("user_data_64 of the post")
+                .isEqualTo(order.id());
+    }
 
     @Test
     @DisplayName("Posting a paid order once more directly in TB makes double transfers 1 and the consistency verdict broken")
@@ -80,6 +102,14 @@ class DoubleTransferTest {
         } while (StatusApiTest.number(consistency, "$.doubleTransfers") == 0 && System.nanoTime() < deadline);
         assertThat(StatusApiTest.number(consistency, "$.doubleTransfers")).as("double transfers").isEqualTo(1);
         assertThat((String) JsonPath.read(consistency, "$.verdict")).as("consistency verdict").isEqualTo("broken");
+    }
+
+    private long userData64OfTransfer(String commandId) throws InterruptedException {
+        IdBatch ids = new IdBatch(1);
+        ids.add(UInt128.asBytes(relay.status(commandId).orElseThrow().transferId()));
+        TransferBatch found = client.lookupTransfers(ids);
+        assertThat(found.next()).as("transfer of " + commandId + " in TB").isTrue();
+        return found.getUserData64();
     }
 
     private void captureAgainBehindTheRelaysBack(ShopOrder order) throws InterruptedException {
