@@ -503,6 +503,35 @@ class RelayWorkerTest {
         }
     }
 
+    @Nested
+    @Order(10)
+    @DisplayName("핸들러가 던지고 그 기록마저 실패하면")
+    class WhenTheHandlerFailureCannotBeRecorded {
+
+        @Test
+        @DisplayName("저장소 예외에 핸들러 예외가 함께 실린다 — 운영자가 처음 원인을 잃지 않게 (02d I6)")
+        void theHandlersFailureSurvivesAFailedRecord() {
+            // given: 핸들러가 한 번 던지고, 그 실패를 기록하는 조회에서 저장소가 한 번 실패한다
+            //        (pay-1 조회: 제출 기록 1, 결과 쓰기 2, 핸들러에 줄 상태 3, 실패 기록 4)
+            FlakyStore flaky = new FlakyStore(storage.store(), "pay-1", 3);
+            CommandLifecycle onFlaky = new CommandLifecycle(storage.keys(), flaky, storage.transactions(),
+                    new SequentialTransferIds(), handler, new Backoff(Duration.ofMillis(200), BACKOFF_MAX));
+            RelayWorker flakyWorker = new RelayWorker(onFlaky, fake, slots, SETTINGS, events);
+            storage.transactions().inTransaction(() -> onFlaky.submit(transfer("pay-1", "order-1")));
+            handler.failNextCalls(1);
+            flaky.arm();
+
+            // when
+            flakyWorker.runOnce();
+
+            // then
+            RuntimeException recorded = events.writeFailure("pay-1");
+            assertThat(recorded).as("알린 쓰기 실패").hasMessage("DB 연결이 잠깐 끊겼다");
+            assertThat(recorded.getSuppressed()).as("함께 실린 예외")
+                    .anySatisfy(e -> assertThat(e).isInstanceOf(RecordingHandler.HandlerFailure.class));
+        }
+    }
+
     // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
 
     /**

@@ -102,7 +102,13 @@ final class WorkerWrites {
         try {
             return transactions.inTransaction(() -> write(claimed, step));
         } catch (HandlerFailedSignal failed) {
-            transactions.inTransaction(() -> write(claimed, new Step.HandlerFailed(claimed.leaseToken(), result)));
+            try {
+                transactions.inTransaction(() -> write(claimed, new Step.HandlerFailed(claimed.leaseToken(), result)));
+            } catch (RuntimeException | Error recordFailed) {
+                // 기록마저 실패하면 이 예외가 워커로 간다. 처음 원인인 핸들러 예외를 함께 실어 잃지 않는다(02d I6)
+                recordFailed.addSuppressed(failed.getCause());
+                throw recordFailed;
+            }
             // Error(메모리 부족 등)는 삼키지 않는다. 그래도 받은 결과는 위에서 남겼으므로, 다시 TB에 보내
             // 원래 사유를 IdAlreadyFailed로 잃지 않는다(§5.4)
             if (failed.getCause() instanceof Error error) {
