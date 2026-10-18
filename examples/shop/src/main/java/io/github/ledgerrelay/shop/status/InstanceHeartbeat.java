@@ -32,14 +32,18 @@ class InstanceHeartbeat {
 
     @Scheduled(fixedDelay = 1000)
     void beat() {
-        sql.sql("INSERT INTO shop_instance (name, seen_at, submitted_total) VALUES (?, now(), ?) "
-                + "ON CONFLICT (name) DO UPDATE SET seen_at = now(), submitted_total = EXCLUDED.submitted_total")
-                .params(name, events.submitted()).update();
+        sql.sql("""
+                INSERT INTO shop_instance (name, seen_at, submitted_total) VALUES (?, now(), ?)
+                ON CONFLICT (name) DO UPDATE SET seen_at = now(), submitted_total = EXCLUDED.submitted_total
+                """).params(name, events.submitted()).update();
     }
 
     List<Instance> alive() {
-        return sql.sql("SELECT name, submitted_total FROM shop_instance WHERE seen_at > now() - make_interval(secs => ?) "
-                + "ORDER BY name").param(ALIVE_SECONDS)
+        return sql.sql("""
+                SELECT name, submitted_total FROM shop_instance
+                WHERE seen_at > now() - make_interval(secs => ?)
+                ORDER BY name
+                """).param(ALIVE_SECONDS)
                 .query((row, n) -> new Instance(row.getString("name"), row.getLong("submitted_total"))).list();
     }
 }

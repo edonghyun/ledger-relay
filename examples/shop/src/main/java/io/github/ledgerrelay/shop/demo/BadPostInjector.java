@@ -31,10 +31,12 @@ class BadPostInjector {
     static final long BUYER = 1003;
     static final String PRODUCT = "mouse";
 
-    private static final String INSERT_COMMAND = "INSERT INTO ledger_command (command_id, transfer_id, ordering_key, "
-            + "seq, kind, reservation_command_id, pending_transfer_id, debit_account_id, credit_account_id, amount, "
-            + "ledger, code, timeout_seconds, user_data_64, user_data_32, content_hash, state, is_head) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 'demo-injected', 'PENDING', ?)";
+    private static final String INSERT_COMMAND = """
+            INSERT INTO ledger_command (command_id, transfer_id, ordering_key, seq, kind, reservation_command_id,
+                pending_transfer_id, debit_account_id, credit_account_id, amount, ledger, code, timeout_seconds,
+                user_data_64, user_data_32, content_hash, state, is_head)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 'demo-injected', 'PENDING', ?)
+            """;
 
     private final JdbcClient sql;
     private final TransferIdGenerator transferIds;
@@ -48,8 +50,10 @@ class BadPostInjector {
     @Transactional
     long inject() {
         long amount = Catalog.find(PRODUCT).orElseThrow().priceSatang();
-        long orderId = sql.sql("INSERT INTO shop_order (idempotency_key, buyer_id, product_code, amount_satang, state) "
-                        + "VALUES (?, ?, ?, ?, 'ACCEPTED') RETURNING id")
+        long orderId = sql.sql("""
+                        INSERT INTO shop_order (idempotency_key, buyer_id, product_code, amount_satang, state)
+                        VALUES (?, ?, ?, ?, 'ACCEPTED') RETURNING id
+                        """)
                 .params("demo-bad-post-" + UUID.randomUUID(), BUYER, PRODUCT, amount).query(Long.class).single();
         String key = ShopOrder.orderingKey(orderId);
         String post = ShopOrder.commandId(orderId, "post");

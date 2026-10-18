@@ -18,16 +18,21 @@ class CommandStats {
         }
     }
 
-    private static final String COUNTS = "SELECT count(*) AS accepted, "
-            + "count(*) FILTER (WHERE state IN ('APPLIED','REJECTED','CONFLICT','SKIPPED')) AS completed, "
-            + "count(*) FILTER (WHERE state = 'PENDING') AS pending, "
-            + "count(*) FILTER (WHERE state = 'CLAIMED') AS claimed, "
-            + "count(*) FILTER (WHERE state = 'APPLIED') AS applied, "
-            + "count(*) FILTER (WHERE state = 'HALTED') AS halted FROM ledger_command";
+    private static final String COUNTS = """
+            SELECT count(*) AS accepted,
+                   count(*) FILTER (WHERE state IN ('APPLIED','REJECTED','CONFLICT','SKIPPED')) AS completed,
+                   count(*) FILTER (WHERE state = 'PENDING') AS pending,
+                   count(*) FILTER (WHERE state = 'CLAIMED') AS claimed,
+                   count(*) FILTER (WHERE state = 'APPLIED') AS applied,
+                   count(*) FILTER (WHERE state = 'HALTED') AS halted
+            FROM ledger_command
+            """;
     /** p99 of accept → completion time over the last 1,000 completed commands, in milliseconds. */
-    private static final String P99 = "SELECT round(1000 * percentile_cont(0.99) WITHIN GROUP (ORDER BY took)) FROM ("
-            + "SELECT extract(epoch FROM completed_at - accepted_at) AS took FROM ledger_command "
-            + "WHERE completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 1000) recent";
+    private static final String P99 = """
+            SELECT round(1000 * percentile_cont(0.99) WITHIN GROUP (ORDER BY took))
+            FROM (SELECT extract(epoch FROM completed_at - accepted_at) AS took FROM ledger_command
+                  WHERE completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 1000) recent
+            """;
 
     private final JdbcClient sql;
 

@@ -16,8 +16,8 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class Orders {
 
-    private static final String COLUMNS = "id, idempotency_key, buyer_id, product_code, amount_satang, state, failure_reason, "
-            + "created_at";
+    private static final String COLUMNS =
+            "id, idempotency_key, buyer_id, product_code, amount_satang, state, failure_reason, created_at";
 
     private final JdbcClient sql;
 
@@ -31,8 +31,12 @@ public class Orders {
      * requests only one inserts (F38).
      */
     Optional<ShopOrder> insertIfAbsent(String idempotencyKey, long buyerId, String productCode, long amountSatang) {
-        return sql.sql("INSERT INTO shop_order (idempotency_key, buyer_id, product_code, amount_satang, state) "
-                        + "VALUES (?, ?, ?, ?, 'ACCEPTED') ON CONFLICT (idempotency_key) DO NOTHING RETURNING " + COLUMNS)
+        return sql.sql("""
+                INSERT INTO shop_order (idempotency_key, buyer_id, product_code, amount_satang, state)
+                VALUES (?, ?, ?, ?, 'ACCEPTED')
+                ON CONFLICT (idempotency_key) DO NOTHING
+                RETURNING
+                """ + COLUMNS)
                 .params(idempotencyKey, buyerId, productCode, amountSatang).query(Orders::order).optional();
     }
 
@@ -75,15 +79,21 @@ public class Orders {
 
     /** The commands of an order, in seq order. */
     public List<OrderCommand> commandsOf(long orderId) {
-        return sql.sql("SELECT oc.order_id, oc.command_id, oc.kind FROM shop_order_command oc "
-                        + "JOIN ledger_command c ON c.command_id = oc.command_id WHERE oc.order_id = ? ORDER BY c.seq")
-                .param(orderId).query(Orders::command).list();
+        return sql.sql("""
+                SELECT oc.order_id, oc.command_id, oc.kind
+                FROM shop_order_command oc JOIN ledger_command c ON c.command_id = oc.command_id
+                WHERE oc.order_id = ?
+                ORDER BY c.seq
+                """).param(orderId).query(Orders::command).list();
     }
 
     /** Whether any command of the order is HALTED. Drives the halted chip in the UI. */
     public boolean isHalted(long orderId) {
-        return sql.sql("SELECT EXISTS (SELECT 1 FROM shop_order_command oc JOIN ledger_command c ON c.command_id = "
-                + "oc.command_id WHERE oc.order_id = ? AND c.state = 'HALTED')").param(orderId).query(Boolean.class).single();
+        return sql.sql("""
+                SELECT EXISTS (
+                    SELECT 1 FROM shop_order_command oc JOIN ledger_command c ON c.command_id = oc.command_id
+                    WHERE oc.order_id = ? AND c.state = 'HALTED')
+                """).param(orderId).query(Boolean.class).single();
     }
 
     private static ShopOrder order(ResultSet row, int rowNumber) throws SQLException {
