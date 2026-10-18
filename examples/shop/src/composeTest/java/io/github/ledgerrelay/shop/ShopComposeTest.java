@@ -115,7 +115,8 @@ class ShopComposeTest {
         for (long order : orders) {
             awaitOrder(order, "AUTHORIZED");
         }
-        await(SETTLE, "/api/status", json -> Boolean.TRUE.equals(JsonPath.read(json, "$.ledgerUp")));
+        await(SETTLE, "/api/status", json -> Boolean.TRUE.equals(JsonPath.read(json, "$.ledgerUp"))
+                && ((Number) JsonPath.read(json, "$.tiles.backlog")).longValue() == 0);
     }
 
     @Test
