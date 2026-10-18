@@ -9,6 +9,7 @@ spring = "7.0.9"
 postgresql = "42.7.14"
 hikaricp = "7.1.0"
 hibernate = "7.4.13.Final"
+spring-boot = "4.0.8"
 
 [libraries]
 tigerbeetle-java = { module = "com.tigerbeetle:tigerbeetle-java", version.ref = "tigerbeetle" }
@@ -28,3 +29,6 @@ postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" 
 hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikaricp" }
 hibernate-core = { module = "org.hibernate.orm:hibernate-core", version.ref = "hibernate" }
 testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql", version.ref = "testcontainers" }
+spring-boot-autoconfigure = { module = "org.springframework.boot:spring-boot-autoconfigure", version.ref = "spring-boot" }
+spring-boot-health = { module = "org.springframework.boot:spring-boot-health", version.ref = "spring-boot" }
+spring-boot-test = { module = "org.springframework.boot:spring-boot-test", version.ref = "spring-boot" }
