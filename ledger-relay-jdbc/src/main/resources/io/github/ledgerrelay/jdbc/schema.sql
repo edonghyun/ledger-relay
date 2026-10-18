@@ -125,7 +125,7 @@ CREATE INDEX ledger_command_unfinished ON ledger_command (ordering_key, seq)
 -- 키마다 맨 앞은 하나다. 표시를 고치는 쪽에 버그가 있어도 둘이 되지 않게 DB가 막는다(02e P2e-3).
 CREATE UNIQUE INDEX ledger_command_one_head ON ledger_command (ordering_key) WHERE is_head;
 
--- claim 후보를 접수 순서(id)로 고르는 질의(§5.2, lockDue)가 끝난 이력을 훑지 않게 한다. 없으면 플래너가 기본 키 순서로
--- 끝난 행을 하나씩 걸러 내며 읽어, 폴링 비용이 이력 크기에 비례한다(F19).
-CREATE INDEX ledger_command_due ON ledger_command (id)
-    WHERE state IN ('PENDING','CLAIMED');
+-- claim 후보(§5.2, lockDue)를 보낼 수 있게 된 시각 순서로 고른다. 맨 앞 명령만 담으므로 끝난 이력(F19)도, 막힌 키 뒤의
+-- 백로그도 읽지 않고, 인덱스 순서가 곧 후보 순서라 limit개를 잠그면 멈춘다(02e P2e-3, F32).
+CREATE INDEX ledger_command_ready ON ledger_command (ready_at, id)
+    WHERE is_head AND state IN ('PENDING','CLAIMED');

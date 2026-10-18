@@ -393,7 +393,7 @@ public abstract class LedgerRelayContract {
         }
 
         @Test
-        @DisplayName("한 번에 limit개까지만 잡고, 접수한 순서대로 고른다")
+        @DisplayName("한 번에 limit개까지만 잡는다 — 같은 시각이면 접수한 순서대로")
         void claimsAtMostLimitInAcceptanceOrder() {
             // given
             submit(transfer("pay-1", "order-1", 500));
@@ -1475,7 +1475,7 @@ public abstract class LedgerRelayContract {
     }
 
     protected static void assertClaimed(ClaimBatch batch, String... commandIds) {
-        assertThat(idsOf(batch)).as("잡힌 명령(접수 순서)").isEqualTo(Arrays.asList(commandIds));
+        assertThat(idsOf(batch)).as("잡힌 명령(보낼 수 있게 된 순서)").isEqualTo(Arrays.asList(commandIds));
     }
 
     protected static void assertNothingClaimed(ClaimBatch batch) {

@@ -85,7 +85,10 @@ public final class CommandLifecycle implements LedgerRelay {
         return transactions.inTransaction(() -> store.find(commandId)).map(CommandLifecycle::statusOf);
     }
 
-    /** 게이트(§5.2)를 통과한 명령을 접수 순서로 limit개까지 잡는다. 트랜잭션 밖에서 부른다. */
+    /**
+     * 게이트(§5.2)를 통과한 명령을 limit개까지 잡는다. 보낼 수 있게 된 시각이 이른 것부터, 같으면 접수 순서로 잡는다
+     * ({@link io.github.ledgerrelay.core.spi.CommandStore#lockDue}). 트랜잭션 밖에서 부른다.
+     */
     public ClaimBatch claim(int limit, Duration lease) {
         requireOutsideTransaction();
         return transactions.inTransaction(() -> {

@@ -10,6 +10,7 @@ import io.github.ledgerrelay.core.spi.RowChange;
 import io.github.ledgerrelay.core.spi.Transactions;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -124,18 +125,18 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
                 headSeqByKey.merge(r.orderingKey(), r.seq(), Math::min);
             }
         }
-        List<DueCommand> due = new ArrayList<>();
+        // 보낼 수 있게 된 시각 순서, 같으면 접수 순서(02e P2e-1)
+        List<Row> heads = new ArrayList<>();
         for (Row row : rows.values()) {
-            if (due.size() >= limit) {
-                break;
-            }
             CommandRecord r = row.record();
             boolean isHead = !r.row().state().isFinal() && headSeqByKey.get(r.orderingKey()) == r.seq();
             if (isHead && row.isDue(now)) {
-                due.add(new DueCommand(recordOf(row), reservationOf(r)));
+                heads.add(row);
             }
         }
-        return due;
+        heads.sort(Comparator.comparing(Row::readyAt).thenComparingLong(row -> row.record().rowId()));
+        return heads.stream().limit(limit).map(row -> new DueCommand(recordOf(row), reservationOf(row.record())))
+                .toList();
     }
 
     @Override
@@ -223,6 +224,12 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
                 // 멈춘 명령은 운영자가 풀 때까지 후보가 아니다. 맨 앞이므로 그 키의 뒤 명령도 후보가 되지 않는다
                 case APPLIED, REJECTED, CONFLICT, SKIPPED, HALTED -> false;
             };
+        }
+
+        /** 보낼 수 있게 되는 시각: 처리 중은 lease 만료 시각, 그 밖에는 다음 시도 시각(jdbc의 ready_at과 같다). */
+        Instant readyAt() {
+            return record.row().state() == io.github.ledgerrelay.core.domain.StoredState.CLAIMED ? leaseExpiresAt
+                    : nextAttemptAt;
         }
 
         Row with(CommandRow newRow, Instant newLeaseExpiresAt, Instant newNextAttemptAt, Optional<Instant> completedAt) {

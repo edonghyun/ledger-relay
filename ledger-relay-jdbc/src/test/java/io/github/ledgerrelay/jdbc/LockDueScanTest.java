@@ -36,6 +36,7 @@ class LockDueScanTest {
                 SELECT 'pay-' || g, 1000000 + g, 'order-' || g, 1, 'TRANSFER', 1, 2, 500, 1, 1, 0, 0, 0, 'hash', 'PENDING'
                 FROM generate_series(1, :n) g
                 """).param("n", PENDING).update();
+        storage.rebuildHeads();
         storage.sql().sql("ANALYZE ledger_command").update();
     }
 

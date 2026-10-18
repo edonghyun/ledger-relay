@@ -129,26 +129,27 @@ public final class JdbcCommandStore implements CommandStore {
                 .optional();
     }
 
-    /** {@link #lockDue}의 질의. 실행 계획 테스트가 같은 질의를 본다. */
+    /**
+     * {@link #lockDue}의 질의. 실행 계획 테스트가 같은 질의를 본다. 맨 앞 표시와 보낼 시각 인덱스({@code ledger_command_ready})로
+     * 지금 보낼 수 있는 맨 앞만 시각 순서로 읽는다(02e P2e-1·P2e-3). 마지막 조건은 lease가 끝나는 바로 그 시각의 처리 중
+     * 명령을 아직 후보로 보지 않는다({@code ready_at <= now()}만으로는 그 시각이 들어온다).
+     */
     static final String LOCK_DUE = """
                 SELECT %s, %s,
                        r.command_id AS r_command_id, r.seq AS r_seq, r.state AS r_state
                 FROM ledger_command c
                 LEFT JOIN ledger_command r ON r.command_id = c.reservation_command_id
-                WHERE ((c.state = 'PENDING' AND c.next_attempt_at <= now())
-                    OR (c.state = 'CLAIMED' AND c.lease_expires_at < now()))
-                  AND NOT EXISTS (SELECT 1 FROM ledger_command e
-                                  WHERE e.ordering_key = c.ordering_key AND e.seq < c.seq
-                                    AND e.state IN ('PENDING','CLAIMED','HALTED'))
-                ORDER BY c.id
+                WHERE c.is_head AND c.state IN ('PENDING','CLAIMED') AND c.ready_at <= now()
+                  AND (c.state = 'PENDING' OR c.lease_expires_at < now())
+                ORDER BY c.ready_at, c.id
                 LIMIT :limit
                 FOR UPDATE OF c SKIP LOCKED
             """.formatted(COLUMNS, ACCEPTED_HERE);
 
     /**
-     * claim 후보를 잠그고 읽는다(P2b-10). 후보 행만 {@code FOR UPDATE OF c SKIP LOCKED}로 잠근다. 맨 앞 판정과 참조 예약은
-     * 잠그지 않고 읽는다. 맨 앞 판정까지 잠긴 행을 건너뛰면 다른 워커가 잡은 명령 뒤의 명령이 먼저 나가고(G4), 예약까지
-     * 잠그면 예약을 쓰는 중인 확정이 후보에서 빠진다(F10).
+     * claim 후보를 잠그고 읽는다(P2b-10). 후보 행만 {@code FOR UPDATE OF c SKIP LOCKED}로 잠근다. 맨 앞 판정은 표시
+     * ({@code is_head})로 하므로 다른 워커가 잡은 맨 앞을 건너뛰어도 그 뒤 명령은 후보가 아니다(G4). 참조 예약은 잠그지 않고
+     * 읽는다. 예약까지 잠그면 예약을 쓰는 중인 확정이 후보에서 빠진다(F10).
      */
     @Override
     public List<DueCommand> lockDue(int limit) {

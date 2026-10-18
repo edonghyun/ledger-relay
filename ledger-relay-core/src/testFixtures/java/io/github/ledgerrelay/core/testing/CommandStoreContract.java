@@ -402,7 +402,7 @@ public abstract class CommandStoreContract {
         }
 
         @Test
-        @DisplayName("한 번에 limit개까지만, 접수한 순서대로 낸다")
+        @DisplayName("한 번에 limit개까지만 낸다 — 같은 시각이면 접수한 순서대로")
         void atMostLimitInAcceptanceOrder() {
             // given
             inserted(newTransfer("pay-1", "order-1", 1));
@@ -411,6 +411,33 @@ public abstract class CommandStoreContract {
 
             // then
             assertDueWithLimit(2, "pay-1", "pay-2");
+        }
+
+        @Test
+        @DisplayName("되돌린 명령은 다시 시도할 시각에 줄을 선다 — 그동안 접수된 다른 키의 명령이 앞선다 (02e P2e-1)")
+        void aRetriedCommandQueuesAtItsRetryTime() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            claimed("pay-1", 1);
+            released("pay-1");
+            inserted(newTransfer("pay-2", "order-2", 1));
+            storage.elapse(BACKOFF.multipliedBy(2));
+
+            // then
+            assertDue("pay-2", "pay-1");
+        }
+
+        @Test
+        @DisplayName("lease가 끝난 명령은 끝난 시각에 줄을 선다 — 그동안 접수된 다른 키의 명령이 앞선다 (02e P2e-1)")
+        void anExpiredLeaseQueuesAtItsExpiry() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            claimed("pay-1", 1);
+            inserted(newTransfer("pay-2", "order-2", 1));
+            storage.elapse(LEASE.plusSeconds(1));
+
+            // then
+            assertDue("pay-2", "pay-1");
         }
 
         @Test
@@ -802,7 +829,7 @@ public abstract class CommandStoreContract {
     }
 
     protected void assertDueWithLimit(int limit, String... commandIds) {
-        assertThat(dueIds(limit)).as("claim 후보(접수 순서, limit %d)", limit).containsExactly(commandIds);
+        assertThat(dueIds(limit)).as("claim 후보(보낼 수 있게 된 순서, limit %d)", limit).containsExactly(commandIds);
     }
 
     protected void assertNothingDue() {
