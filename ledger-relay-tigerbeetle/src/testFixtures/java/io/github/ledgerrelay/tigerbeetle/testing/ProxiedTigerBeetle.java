@@ -72,6 +72,11 @@ public final class ProxiedTigerBeetle implements AutoCloseable {
         return TigerBeetleContainer.ipv4(toxiproxy.getHost()) + ":" + toxiproxy.getMappedPort(PROXY_PORT);
     }
 
+    /** Toxiproxy 관리 API 주소({@code http://IPv4:포트}). 프록시 이름은 {@code tigerbeetle}이다. 앱이 직접 끊고 이을 때 쓴다. */
+    public String controlUrl() {
+        return "http://" + TigerBeetleContainer.ipv4(toxiproxy.getHost()) + ":" + toxiproxy.getMappedPort(CONTROL_PORT);
+    }
+
     public Client newClient() {
         return new Client(UInt128.asBytes(0), new String[] {clientAddress()});
     }
