@@ -33,6 +33,16 @@ class InFlightLimitTest {
         }
     }
 
+    @Test
+    @DisplayName("만든 슬롯 수를 기억한다 — 워커가 설정과 맞는지 확인할 수 있게 (02d I5)")
+    void capacityIsTheSlotCountGiven() {
+        // when
+        InFlightLimit slots = new InFlightLimit(64);
+
+        // then
+        assertThat(slots.capacity()).as("슬롯 수").isEqualTo(64);
+    }
+
     @Nested
     @Order(2)
     @DisplayName("슬롯이 모자라면")

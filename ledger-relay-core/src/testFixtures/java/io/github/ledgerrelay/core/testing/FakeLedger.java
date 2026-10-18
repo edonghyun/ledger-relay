@@ -25,6 +25,7 @@ public final class FakeLedger implements LedgerClient {
     private RuntimeException nextFailure;
     private Integer nextCount;
     private RuntimeException nextThrow;
+    private boolean nextNull;
 
     /** 이 이체 ID에는 이 결과를 낸다. */
     public synchronized void answer(BigInteger transferId, LedgerResultCode code) {
@@ -57,6 +58,11 @@ public final class FakeLedger implements LedgerClient {
         nextThrow = failure;
     }
 
+    /** 다음 요청 하나는 future 대신 null을 돌려준다(계약을 어긴 클라이언트). */
+    public synchronized void replyWithNull() {
+        nextNull = true;
+    }
+
     /** 다음 요청 하나에 결과를 n개만 낸다. 요청보다 많으면 남는 몫은 Created다. */
     public synchronized void replyWithCount(int n) {
         nextCount = n;
@@ -73,6 +79,10 @@ public final class FakeLedger implements LedgerClient {
             RuntimeException failure = nextThrow;
             nextThrow = null;
             throw failure;
+        }
+        if (nextNull) {
+            nextNull = false;
+            return null;
         }
         if (nextFailure != null) {
             RuntimeException failure = nextFailure;

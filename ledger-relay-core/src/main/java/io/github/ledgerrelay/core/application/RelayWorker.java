@@ -30,6 +30,11 @@ public final class RelayWorker {
 
     public RelayWorker(CommandLifecycle lifecycle, LedgerClient ledger, InFlightLimit slots, WorkerSettings settings,
             WorkerEvents events) {
+        if (slots.capacity() != settings.maxInFlight()) {
+            // 설정의 maxInFlight가 실제 상한이어야 한다. 다르면 설정을 바꿔도 동시 요청 수가 바뀌지 않는다(02d I5)
+            throw new IllegalArgumentException("in-flight 슬롯(" + slots.capacity() + ")이 설정의 maxInFlight("
+                    + settings.maxInFlight() + ")와 다릅니다. 같은 값으로 만드세요");
+        }
         this.lifecycle = lifecycle;
         this.ledger = ledger;
         this.slots = slots;
@@ -70,6 +75,10 @@ public final class RelayWorker {
             CompletableFuture<List<LedgerResultCode>> reply;
             try {
                 reply = ledger.submit(request);
+                if (reply == null) {
+                    // 계약을 어긴 클라이언트다. 슬롯 반납을 걸 future가 없으므로 보내지 못한 것으로 본다(02d I7)
+                    throw new IllegalStateException("LedgerClient.submit이 null을 돌려줬다");
+                }
             } catch (RuntimeException e) {
                 failed(sent, e);
                 return released(batch, sent, completed, sending);

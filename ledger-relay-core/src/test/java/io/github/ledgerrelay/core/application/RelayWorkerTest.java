@@ -557,6 +557,46 @@ class RelayWorkerTest {
         return storage.transactions().inTransaction(() -> relay.submit(command));
     }
 
+    @Nested
+    @Order(8)
+    @DisplayName("설정과 슬롯이 어긋나면")
+    class WhenSlotsDisagreeWithSettings {
+
+        @Test
+        @DisplayName("워커를 만들 수 없다 — 설정의 max-in-flight가 실제 상한이 아닌 채로 돌지 않게 (02d I5)")
+        void aWorkerRefusesSlotsThatDisagreeWithMaxInFlight() {
+            // when
+            Throwable refused = org.assertj.core.api.Assertions.catchThrowable(
+                    () -> new RelayWorker(relay, fake, new InFlightLimit(512), SETTINGS, events));
+
+            // then
+            assertThat(refused).as("거부").isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("512").hasMessageContaining("1024");
+        }
+    }
+
+    @Nested
+    @Order(9)
+    @DisplayName("TB 클라이언트가 future 대신 null을 주면")
+    class WhenTheClientReturnsNull {
+
+        @Test
+        @DisplayName("요청 실패로 보고 명령을 되돌리며, 슬롯은 모두 돌아온다 (02d I7)")
+        void aNullReplyGivesTheSlotsBackAndReleasesTheBatch() {
+            // given
+            fake.replyWithNull();
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            CycleReport report = worker.runOnce();
+
+            // then
+            assertThat(report.released()).as("되돌린 명령 수").isEqualTo(1);
+            assertThat(slots.available()).as("남은 슬롯").isEqualTo(1024);
+            assertThat(events.events()).as("워커 이벤트").contains("submitFailed:1");
+        }
+    }
+
     private void insertedPastTheChecks(NewCommand row) {
         if (storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(row)).isPresent()) {
             throw new IllegalStateException("given 준비 실패: " + row.commandId() + "가 이미 있었다");

@@ -11,12 +11,14 @@ import java.util.concurrent.TimeUnit;
 public final class InFlightLimit {
 
     private final Semaphore slots;
+    private final int capacity;
 
     public InFlightLimit(int slots) {
         if (slots < 1) {
             throw new IllegalArgumentException("in-flight 슬롯은 1개 이상이어야 합니다: " + slots);
         }
         this.slots = new Semaphore(slots, true);
+        this.capacity = slots;
     }
 
     /** n개를 한꺼번에 잡는다. 기다림 상한 안에 다 못 잡으면 하나도 잡지 않고 false다. */
@@ -33,6 +35,11 @@ public final class InFlightLimit {
         if (n > 0) {
             slots.release(n);
         }
+    }
+
+    /** 만들 때 정한 슬롯 수. */
+    public int capacity() {
+        return capacity;
     }
 
     public int available() {
