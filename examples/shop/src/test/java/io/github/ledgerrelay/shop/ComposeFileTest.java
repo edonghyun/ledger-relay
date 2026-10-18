@@ -16,7 +16,7 @@ class ComposeFileTest {
     static final Path COMPOSE = Path.of("../../compose.yaml");
 
     @Test
-    @DisplayName("Neither PostgreSQL nor TigerBeetle keeps data in a named volume — so that one store never outlives down without the other and shows double transfers")
+    @DisplayName("Neither PostgreSQL nor TigerBeetle keeps data in a named volume — so that one store never outlives down without the other and shows orders charged twice")
     void neitherStoreOutlivesTheOther() throws IOException {
         // given
         List<String> lines = Files.readAllLines(COMPOSE);

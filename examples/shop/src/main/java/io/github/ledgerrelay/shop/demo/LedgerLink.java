@@ -32,15 +32,24 @@ class LedgerLink {
         this.proxy = URI.create(properties.demo().toxiproxyUrl() + "/proxies/" + properties.demo().toxiproxyProxy());
     }
 
-    /** Runs before {@code ShopBootstrap}, which waits for TB after all beans are created. */
+    /**
+     * Runs before {@code ShopBootstrap}, which waits for TB after all beans are created. Tries for about 10 seconds:
+     * a Toxiproxy that has only just started may not answer yet, and a fresh proxy is connected anyway.
+     */
     @PostConstruct
-    void restoreAtStartup() {
-        try {
-            connect(true);
-        } catch (IllegalStateException e) {
-            // Toxiproxy that has only just started may not answer yet. A fresh proxy is connected anyway
-            System.getLogger(LedgerLink.class.getName()).log(System.Logger.Level.WARNING,
-                    "Could not restore the TB connection at startup: " + e.getMessage());
+    void restoreAtStartup() throws InterruptedException {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                connect(true);
+                return;
+            } catch (IllegalStateException e) {
+                if (attempt == 5) {
+                    System.getLogger(LedgerLink.class.getName()).log(System.Logger.Level.WARNING,
+                            "Could not restore the TB connection at startup: " + e.getMessage());
+                    return;
+                }
+                Thread.sleep(500);
+            }
         }
     }
 

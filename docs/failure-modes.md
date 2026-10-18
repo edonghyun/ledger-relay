@@ -365,7 +365,7 @@ F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F
 - **Structure**: `LedgerSnapshot` reconciles everything from the start on every refresh and rewrites the totals (up to 50,000 commands; at demo size it is always everything). Reconciliation at production scale will be redesigned later with a position that does not pass "the smallest id not yet finished" (the same problem as the reconciliation cursor in the list of open failures).
 - **Verification**: the test above failed before the fix with `expected: 22L but was: 18L`, and passes after the fix.
 
-### F44. Starting again after `docker compose down` keeps only the ledger, and the screen shows false duplicate transfers
+### F44. Starting again after `docker compose down` keeps only the ledger, and the screen shows orders charged twice that never were
 
 - **What breaks**: the first compose kept TB data in a named volume (`tigerbeetle-data`), while PG used the image's anonymous volume. The most common way to shut down, `docker compose down` (without -v), discards the PG data together with the containers but keeps the TB volume. On the next `up`, PG is empty but the ledger still has the old transfers. Order ids start again from 1, so old posts (user_data = old order id) get mixed up with new orders. The "orders charged twice" count on the screen goes above 0, the merchant balance and the total of paid orders differ, and the consistency panel stays red. A demo meant to show that money moves exactly once shows the opposite.
 - **Reproduction**: `ComposeFileTest` › `neitherStoreOutlivesTheOther` (compose.yaml has no top-level `volumes:`). By hand: pay and ship → `docker compose down` → `up`.
@@ -376,7 +376,7 @@ F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F
 
 - **What breaks**: at startup the app creates the ledger accounts and waits for TB's answer. The TB client has no timeout. If the app restarts while the demo's Toxiproxy is still cut (scene 2, then a crash or `docker compose restart shop-a`), the account setup never ends and the web server never opens. The button that restores the connection is on that app's own screen, so there is no way back except calling the Toxiproxy API by hand.
 - **Reproduction**: `DemoRestartTest` › `startupRestoresACutConnection`. Cut the connection, then start the app with the demo profile.
-- **Structure**: in the demo profile, `LedgerLink` restores the connection when it is created, before `ShopBootstrap` waits for TB. A restart therefore ends an outage scene. If Toxiproxy does not answer yet (it has only just started), the app logs a warning and continues; a fresh proxy is connected anyway.
+- **Structure**: in the demo profile, `LedgerLink` restores the connection when it is created, before `ShopBootstrap` waits for TB. A restart of either instance therefore ends an outage scene for both, since they share the one proxy. If Toxiproxy does not answer within about 10 seconds (it has only just started), the app logs a warning and continues; a fresh proxy is connected anyway.
 - **Verification**: the test above failed before the fix with "did not finish starting within 60 s", and passes after the fix.
 
 ## 2. Open failures

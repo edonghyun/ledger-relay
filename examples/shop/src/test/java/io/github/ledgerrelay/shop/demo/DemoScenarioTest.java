@@ -291,11 +291,11 @@ class DemoScenarioTest extends ShopSpringTest {
 
     // ── Helpers used only in this file ───────────────────────────────────
 
-    /** given setup: cuts or restores the TB connection through the demo API. Fails here if the API refuses. */
+    /** Cuts or restores the TB connection through the demo API. Fails here if the API refuses. */
     private void setLink(String action) {
         MvcTestResult result = http.post().uri("/api/demo/ledger/" + action).exchange();
         if (result.getResponse().getStatus() != HttpStatus.OK.value()) {
-            throw new IllegalStateException("given setup failed: ledger " + action + " answered " + result.getResponse().getStatus());
+            throw new IllegalStateException("ledger " + action + " answered " + result.getResponse().getStatus());
         }
     }
 

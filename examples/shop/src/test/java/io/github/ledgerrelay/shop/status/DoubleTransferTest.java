@@ -33,7 +33,7 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 /** Breaks consistency on purpose, so it runs on its own PG and TB, not shared with other tests. */
 @SpringBootTest
 @AutoConfigureMockMvc
-@DisplayName("Double transfers — the numbers expose a second post for one order")
+@DisplayName("Orders charged twice — the numbers expose a second post for one order")
 class DoubleTransferTest {
 
     static final ShopTestEnvironment ENVIRONMENT = ShopTestEnvironment.isolated();
@@ -63,7 +63,7 @@ class DoubleTransferTest {
 
     @Test
     @DisplayName("A shipped order's post carries the order id in TB — the post sets no user_data and TB copies it from "
-            + "the reservation, which is how double transfers are counted per order")
+            + "the reservation, which is how orders charged twice are counted")
     void thePostCarriesTheOrderIdOfItsReservation() throws Exception {
         // given
         ShopProbe probe = new ShopProbe(orders, client, dataSource);
@@ -79,7 +79,7 @@ class DoubleTransferTest {
     }
 
     @Test
-    @DisplayName("Posting a paid order once more directly in TB makes double transfers 1 and the consistency verdict broken")
+    @DisplayName("Posting a paid order once more directly in TB makes orders charged twice 1 and the consistency verdict broken")
     void aSecondCaptureForOneOrderIsCounted() throws Exception {
         // given
         ShopProbe probe = new ShopProbe(orders, client, dataSource);

@@ -51,7 +51,7 @@ class StaticPageTest extends ShopSpringTest {
     @Test
     @DisplayName("Every API path shop.js calls is mapped on the server — so that a rename never silently breaks the UI")
     void everyApiPathTheUiCallsIsMapped() throws Exception {
-        // when
+        // given
         List<String[]> calls = apiCalls();
 
         // then
@@ -83,7 +83,6 @@ class StaticPageTest extends ShopSpringTest {
     }
 
     // ── Helpers used only in this file ───────────────────────────────────
-
 
     private static List<String[]> apiCalls() throws IOException {
         String script;

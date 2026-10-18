@@ -26,7 +26,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Collects the UI numbers read from TB (balances, double transfers, reconciliation) every second on a dedicated thread.
+ * Collects the UI numbers read from TB (balances, orders charged twice, reconciliation) every second on a dedicated thread.
  * The API returns the latest collected values immediately.
  *
  * <p>The TB client has no timeout. When TB is unreachable, a lookup waits until the connection returns. If UI requests
