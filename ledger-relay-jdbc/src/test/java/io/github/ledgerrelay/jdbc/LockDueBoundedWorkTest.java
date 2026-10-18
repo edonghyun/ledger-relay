@@ -21,6 +21,11 @@ class LockDueBoundedWorkTest {
     static final int LIMIT = 128;
     static final long PAGE_BUDGET = 1_000;
     static final int MANY = 20_000;
+    /**
+     * 회복 몰림 장면의 끝난 이력. 접수 순서로 고르면 플래너가 기본 키 순서로 이력을 걸러 내며 읽어 이 수에 비례한다.
+     * 2만이면 약 1,030페이지로 상한에 겨우 걸리므로 크게 둔다.
+     */
+    static final int HISTORY = 50_000;
     static final int READY_KEYS = 100;
 
     PostgresStorage storage;
@@ -67,9 +72,10 @@ class LockDueBoundedWorkTest {
     class ManyReadyHeads {
 
         @Test
-        @DisplayName("limit개를 잠그면 멈춘다 — 전부 정렬하지 않는다")
+        @DisplayName("limit개를 잠그면 멈춘다 — 끝난 이력을 접수 순서로 훑거나 전부 정렬하지 않는다")
         void manyReadyHeadsStopAtTheLimit() {
-            // given
+            // given: TB가 회복된 직후처럼 보낼 수 있는 맨 앞 2만 개가 끝난 이력 5만 건 뒤에 있다
+            finishedHistory(HISTORY);
             readyKeys(MANY);
             prepared();
 
@@ -85,7 +91,19 @@ class LockDueBoundedWorkTest {
         inserted("'pay-' || g", "'order-' || g", "1", "now()", 1, n);
     }
 
-    /** 접수 상태의 행을 g = from..to로 직접 넣는다. 이체 ID가 겹치지 않게 이름으로 띄운다. */
+    /** 끝난 명령 n건. 키마다 하나다. */
+    private void finishedHistory(int n) {
+        storage.sql().sql("""
+                INSERT INTO ledger_command (command_id, transfer_id, ordering_key, seq, kind, debit_account_id,
+                    credit_account_id, amount, ledger, code, timeout_seconds, user_data_64, user_data_32,
+                    content_hash, state, completed_at)
+                SELECT 'done-' || g, 9000000 + g, 'done-' || g, 1, 'TRANSFER', 1, 2, 500, 1, 1, 0, 0, 0, 'hash',
+                    'APPLIED', now()
+                FROM generate_series(1, :n) g
+                """).param("n", n).update();
+    }
+
+    /** 접수 상태의 행을 g = from..to로 직접 넣는다. 이체 ID는 이미 있는 가장 큰 값 뒤로 잇는다. */
     private void inserted(String commandId, String orderingKey, String seq, String nextAttemptAt, int from, int to) {
         storage.sql().sql("""
                 INSERT INTO ledger_command (command_id, transfer_id, ordering_key, seq, kind, debit_account_id,
