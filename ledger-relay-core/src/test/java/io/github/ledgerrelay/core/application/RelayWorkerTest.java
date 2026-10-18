@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.ledgerrelay.core.CommandKind;
 import io.github.ledgerrelay.core.CommandReceipt;
+import io.github.ledgerrelay.core.CommandStatus;
 import io.github.ledgerrelay.core.CommandStatus.State;
 import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.spi.CommandRecord;
@@ -15,6 +16,7 @@ import io.github.ledgerrelay.core.spi.LedgerClient;
 import io.github.ledgerrelay.core.spi.NewCommand;
 import io.github.ledgerrelay.core.spi.RowChange;
 import io.github.ledgerrelay.core.spi.Submission;
+import io.github.ledgerrelay.core.spi.SubmitOutcome;
 import io.github.ledgerrelay.core.spi.TransferBody;
 import io.github.ledgerrelay.core.testing.FakeLedger;
 import io.github.ledgerrelay.core.testing.InMemoryStorage;
@@ -654,6 +656,190 @@ class RelayWorkerTest {
             assertThat(slots.available()).as("remaining slots").isEqualTo(1024);
             assertThat(events.events()).as("worker events").contains("submitFailed:1");
         }
+    }
+
+    @Nested
+    @Order(11)
+    @DisplayName("When commands finish — what metrics count")
+    class WhenCommandsFinish {
+
+        @Test
+        @DisplayName("Every command that reaches a final state is reported once, with its outcome and completion time")
+        void everyFinishedCommandIsReportedOnceWithItsOutcome() {
+            // given
+            accepted(transfer("pay-1", "order-1"));
+            accepted(transfer("pay-2", "order-2"));
+            accepted(transfer("pay-3", "order-3"));
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertFinished("pay-1", "pay-2", "pay-3");
+            assertFinishedAs(State.APPLIED);
+        }
+
+        @Test
+        @DisplayName("A post skipped without a TB request is reported as finished too")
+        void aSkippedCommandIsReportedAsFinished() {
+            // given: hold-1 was rejected for insufficient funds
+            fake.answer(accepted(reserve("hold-1", "order-1")).transferId(), ExceedsCredits);
+            worker.runOnce();
+            accepted(LedgerCommand.post("capture-1").orderingKey("order-1").reservation("hold-1").build());
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertFinished("hold-1", "capture-1");
+            assertThat(events.finished().get(1).state()).as("state reported for capture-1").isEqualTo(State.SKIPPED);
+        }
+
+        @Test
+        @DisplayName("A completion rolled back because the handler failed is not reported — otherwise metrics count work that did not happen")
+        void aRolledBackCompletionIsNotReported() {
+            // given
+            handler.failNextCalls(1);
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertFinished();
+            assertThat(events.events()).as("worker events").contains("handlerFailed:pay-1");
+        }
+
+        @Test
+        @DisplayName("A command released after a timeout is not reported as finished")
+        void aReleasedCommandIsNotReportedAsFinished() {
+            // given
+            fake.holdReplies();
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertFinished();
+        }
+    }
+
+    @Nested
+    @Order(12)
+    @DisplayName("When a TB request ends — its duration and how it ended")
+    class WhenARequestEnds {
+
+        @Test
+        @DisplayName("An answered request is reported once with its batch size")
+        void anAnsweredRequestIsReported() {
+            // given
+            accepted(transfer("pay-1", "order-1"));
+            accepted(transfer("pay-2", "order-2"));
+            accepted(transfer("pay-3", "order-3"));
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertRequestEnded(3, SubmitOutcome.REPLIED);
+        }
+
+        @Test
+        @DisplayName("A request that times out is reported as timed out, after at least submit-timeout")
+        void aTimedOutRequestIsReported() {
+            // given
+            fake.holdReplies();
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertRequestEnded(1, SubmitOutcome.TIMED_OUT);
+            assertThat(events.submitsCompleted().get(0).elapsed()).as("reported duration")
+                    .isGreaterThanOrEqualTo(Duration.ofMillis(200));
+        }
+
+        @Test
+        @DisplayName("A request that ends with an exception is reported as failed")
+        void aFailedRequestIsReported() {
+            // given
+            fake.failNext(new IllegalStateException("the connection dropped"));
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertRequestEnded(1, SubmitOutcome.FAILED);
+        }
+
+        @Test
+        @DisplayName("A request that throws on the spot is reported as failed")
+        void aSynchronousFailureIsReported() {
+            // given
+            fake.throwOnNextSubmit(new IllegalStateException("failed while filling the batch"));
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertRequestEnded(1, SubmitOutcome.FAILED);
+        }
+
+        @Test
+        @DisplayName("A request refused because the TB client can no longer be used is reported apart from failures")
+        void anUnavailableLedgerIsReported() {
+            // given
+            fake.failNext(new LedgerUnavailableException("the client was closed", new IllegalStateException()));
+            accepted(transfer("pay-1", "order-1"));
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertRequestEnded(1, SubmitOutcome.LEDGER_UNAVAILABLE);
+        }
+
+        @Test
+        @DisplayName("A reply with the wrong result count is reported as malformed")
+        void aMalformedReplyIsReported() {
+            // given
+            fake.replyWithCount(1);
+            accepted(transfer("pay-1", "order-1"));
+            accepted(transfer("pay-2", "order-2"));
+
+            // when
+            worker.runOnce();
+
+            // then
+            assertRequestEnded(2, SubmitOutcome.MALFORMED_REPLY);
+        }
+    }
+
+    /** Exactly these commands were reported finished, in this order, each with a completion time. */
+    private void assertFinished(String... commandIds) {
+        assertThat(events.finished()).as("finished commands").extracting(CommandStatus::commandId)
+                .containsExactly(commandIds);
+        assertThat(events.finished()).as("completion time of finished commands")
+                .allSatisfy(outcome -> assertThat(outcome.completedAt()).isPresent());
+    }
+
+    /** Every reported finished command ended in this state. */
+    private void assertFinishedAs(State state) {
+        assertThat(events.finished()).as("states of finished commands").extracting(CommandStatus::state)
+                .containsOnly(state);
+    }
+
+    /** Exactly one TB request was reported, with this batch size and outcome and a non-negative duration. */
+    private void assertRequestEnded(int batchSize, SubmitOutcome outcome) {
+        assertThat(events.submitsCompleted()).as("reported TB requests").singleElement().satisfies(request -> {
+            assertThat(request.batchSize()).as("batch size").isEqualTo(batchSize);
+            assertThat(request.outcome()).as("outcome").isEqualTo(outcome);
+            assertThat(request.elapsed().isNegative()).as("negative duration").isFalse();
+        });
     }
 
     private void insertedPastTheChecks(NewCommand row) {

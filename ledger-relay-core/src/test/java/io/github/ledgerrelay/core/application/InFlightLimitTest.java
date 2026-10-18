@@ -84,4 +84,21 @@ class InFlightLimitTest {
             assertThat(waiting.get(10, TimeUnit.SECONDS)).as("whether the waiting side took them").isTrue();
         }
     }
+
+    @Test
+    @DisplayName("It reports how many slots are taken right now — the in-flight gauge")
+    void inUseCountsTakenSlots() {
+        // given
+        InFlightLimit slots = new InFlightLimit(10);
+        slots.tryTake(4, Duration.ZERO);
+
+        // when
+        int whileTaken = slots.inUse();
+        slots.giveBack(4);
+        int afterReturn = slots.inUse();
+
+        // then
+        assertThat(whileTaken).as("slots in use while taken").isEqualTo(4);
+        assertThat(afterReturn).as("slots in use after giving back").isZero();
+    }
 }

@@ -1,9 +1,15 @@
 package io.github.ledgerrelay.core.spi;
 
+import io.github.ledgerrelay.core.CommandStatus;
+import java.time.Duration;
+
 /**
  * The outgoing port that reports what happened in a worker cycle. Logging ({@code LoggingWorkerEvents} in the
  * spring-boot module) and metrics attach through it. Every method has a default implementation that does nothing.
  * Implementations must return quickly and must not throw.
+ *
+ * <p>Commands an operator abandons ({@code LedgerRelayOperator.abandonHalted}) do not pass through a worker, so they
+ * are not reported here.
  */
 public interface WorkerEvents {
 
@@ -68,5 +74,20 @@ public interface WorkerEvents {
      * No in-flight slots could be taken, so this cycle did not claim. A backpressure signal that TB is stalled or slow.
      */
     default void noSlots() {
+    }
+
+    /**
+     * A command reached a final state and its result and handler effects are committed. Arrives once per command, after
+     * the commit: a completion that the handler failure rolled back is not reported. {@code outcome.completedAt()} is
+     * always present.
+     */
+    default void finished(CommandStatus outcome) {
+    }
+
+    /**
+     * One TB request ended. Arrives exactly once per request, however it ended, with the time from sending to the end
+     * (for a timeout, until the worker stopped waiting).
+     */
+    default void submitCompleted(int batchSize, Duration elapsed, SubmitOutcome outcome) {
     }
 }

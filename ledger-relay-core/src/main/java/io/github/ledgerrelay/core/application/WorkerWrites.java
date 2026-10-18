@@ -166,8 +166,9 @@ final class WorkerWrites {
             } catch (RuntimeException | Error e) {
                 throw new HandlerFailedSignal(e);
             }
+            return new WriteResult.Written(Optional.of(outcome));
         }
-        return new WriteResult.Written();
+        return WriteResult.Written.NOT_FINAL;
     }
 
     /** The timestamp column the transition updates along with it. */

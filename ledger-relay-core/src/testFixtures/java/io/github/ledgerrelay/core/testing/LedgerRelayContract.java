@@ -1515,7 +1515,7 @@ public abstract class LedgerRelayContract {
     }
 
     protected static void assertWritten(WriteResult result) {
-        assertThat(result).as("expected the write to take effect").isEqualTo(new WriteResult.Written());
+        assertThat(result).as("expected the write to take effect").isInstanceOf(WriteResult.Written.class);
     }
 
     protected static void assertFenced(WriteResult result) {

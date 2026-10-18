@@ -252,7 +252,7 @@ class HeadRaceTest {
                 app.commit();
 
                 // then
-                assertThat(completion.get(10, TimeUnit.SECONDS)).as("writing the result of pay-1").isEqualTo(new WriteResult.Written());
+                assertThat(completion.get(10, TimeUnit.SECONDS)).as("writing the result of pay-1").isInstanceOf(WriteResult.Written.class);
                 assertThat(orderStatus()).as("order state last written by the handler").isEqualTo("paid");
             }
         }
@@ -280,7 +280,7 @@ class HeadRaceTest {
                 app.commit();
 
                 // then
-                assertThat(completion.get(10, TimeUnit.SECONDS)).as("writing the result of pay-1").isEqualTo(new WriteResult.Written());
+                assertThat(completion.get(10, TimeUnit.SECONDS)).as("writing the result of pay-1").isInstanceOf(WriteResult.Written.class);
             }
         }
     }

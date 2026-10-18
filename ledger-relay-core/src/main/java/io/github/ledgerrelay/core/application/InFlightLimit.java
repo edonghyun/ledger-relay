@@ -46,4 +46,9 @@ public final class InFlightLimit {
     public int available() {
         return slots.availablePermits();
     }
+
+    /** The slots taken right now. */
+    public int inUse() {
+        return capacity() - available();
+    }
 }

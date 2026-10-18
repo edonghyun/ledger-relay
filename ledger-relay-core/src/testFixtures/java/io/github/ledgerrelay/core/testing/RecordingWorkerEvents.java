@@ -1,6 +1,9 @@
 package io.github.ledgerrelay.core.testing;
 
+import io.github.ledgerrelay.core.CommandStatus;
+import io.github.ledgerrelay.core.spi.SubmitOutcome;
 import io.github.ledgerrelay.core.spi.WorkerEvents;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -13,6 +16,32 @@ public final class RecordingWorkerEvents implements WorkerEvents {
     private final java.util.Map<String, RuntimeException> writeFailures = new java.util.HashMap<>();
 
     private final List<String> events = new ArrayList<>();
+    private final List<CommandStatus> finished = new ArrayList<>();
+    private final List<SubmitCompleted> submitsCompleted = new ArrayList<>();
+
+    /** One {@link #submitCompleted} call. */
+    public record SubmitCompleted(int batchSize, Duration elapsed, SubmitOutcome outcome) {
+    }
+
+    /** The outcomes reported by {@link #finished}, in order. */
+    public synchronized List<CommandStatus> finished() {
+        return List.copyOf(finished);
+    }
+
+    /** The {@link #submitCompleted} calls, in order. */
+    public synchronized List<SubmitCompleted> submitsCompleted() {
+        return List.copyOf(submitsCompleted);
+    }
+
+    @Override
+    public synchronized void finished(CommandStatus outcome) {
+        finished.add(outcome);
+    }
+
+    @Override
+    public synchronized void submitCompleted(int batchSize, Duration elapsed, SubmitOutcome outcome) {
+        submitsCompleted.add(new SubmitCompleted(batchSize, elapsed, outcome));
+    }
 
     public synchronized List<String> events() {
         return List.copyOf(events);
