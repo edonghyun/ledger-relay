@@ -61,7 +61,7 @@ public abstract class LedgerRelayContract {
     @BeforeEach
     protected void givenAnEmptyRelay() {
         storage = createStorage();
-        relay = new CommandLifecycle(storage.store(), storage.transactions(), new SequentialTransferIds(), handler,
+        relay = new CommandLifecycle(storage.keys(), storage.store(), storage.transactions(), new SequentialTransferIds(), handler,
                 new Backoff(BACKOFF, BACKOFF.multipliedBy(4)));
     }
 

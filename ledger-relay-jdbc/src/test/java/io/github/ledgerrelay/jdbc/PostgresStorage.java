@@ -2,6 +2,7 @@ package io.github.ledgerrelay.jdbc;
 
 import com.zaxxer.hikari.HikariDataSource;
 import io.github.ledgerrelay.core.spi.CommandStore;
+import io.github.ledgerrelay.core.spi.OrderingKeys;
 import io.github.ledgerrelay.core.spi.Transactions;
 import io.github.ledgerrelay.core.testing.StorageUnderTest;
 import java.io.IOException;
@@ -45,12 +46,14 @@ final class PostgresStorage implements StorageUnderTest {
     private final DataSource dataSource;
     private final PlatformTransactionManager transactionManager;
     private final JdbcTransactions transactions;
+    private final JdbcOrderingKeys keys;
     private final JdbcCommandStore store;
 
     private PostgresStorage(DataSource dataSource, PlatformTransactionManager transactionManager) {
         this.dataSource = dataSource;
         this.transactionManager = transactionManager;
         this.transactions = new JdbcTransactions(transactionManager, dataSource);
+        this.keys = new JdbcOrderingKeys(dataSource);
         this.store = new JdbcCommandStore(dataSource);
     }
 
@@ -113,6 +116,11 @@ final class PostgresStorage implements StorageUnderTest {
     /** 앱 코드가 쓰는 EntityManager: 지금 트랜잭션의 것을 쓴다. */
     EntityManager sharedEntityManager() {
         return SharedEntityManagerCreator.createSharedEntityManager(entityManagerFactory(dataSource));
+    }
+
+    @Override
+    public OrderingKeys keys() {
+        return keys;
     }
 
     @Override

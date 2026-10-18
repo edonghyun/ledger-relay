@@ -42,7 +42,7 @@ class CommandLifecycleRaceTest {
         storage = InMemoryStorage.create();
         handler = new RecordingHandler();
         racing = new RacingStore(storage.store());
-        relay = new CommandLifecycle(racing, storage.transactions(), new SequentialTransferIds(), handler,
+        relay = new CommandLifecycle(storage.keys(), racing, storage.transactions(), new SequentialTransferIds(), handler,
                 new Backoff(Duration.ofSeconds(5), Duration.ofSeconds(20)));
         storage.transactions().inTransaction(() -> relay.submit(LedgerCommand.transfer("pay-1").orderingKey("order-1")
                 .debit(1).credit(2).amount(500).ledger(1).code(1).build()));
@@ -101,10 +101,6 @@ class CommandLifecycleRaceTest {
             return real.compareAndSet(change);
         }
 
-        @Override
-        public long nextSeq(String orderingKey) {
-            return real.nextSeq(orderingKey);
-        }
 
         @Override
         public Optional<CommandRecord> insertIfAbsent(NewCommand command) {

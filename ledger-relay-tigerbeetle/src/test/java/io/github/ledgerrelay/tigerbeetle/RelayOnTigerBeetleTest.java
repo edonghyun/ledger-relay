@@ -80,7 +80,7 @@ class RelayOnTigerBeetleTest {
         TB.assertAlive();
         storage = InMemoryStorage.create();
         handler = new RecordingHandler();
-        relay = new CommandLifecycle(storage.store(), storage.transactions(),
+        relay = new CommandLifecycle(storage.keys(), storage.store(), storage.transactions(),
                 () -> UInt128.asBigInteger(UInt128.id()), handler, new Backoff(Duration.ofMillis(200), BACKOFF_MAX));
         payer = ledger.openAccount("구매자");
         payee = ledger.openAccount("가맹점");

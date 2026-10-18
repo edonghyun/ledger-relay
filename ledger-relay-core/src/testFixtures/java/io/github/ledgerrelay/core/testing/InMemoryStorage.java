@@ -1,6 +1,7 @@
 package io.github.ledgerrelay.core.testing;
 
 import io.github.ledgerrelay.core.spi.CommandStore;
+import io.github.ledgerrelay.core.spi.OrderingKeys;
 import io.github.ledgerrelay.core.spi.Transactions;
 import java.time.Duration;
 
@@ -10,6 +11,11 @@ public record InMemoryStorage(InMemoryCommandStore memory, ManualClock clock) im
     public static InMemoryStorage create() {
         ManualClock clock = new ManualClock();
         return new InMemoryStorage(new InMemoryCommandStore(clock), clock);
+    }
+
+    @Override
+    public OrderingKeys keys() {
+        return memory;
     }
 
     @Override

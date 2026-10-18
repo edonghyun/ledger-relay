@@ -61,7 +61,7 @@ class HeadRaceTest {
     @BeforeEach
     void givenPay1IsSubmittedToTheLedger() {
         storage = PostgresStorage.withDataSourceTransactions();
-        relay = new CommandLifecycle(storage.store(), storage.transactions(), new SequentialTransferIds(),
+        relay = new CommandLifecycle(storage.keys(), storage.store(), storage.transactions(), new SequentialTransferIds(),
                 new RecordingHandler(), new Backoff(Duration.ofSeconds(5), Duration.ofSeconds(20)));
         storage.transactions().inTransaction(() -> relay.submit(transfer("pay-1")));
         pay1 = relay.claim(10, LEASE).claimed().get(0);

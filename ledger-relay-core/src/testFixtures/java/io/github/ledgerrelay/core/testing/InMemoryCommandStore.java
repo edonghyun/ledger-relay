@@ -6,6 +6,7 @@ import io.github.ledgerrelay.core.spi.CommandRecord;
 import io.github.ledgerrelay.core.spi.CommandStore;
 import io.github.ledgerrelay.core.spi.DueCommand;
 import io.github.ledgerrelay.core.spi.NewCommand;
+import io.github.ledgerrelay.core.spi.OrderingKeys;
 import io.github.ledgerrelay.core.spi.RowChange;
 import io.github.ledgerrelay.core.spi.Transactions;
 import java.time.Instant;
@@ -23,7 +24,7 @@ import java.util.function.Supplier;
  * 메모리 저장소. 계약 테스트의 기준 구현이자 6단계 무작위 검증(E6a)의 저장소다. 판단은 하지 않는다.
  * 트랜잭션은 잠금 하나와 스냅샷이다. 한 번에 한 트랜잭션만 돌므로 SKIP LOCKED가 할 일이 없다.
  */
-public final class InMemoryCommandStore implements CommandStore, Transactions {
+public final class InMemoryCommandStore implements OrderingKeys, CommandStore, Transactions {
 
     private final Supplier<Instant> clock;
     private final ReentrantLock lock = new ReentrantLock();
@@ -85,9 +86,15 @@ public final class InMemoryCommandStore implements CommandStore, Transactions {
     }
 
     @Override
-    public long nextSeq(String orderingKey) {
+    public long lockKeyAndTakeSeq(String orderingKey) {
         requireTransaction();
         return lastSeqByKey.merge(orderingKey, 1L, Long::sum);
+    }
+
+    /** 맨 앞을 {@link #lockDue}마다 행에서 계산하므로 넘길 표시가 없다. */
+    @Override
+    public void passOnFinishedHeads(int limit) {
+        requireTransaction();
     }
 
     @Override

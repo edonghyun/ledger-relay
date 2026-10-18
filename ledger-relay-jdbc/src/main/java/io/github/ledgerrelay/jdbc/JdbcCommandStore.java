@@ -43,19 +43,6 @@ public final class JdbcCommandStore implements CommandStore {
             "coalesce(c.accepted_xact = pg_current_xact_id_if_assigned(), false) AS accepted_in_this_transaction";
 
     /**
-     * 키 행을 upsert해 잠그고 다음 순번을 낸다(P2b-8). 잠금은 커밋까지 유지되므로 같은 키의 다음 접수는 이 트랜잭션이
-     * 끝날 때까지 기다린다. 그래서 seq 순서가 커밋 순서와 같다(R12).
-     */
-    @Override
-    public long nextSeq(String orderingKey) {
-        return sql.sql("""
-                INSERT INTO ledger_ordering_key (ordering_key, next_seq) VALUES (:key, 2)
-                ON CONFLICT (ordering_key) DO UPDATE SET next_seq = ledger_ordering_key.next_seq + 1
-                RETURNING next_seq - 1
-                """).param("key", orderingKey).query(Long.class).single();
-    }
-
-    /**
      * 넣는다. 같은 commandId가 이미 있으면 {@code ON CONFLICT DO NOTHING}으로 넘기고 있던 행을 읽는다(P2b-9).
      * 유일성 위반 예외를 잡는 방식은 PostgreSQL 트랜잭션 전체를 중단시켜 앱 트랜잭션을 깨뜨린다(G7).
      * 넣었으면 그 키의 미완료 개수를 올리고 맨 앞을 다시 정한다(02e P2e-4).
@@ -82,7 +69,7 @@ public final class JdbcCommandStore implements CommandStore {
 
     /**
      * 키 행의 미완료 개수를 하나 올린다. 순번을 거치지 않고 넣은 행(저장소 계약의 준비)이면 키 행을 여기서 만든다.
-     * 정상 경로에서는 {@link #nextSeq}가 이미 잠근 행이다.
+     * 정상 경로에서는 {@link JdbcOrderingKeys#lockKeyAndTakeSeq}가 이미 잠근 행이다.
      */
     private void countUnfinished(String orderingKey, long seq) {
         sql.sql("""

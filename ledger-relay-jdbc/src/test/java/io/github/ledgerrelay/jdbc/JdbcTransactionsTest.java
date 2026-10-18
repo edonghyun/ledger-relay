@@ -68,7 +68,7 @@ class JdbcTransactionsTest {
         void aJpaTransactionHidingTheConnectionIsRefused() {
             // given
             PostgresStorage storage = PostgresStorage.withJpaTransactions(new PostgresStorage.NonExposingJpaDialect());
-            CommandLifecycle relay = new CommandLifecycle(storage.store(), storage.transactions(),
+            CommandLifecycle relay = new CommandLifecycle(storage.keys(), storage.store(), storage.transactions(),
                     new SequentialTransferIds(), new RecordingHandler(), new Backoff(Duration.ofSeconds(5), Duration.ofSeconds(20)));
 
             // when

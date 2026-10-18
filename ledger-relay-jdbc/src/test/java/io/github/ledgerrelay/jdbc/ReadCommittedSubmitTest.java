@@ -34,7 +34,7 @@ class ReadCommittedSubmitTest {
     @BeforeEach
     void givenAnEmptyRelay() {
         storage = PostgresStorage.withDataSourceTransactions();
-        relay = new CommandLifecycle(storage.store(), storage.transactions(), new SequentialTransferIds(),
+        relay = new CommandLifecycle(storage.keys(), storage.store(), storage.transactions(), new SequentialTransferIds(),
                 new RecordingHandler(), new Backoff(Duration.ofSeconds(5), Duration.ofSeconds(20)));
     }
 

@@ -41,7 +41,7 @@ class ClaimIsolationTest {
     void givenPay9IsFinished() {
         storage = InMemoryStorage.create();
         leaky = new LeakyStore(storage.store());
-        relay = new CommandLifecycle(leaky, storage.transactions(), new SequentialTransferIds(), new RecordingHandler(),
+        relay = new CommandLifecycle(storage.keys(), leaky, storage.transactions(), new SequentialTransferIds(), new RecordingHandler(),
                 new Backoff(Duration.ofSeconds(5), Duration.ofSeconds(20)));
         accepted("pay-9", "order-9");
         relay.complete(relay.claim(10, LEASE).claimed().get(0), Created);
@@ -114,10 +114,6 @@ class ClaimIsolationTest {
             return due;
         }
 
-        @Override
-        public long nextSeq(String orderingKey) {
-            return real.nextSeq(orderingKey);
-        }
 
         @Override
         public Optional<CommandRecord> insertIfAbsent(NewCommand command) {

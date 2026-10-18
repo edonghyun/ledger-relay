@@ -15,6 +15,7 @@ import io.github.ledgerrelay.core.spi.CommandRecord;
 import io.github.ledgerrelay.core.spi.CommandStore;
 import io.github.ledgerrelay.core.spi.DueCommand;
 import io.github.ledgerrelay.core.spi.NewCommand;
+import io.github.ledgerrelay.core.spi.OrderingKeys;
 import io.github.ledgerrelay.core.spi.RowChange;
 import io.github.ledgerrelay.core.spi.TransferBody;
 import java.math.BigInteger;
@@ -42,6 +43,7 @@ public abstract class CommandStoreContract {
     protected static final Duration BLOCKED = Duration.ofMillis(300);
 
     protected StorageUnderTest storage;
+    protected OrderingKeys keys;
     protected CommandStore store;
 
     /** 테스트마다 비어 있는 저장소 한 벌을 만든다. */
@@ -50,6 +52,7 @@ public abstract class CommandStoreContract {
     @BeforeEach
     protected void givenAnEmptyStore() {
         storage = createStorage();
+        keys = storage.keys();
         store = storage.store();
     }
 
@@ -62,9 +65,9 @@ public abstract class CommandStoreContract {
         @DisplayName("순서 키마다 1부터 오르고, 키끼리는 서로 상관없다")
         void eachKeyCountsFromOne() {
             // when
-            long first = inTx(() -> store.nextSeq("order-1"));
-            long second = inTx(() -> store.nextSeq("order-1"));
-            long otherKey = inTx(() -> store.nextSeq("order-2"));
+            long first = inTx(() -> keys.lockKeyAndTakeSeq("order-1"));
+            long second = inTx(() -> keys.lockKeyAndTakeSeq("order-1"));
+            long otherKey = inTx(() -> keys.lockKeyAndTakeSeq("order-2"));
 
             // then
             assertThat(first).as("order-1의 첫 순번").isEqualTo(1);
@@ -684,8 +687,8 @@ public abstract class CommandStoreContract {
         void theKeyLockHoldsUntilCommit() {
             // given: 첫 접수가 order-1의 순번 1을 받고 아직 커밋하지 않았다
             try (OtherTransaction<Long> first = OtherTransaction.start(storage.transactions(),
-                    () -> store.nextSeq("order-1"));
-                 OtherTransaction<Long> second = startAfter(first, () -> store.nextSeq("order-1"))) {
+                    () -> keys.lockKeyAndTakeSeq("order-1"));
+                 OtherTransaction<Long> second = startAfter(first, () -> keys.lockKeyAndTakeSeq("order-1"))) {
 
                 // when: 두 번째는 첫 번째가 커밋할 때까지 막혀 있다
                 second.assertStillWorkingAfter(BLOCKED);
@@ -704,7 +707,7 @@ public abstract class CommandStoreContract {
                     () -> store.insertIfAbsent(newTransfer("pay-1", "order-1", 1)));
                  OtherTransaction<String> second = startAfter(first, () -> {
                      Optional<CommandRecord> existing = store.insertIfAbsent(newTransfer("pay-1", "order-2", 1));
-                     long nextOnAnotherKey = store.nextSeq("order-3"); // 트랜잭션이 살아 있어야 성공한다
+                     long nextOnAnotherKey = keys.lockKeyAndTakeSeq("order-3"); // 트랜잭션이 살아 있어야 성공한다
                      return existing.map(CommandRecord::orderingKey).orElse("-") + "/" + nextOnAnotherKey;
                  })) {
 

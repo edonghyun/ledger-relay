@@ -49,7 +49,7 @@ class RelayWorkerTest {
     void givenAWorkerOnAFakeLedger() {
         storage = InMemoryStorage.create();
         handler = new RecordingHandler();
-        relay = new CommandLifecycle(storage.store(), storage.transactions(), new SequentialTransferIds(), handler,
+        relay = new CommandLifecycle(storage.keys(), storage.store(), storage.transactions(), new SequentialTransferIds(), handler,
                 new Backoff(Duration.ofMillis(200), BACKOFF_MAX));
         fake = new FakeLedger();
         slots = new InFlightLimit(SETTINGS.maxInFlight());
@@ -465,7 +465,7 @@ class RelayWorkerTest {
         void theOtherResultsOfTheBatchAreStillWritten() {
             // given: pay-1의 결과를 쓸 때 저장소가 한 번 실패한다(제출 기록 때의 조회는 지나간다)
             FlakyStore flaky = new FlakyStore(storage.store(), "pay-1", 1);
-            CommandLifecycle onFlaky = new CommandLifecycle(flaky, storage.transactions(), new SequentialTransferIds(),
+            CommandLifecycle onFlaky = new CommandLifecycle(storage.keys(), flaky, storage.transactions(), new SequentialTransferIds(),
                     handler, new Backoff(Duration.ofMillis(200), BACKOFF_MAX));
             RelayWorker flakyWorker = new RelayWorker(onFlaky, fake, slots, SETTINGS, events);
             storage.transactions().inTransaction(() -> onFlaky.submit(transfer("pay-1", "order-1")));
@@ -488,7 +488,7 @@ class RelayWorkerTest {
         void aCommandWhoseSubmissionWasNotRecordedIsNotSent() {
             // given: pay-1의 제출을 기록할 때 저장소가 한 번 실패한다
             FlakyStore flaky = new FlakyStore(storage.store(), "pay-1", 0);
-            CommandLifecycle onFlaky = new CommandLifecycle(flaky, storage.transactions(), new SequentialTransferIds(),
+            CommandLifecycle onFlaky = new CommandLifecycle(storage.keys(), flaky, storage.transactions(), new SequentialTransferIds(),
                     handler, new Backoff(Duration.ofMillis(200), BACKOFF_MAX));
             RelayWorker flakyWorker = new RelayWorker(onFlaky, fake, slots, SETTINGS, events);
             storage.transactions().inTransaction(() -> onFlaky.submit(transfer("pay-1", "order-1")));
@@ -527,10 +527,6 @@ class RelayWorkerTest {
             this.skip = skip;
         }
 
-        @Override
-        public long nextSeq(String orderingKey) {
-            return real.nextSeq(orderingKey);
-        }
 
         @Override
         public Optional<CommandRecord> insertIfAbsent(NewCommand command) {

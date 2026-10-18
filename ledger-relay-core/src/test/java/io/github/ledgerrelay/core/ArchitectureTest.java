@@ -3,8 +3,11 @@ package io.github.ledgerrelay.core;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
+import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
+import io.github.ledgerrelay.core.spi.OrderingKeys;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -67,5 +70,20 @@ class ArchitectureTest {
         noClasses().that().resideInAPackage(SPI)
                 .should().dependOnClassesThat().resideInAPackage(APPLICATION)
                 .check(MAIN);
+    }
+
+    @Test
+    @DisplayName("핸들러를 부르는 클래스는 순서 키 포트를 모른다 — 키 행을 쥔 채 핸들러가 주문 행을 기다려 앱의 접수와 교착하지 않게 (02e P2e-7)")
+    void theHandlerPathCannotLockAKey() {
+        // then
+        noClasses().that(callTheOutcomeHandler())
+                .should().dependOnClassesThat().areAssignableTo(OrderingKeys.class)
+                .check(MAIN);
+    }
+
+    private static DescribedPredicate<JavaClass> callTheOutcomeHandler() {
+        return DescribedPredicate.describe("call LedgerOutcomeHandler.onCompleted", javaClass ->
+                javaClass.getMethodCallsFromSelf().stream().anyMatch(call -> call.getName().equals("onCompleted")
+                        && call.getTargetOwner().isAssignableTo(LedgerOutcomeHandler.class)));
     }
 }

@@ -39,7 +39,7 @@ class HandlerAtomicityTest {
                 .update();
         storage.sql().sql("TRUNCATE wallet_event").update();
         handler = new WalletEventHandler(storage.dataSource());
-        relay = new CommandLifecycle(storage.store(), storage.transactions(), new SequentialTransferIds(), handler,
+        relay = new CommandLifecycle(storage.keys(), storage.store(), storage.transactions(), new SequentialTransferIds(), handler,
                 new Backoff(BACKOFF, BACKOFF));
         storage.transactions().inTransaction(() -> relay.submit(LedgerCommand.transfer("pay-1").orderingKey("order-1")
                 .debit(1).credit(2).amount(500).ledger(1).code(1).build()));
