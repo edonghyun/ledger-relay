@@ -321,6 +321,13 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: `ShopSchema.apply`는 한 트랜잭션에서 `pg_advisory_xact_lock(764)`를 잡은 뒤, `shop_order`가 없을 때만 라이브러리 `schema.sql`과 `shop-schema.sql`을 적용한다. 늦은 쪽은 앞쪽이 커밋할 때까지 lock에서 기다렸다가 표가 있는 것을 보고 지나간다. 적용은 `SmartInitializingSingleton`에서 하므로 워커 루프가 시작하기 전에 끝난다. 라이브러리는 여전히 스키마를 자동 적용하지 않는다. 이것은 샘플 앱만의 편의다.
 - **확인**: lock 줄을 지운 대조군에서 위 테스트가 5번 중 5번 23505로 실패했다.
 
+### F38. 결제 버튼을 두 번 누르면 주문이 둘 생기고 돈이 두 번 묶인다 (03b-2 샘플 쇼핑몰)
+
+- **깨지는 것**: 같은 `Idempotency-Key`로 결제 요청 둘이 동시에 온다. "키로 찾아보고 없으면 넣는다"로 짜면 두 트랜잭션이 모두 "없다"를 보고 둘 다 넣으려 한다. 유일 제약이 있으면 늦은 쪽이 23505로 500을 받고(사용자는 결제가 실패했다고 본다), 유일 제약이 없으면 주문 둘과 예약 둘이 생겨 구매자 돈이 두 번 묶인다. 라이브러리의 멱등성(같은 commandId는 한 번)은 이것을 막지 못한다. 두 요청이 서로 다른 주문, 다른 commandId를 만들기 때문이다.
+- **재현**: `OrderFlowTest` › 결제하면 › `aDoubleClickMakesOneOrderAndOneReservation`(두 스레드가 같은 키로 함께 결제), HTTP로 부르면 › `aRepeatedRequestReturnsTheSameOrder`.
+- **구조**: `shop_order.idempotency_key`에 유일 제약을 두고 `INSERT … ON CONFLICT (idempotency_key) DO NOTHING RETURNING`으로 넣는다. 늦은 쪽은 앞 트랜잭션이 끝날 때까지 유일 인덱스에서 기다렸다가 아무것도 넣지 않는다. 이어서 키로 다시 읽는다. READ COMMITTED는 문장마다 스냅숏을 새로 잡으므로 앞쪽이 커밋한 주문이 보인다. 같은 키에 구매자나 상품이 다르면 422로 거부한다. 예약은 새로 넣은 쪽만 접수한다.
+- **확인**: `ON CONFLICT DO NOTHING`을 지운 대조군에서 4건이 실패했다(더블 클릭, 다른 상품 거부, HTTP 둘).
+
 ### F39. TB 클라이언트에 호스트 이름 주소를 주면 앱이 기동하지 못한다 (03b-2 샘플 쇼핑몰)
 
 - **깨지는 것**: TB Java 클라이언트(0.17.9)는 `IPv4:포트`만 받는다. compose 안에서 TB 앞의 Toxiproxy는 `toxiproxy:3001`처럼 이름으로만 찾을 수 있다. 이 값을 그대로 넘기면 `Client`를 만드는 순간 `Replica addresses format is invalid`로 실패해 앱이 뜨지 않는다.
