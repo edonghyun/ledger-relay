@@ -61,9 +61,22 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 - 종료: 새 바퀴를 막고, 돌고 있는 바퀴를 `lease-duration`까지 기다린다. 바퀴는 TB 응답을 `submit-timeout`까지 기다린 뒤 결과를 쓰므로 보통 그 안에 끝난다. 그래도 남으면 인터럽트한다. 그 명령은 lease가 끝난 뒤 다른 워커가 같은 이체 ID로 다시 보내므로 돈이 두 번 움직이지 않는다.
 - 워커 설정(lease ≥ submit-timeout×2, batch-size ≤ 8189, max-in-flight ≥ batch-size)은 워커를 꺼도 기동에서 검사한다.
 - health(`spring-boot-health`가 있을 때): TB가 끊겨도 UP이고 세부 `ledger`만 DOWN이다. 접수는 TB 없이도 되므로, health가 DOWN이면 부하 분산기가 접수까지 막는 일이 생긴다. 저장소를 읽을 수 없을 때만 DOWN이다.
-  - TB 확인은 health 요청을 붙잡지 않는다. TB 클라이언트에는 ping이 없어 이체 하나를 조회해 보는데, 답을 기다리지 않고 마지막 답이 5초 안이면 UP으로 본다. 조회는 한 번에 하나만 보낸다(요청마다 쌓이지 않게).
+  - TB 확인은 health 요청을 붙잡지 않는다. TB 클라이언트에는 ping이 없어 이체 하나를 조회해 보는데, 답을 기다리지 않는다. 마지막으로 끝난 확인이 성공했고 가 있는 확인이 5초 넘게 답을 기다리고 있지 않으면 UP이다. 그래서 health를 드물게 불러도(Kubernetes 기본 10초) 판정이 맞다(F40). 조회는 한 번에 하나만 보낸다(요청마다 쌓이지 않게).
   - 대기 수는 1,000까지만 센다(`countsCapped`). 가장 오래된 대기는 `ledger_command_waiting`의 첫 항목이다. 장애로 대기가 10만 건이어도 health 한 번은 약 2,000페이지(상한에 비례) 안에서 끝난다. 정확한 수는 지표(03c)가 맡는다.
 - 종료는 `lease-duration`(기본 30초)까지 기다릴 수 있다. 웹 서버의 graceful shutdown과 합치면 오케스트레이터의 종료 유예(예: Kubernetes 기본 30초)를 넘을 수 있다. 넘어서 강제 종료돼도 lease와 같은 이체 ID 덕분에 돈은 두 번 움직이지 않는다.
+
+### 샘플 쇼핑몰 (03b-2)
+
+- 구성(`compose.yaml`, 저장소 루트): PostgreSQL 18.6, TigerBeetle 0.17.9(`--development --cache-grid=128MiB`, 처음 뜰 때만 format), Toxiproxy 2.13.0, 앱 둘(`shop-a`, `shop-b`, 같은 이미지). 앱은 TB에 Toxiproxy(`toxiproxy:3001`)로만 붙는다. Scenarios의 TB 스위치는 Toxiproxy 관리 API로 그 프록시를 끄고 켠다. Docker 소켓을 앱에 주지 않는다.
+- 앱 컨테이너도 `seccomp=unconfined`로 띄운다. TB Java 클라이언트도 io_uring을 쓰기 때문이다(F41). 라이브러리를 쓰는 앱을 컨테이너로 배포할 때도 같다. 운영에서는 io_uring 시스템 호출(`io_uring_setup`, `io_uring_enter`, `io_uring_register`)만 더 허용한 seccomp 프로필이 낫다.
+- 호스트에 여는 포트는 화면 하나(`SHOP_PORT`, 기본 8090)다. PG·TB·Toxiproxy는 열지 않는다. TB 포트를 열지 않으므로 F26의 원인 경로도 없다. 그래도 TB가 죽으면 `restart: on-failure`로 다시 뜬다.
+- 이미지는 `examples/shop/Dockerfile`이 저장소 전체를 컨텍스트로 Gradle 빌드한다(멀티 스테이지, Gradle 캐시는 BuildKit 캐시 마운트).
+- 스키마는 앱이 기동할 때 적용한다(샘플 앱만의 편의. 앱 둘이 함께 떠도 한 번만, F37). 라이브러리는 여전히 자동 적용하지 않는다.
+- TB 주소는 앱이 IPv4로 풀어 `Client` 빈을 직접 만든다. TB 클라이언트는 호스트 이름을 받지 않는다(F39). 라이브러리 설정 `ledger-relay.tigerbeetle.addresses`에도 IP를 쓴다.
+- 데모 전용 경로(`/api/demo/*`: TB 끊기, 잘못된 확정 넣기, 몰아넣기)는 `demo` 프로필에서만 있다. compose는 이 프로필로 띄운다. "잘못된 확정"은 정상 API로 만들 수 없는 행을 라이브러리 표에 직접 넣는다(`BadPostInjector`).
+- 화면의 숫자: 타일과 단계 칸은 `ledger_command`를 질의 하나로 직접 센다. 데모 크기에서는 충분하지만 운영 지표가 아니다. 03c에서 Micrometer로 바꿀 자리다. TB에서 읽는 숫자(잔액, 중복 이체, 대사)는 전용 스레드 하나가 1초마다 모은다. TB 클라이언트에는 timeout이 없어서, 화면 요청이 TB를 직접 부르면 TB가 끊긴 동안 화면이 멈추기 때문이다.
+- 재시도 간격 최대를 2초로 줄였다(`ledger-relay.backoff.max`, 라이브러리 기본 30초). 15초 끊었다 이었을 때 대기가 비는 데 기본값으로는 약 40초, 2초로는 약 5초 걸렸다.
+- 워커는 인스턴스마다 스레드 2개, 배치 4건이다. 배치가 작아야 몰아넣기 50건을 한 스레드가 다 가져가지 않고 두 인스턴스가 나눠 보내는 것이 보인다.
 
 ### DB를 옮길 때
 

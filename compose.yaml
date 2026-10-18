@@ -1,0 +1,90 @@
+# ledger-relay 샘플 쇼핑몰 데모(03b §7.5). 준비물은 Docker뿐이다.
+#   docker compose up --build   →   http://localhost:8090
+# 끄기: docker compose down -v   (데모는 매번 빈 DB와 빈 원장에서 시작한다)
+#
+#   브라우저 → shop-a(화면·API·워커) ┐
+#              shop-b(워커)          ┴→ PostgreSQL
+#                                     → Toxiproxy(장면 2의 끊기 스위치) → TigerBeetle
+#
+# PG·TB·Toxiproxy는 호스트 포트를 열지 않는다. TB 포트를 열지 않으면 기동 직후 panic(docs/failure-modes.md F26)의
+# 원인 경로도 없다.
+
+x-shop: &shop
+  build:
+    context: .
+    dockerfile: examples/shop/Dockerfile
+  image: ledger-relay-shop:local
+  depends_on:
+    postgres:
+      condition: service_healthy
+    toxiproxy:
+      condition: service_started
+    tigerbeetle:
+      condition: service_started
+  # TB Java 클라이언트도 io_uring을 쓴다. 기본 seccomp 프로필에서는 Client를 만들다 죽는다(docs/failure-modes.md F41)
+  security_opt:
+    - seccomp=unconfined
+  mem_limit: 640m
+  restart: on-failure
+  environment: &shop-env
+    SPRING_PROFILES_ACTIVE: demo
+    SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/shop
+    SPRING_DATASOURCE_USERNAME: shop
+    SPRING_DATASOURCE_PASSWORD: shop
+    SHOP_TIGERBEETLE_ADDRESS: toxiproxy:3001
+    SHOP_DEMO_TOXIPROXY_URL: http://toxiproxy:8474
+    LEDGER_RELAY_WORKER_CONCURRENCY: "2"
+    LEDGER_RELAY_WORKER_BATCH_SIZE: "4"
+    LEDGER_RELAY_WORKER_MAX_IN_FLIGHT: "64"
+    JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60
+
+services:
+  postgres:
+    image: postgres:18.6
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "shop", "-d", "shop"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  tigerbeetle:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9
+    # TB는 io_uring을 쓴다. Docker 기본 seccomp 프로필에서는 뜨지 않는다
+    security_opt:
+      - seccomp=unconfined
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        [ -f /data/0_0.tigerbeetle ] ||
+        /tigerbeetle format --cluster=0 --replica=0 --replica-count=1 --development /data/0_0.tigerbeetle;
+        exec /tigerbeetle start --addresses=0.0.0.0:3000 --development --cache-grid=128MiB /data/0_0.tigerbeetle
+    volumes:
+      - tigerbeetle-data:/data
+    restart: on-failure
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.13.0
+    command: ["-host=0.0.0.0", "-config=/config/toxiproxy.json"]
+    volumes:
+      - ./examples/shop/compose/toxiproxy.json:/config/toxiproxy.json:ro
+
+  shop-a:
+    <<: *shop
+    environment:
+      <<: *shop-env
+      SHOP_INSTANCE_NAME: shop-a
+    ports:
+      - "${SHOP_PORT:-8090}:8080"
+
+  shop-b:
+    <<: *shop
+    environment:
+      <<: *shop-env
+      SHOP_INSTANCE_NAME: shop-b
+
+volumes:
+  tigerbeetle-data:

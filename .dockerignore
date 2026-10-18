@@ -1,0 +1,9 @@
+# 샘플 쇼핑몰 이미지 빌드에 필요 없는 것
+**/build
+.gradle
+.git
+.idea
+.claude
+.superpowers
+docs/superpowers
+**/*.iml

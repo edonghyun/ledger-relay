@@ -342,6 +342,13 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: 판정을 시각이 아니라 확인의 결과로 한다. 마지막으로 끝난 확인이 성공했고, 가 있는 확인이 `ledgerStaleAfter`(5초)보다 오래 답을 기다리지 않으면 UP이다. F36의 성질은 그대로다. health는 기다리지 않고, 조회는 한 번에 하나만 보낸다. 답 없는 확인이 5초를 넘으면 DOWN이다(`aProbeUnansweredForTooLongIsDown`).
 - **확인**: 고치기 전 규칙에서 위 테스트가 `ledger: DOWN`으로 실패했다. 기존 health 테스트 5건은 그대로 통과한다.
 
+### F41. 앱을 컨테이너로 띄우면 TB 클라이언트가 io_uring을 못 써 앱이 기동하지 못한다 (03b-2 샘플 쇼핑몰)
+
+- **깨지는 것**: TB 서버만 io_uring을 쓰는 줄 알기 쉽다. 그런데 TB Java 클라이언트(0.17.9)도 네이티브 라이브러리 안에서 io_uring을 쓴다. Docker 기본 seccomp 프로필로 띄운 앱 컨테이너는 `Client`를 만드는 순간 `error(io): io_uring is not available` → `thread 7 panic: attempt to unwrap error: PermissionDenied`로 JVM째 죽는다(exit 133). 예외가 아니라 panic이라 앱이 잡을 수도 없다. compose의 `restart`가 다시 띄워도 매번 같다. 처음 compose를 띄웠을 때 앱 둘이 모두 이렇게 재시작을 반복했다. 테스트에서는 앱이 호스트 JVM이라 드러나지 않았다.
+- **재현**: `compose.yaml`의 앱 서비스에서 `security_opt`를 지우고 `docker compose up`. 끝-끝 테스트 `ShopComposeTest`가 기동 대기(`/actuator/health`)에서 실패한다.
+- **구조**: 앱 컨테이너에도 `security_opt: [seccomp=unconfined]`를 준다(TB 서버 컨테이너와 같다). 운영에서는 unconfined 대신 io_uring 시스템 호출만 더 허용한 seccomp 프로필을 쓰는 편이 낫다. docs/development.md에 적었다.
+- **확인**: 옵션 없이 띄운 앱 둘이 위 panic으로 재시작을 반복했고, 옵션을 준 뒤 둘 다 떠 health가 UP이었다(2026-10-18, Docker Desktop).
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |

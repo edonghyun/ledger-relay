@@ -19,6 +19,28 @@ PG와 TB는 한 트랜잭션으로 묶을 수 없다. TB 응답은 유실될 수
 
 장애를 막은 변경마다 재현 테스트와 대조군 결과를 `docs/failure-modes.md`에 남겼다. 대조군은 그 수리를 되돌렸을 때 테스트가 실제로 실패하는지 확인한 것이다.
 
+## 샘플 쇼핑몰로 보기
+
+준비물은 Docker뿐이다(JDK, Node 필요 없음). Docker에 메모리를 3GB 이상 준다(TigerBeetle만 1.5GB쯤 쓴다). 저장소 루트에서:
+
+```bash
+docker compose up --build        # 처음에는 이미지 빌드로 몇 분 걸린다
+```
+
+브라우저로 <http://localhost:8090>을 연다(포트를 바꾸려면 `SHOP_PORT=9000 docker compose up --build`). 끌 때는 `docker compose down -v`. 데모는 매번 빈 DB와 빈 원장에서 시작한다.
+
+구성은 PostgreSQL, TigerBeetle, 둘 사이의 Toxiproxy(끊기 스위치), 같은 이미지로 띄운 앱 둘(`shop-a`는 화면과 워커, `shop-b`는 워커)이다. 화면의 숫자는 모두 PG와 TB의 실제 상태에서 나온다. 통화는 태국 바트(฿)이고, 결제는 카드처럼 **승인(예약) → 출고 때 매입(확정)** 이다.
+
+| 장면 | 하는 것 | 보이는 것 |
+|---|---|---|
+| ① 정상 결제 | Store에서 `결제하기` → 주문의 `Ship` | `authorized`(구매자 돈이 묶임) → `paid`(가맹점으로 이동). 오른쪽 타임라인에 단계별 시각, 이체 ID, TB 전송 횟수, 잔액 |
+| ② TB 장애 | Scenarios에서 TigerBeetle 스위치를 끄고 몇 번 결제 → 다시 켬 | 결제는 바로 접수되고 backlog가 쌓이며 TB 점이 빨강. 켜면 몇 초 안에 backlog가 비고 아래 Consistency는 초록 그대로 |
+| ③ 멈춤과 운영자 | Scenarios의 `Inject bad post` → Operator에서 `Abandon` | 그 주문의 확정만 멈추고 다른 주문은 흐른다. 포기하면 해제가 뒤따라 주문은 `cancelled`, 잔액은 원래대로 |
+| ④ 멱등 | Scenarios의 `Double click` | 같은 Idempotency-Key 요청 둘 → 주문 하나(201과 200), 예약 하나 |
+| ⑤ 취소 | 결제 승인된 주문의 `Cancel` | 예약 해제, 묶였던 돈이 풀림 |
+
+`Burst ×50`은 주문 50건을 한꺼번에 넣는다. Store의 Workers 칸에서 두 인스턴스가 나눠 보내는 것이 보인다. 이 장면들은 끝-끝 테스트(`./gradlew :examples-shop:composeTest`)가 실제 `compose.yaml`로 그대로 돈다.
+
 ## 지금 되는 것
 
 | 모듈 | 내용 |
@@ -29,6 +51,8 @@ PG와 TB는 한 트랜잭션으로 묶을 수 없다. TB 응답은 유실될 수
 | `ledger-relay-spring-boot` | Spring Boot 4.0 자동 설정, 워커 루프와 정상 종료, health(TB가 끊겨도 UP), 운영자 포트 빈 |
 
 운영자 포트 `LedgerRelayOperator`: 멈춘 명령 목록(이유·시각), 포기, PG와 TB의 대사.
+
+샘플 앱 `examples/shop`(Gradle 프로젝트 `:examples-shop`)은 라이브러리를 쓰는 쪽의 본보기다. 라이브러리 모듈은 이것에 의존하지 않는다.
 
 ## 앱에서 쓰기 (Spring Boot)
 
@@ -48,7 +72,7 @@ ledger-relay:
 ## 아직 안 되는 것
 
 - Micrometer 지표와 대시보드(3c 단계)
-- 샘플 쇼핑몰 앱(`examples/shop`, 3b-2 단계), 장애 실험(E1~E10), 보관 작업
+- 장애 실험(E1~E10), 보관 작업
 
 ## 문서
 
@@ -61,8 +85,9 @@ ledger-relay:
 JDK 21이 필요하다. PG와 TB 테스트는 Docker(Testcontainers)를 쓴다.
 
 ```bash
-./gradlew test                          # 전체
+./gradlew test                          # 전체(빠른 테스트)
 ./gradlew :ledger-relay-core:test       # Docker 없이 도는 core만
+./gradlew check                         # 위에 더해 샘플 앱 끝-끝 테스트(compose.yaml로 이미지 빌드부터)
 ```
 
 TB 컨테이너는 `seccomp=unconfined`로 띄운다(io_uring). 기동 직후의 간헐 panic과 그 완화는 `docs/failure-modes.md` F26에 있다.
