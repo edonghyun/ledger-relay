@@ -64,7 +64,7 @@ public class Orders {
     }
 
     /** 이 명령을 접수한 주문. 이 앱이 만든 명령이 아니면 비어 있다. */
-    Optional<OrderCommand> commandOf(String commandId) {
+    public Optional<OrderCommand> commandOf(String commandId) {
         return sql.sql("SELECT order_id, command_id, kind FROM shop_order_command WHERE command_id = ?").param(commandId)
                 .query(Orders::command).optional();
     }

@@ -6,7 +6,7 @@ import java.time.Instant;
 public record OrderView(long id, long buyerId, String product, long amountSatang, String state, String chip, String label,
         String failureReason, boolean halted, Instant createdAt) {
 
-    static OrderView of(ShopOrder order, boolean halted) {
+    public static OrderView of(ShopOrder order, boolean halted) {
         return new OrderView(order.id(), order.buyerId(), order.productCode(), order.amountSatang(), order.state().name(),
                 order.state().chip(), order.state().label(), order.failureReason(), halted, order.createdAt());
     }
