@@ -349,6 +349,13 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **구조**: 앱 컨테이너에도 `security_opt: [seccomp=unconfined]`를 준다(TB 서버 컨테이너와 같다). 운영에서는 unconfined 대신 io_uring 시스템 호출만 더 허용한 seccomp 프로필을 쓰는 편이 낫다. docs/development.md에 적었다.
 - **확인**: 옵션 없이 띄운 앱 둘이 위 panic으로 재시작을 반복했고, 옵션을 준 뒤 둘 다 떠 health가 UP이었다(2026-10-18, Docker Desktop).
 
+### F42. 앱 둘이 같은 이미지를 동시에 빌드해 `docker compose up`이 가끔 실패한다 (03b-2 샘플 쇼핑몰)
+
+- **깨지는 것**: 처음 compose는 `shop-a`와 `shop-b`에 모두 `build`와 같은 `image` 이름을 줬다. `docker compose up --build`는 둘을 동시에 빌드하고, 늦게 끝난 쪽이 이미지 이름을 붙이다 `image "docker.io/library/ledger-relay-shop:local": already exists`로 실패해 `up` 전체가 끝난다. 빌드 캐시 상태에 따라 날 때도 안 날 때도 있다. 면접관이 처음 띄울 때 나면 데모가 시작조차 하지 않는다(03b 반목표).
+- **재현**: 전체 `./gradlew check --rerun-tasks`에서 `ShopComposeTest`가 `compose up -d --build` 단계에서 위 메시지로 실패했다(2026-10-18). 그전 두 번은 통과했다.
+- **구조**: 이미지는 `shop-a`만 빌드한다. `shop-b`는 같은 이미지 이름을 쓰고 `pull_policy: never`라 레지스트리에서 찾지 않는다. compose는 컨테이너를 만들기 전에 빌드를 끝내므로 `shop-b`는 `shop-a`가 빌드한 이미지로 뜬다.
+- **확인**: 고친 뒤 이미지를 지운 상태(처음 띄우는 상황)와 캐시가 있는 상태에서 `ShopComposeTest`를 차례로 돌려 둘 다 통과했다.
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |
