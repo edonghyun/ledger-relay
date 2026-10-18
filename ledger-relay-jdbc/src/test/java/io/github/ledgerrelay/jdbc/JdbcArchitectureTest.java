@@ -19,6 +19,9 @@ class JdbcArchitectureTest {
             .withImportOption(new ImportOption.DoNotIncludeTests())
             .importPackages("io.github.ledgerrelay.jdbc");
 
+    /** testFixtures(Testcontainers를 쓰는 픽스처)는 이 패키지에만 있다. DoNotIncludeTests는 testFixtures를 거르지 못한다. */
+    static final String FIXTURES = "io.github.ledgerrelay.jdbc.testing..";
+
     /** jdbc가 읽고 쓰는 도메인 값. 판단(상태 기계, 게이트, 전이표, 해시, 서비스)은 여기에 없다. */
     static final Set<String> DOMAIN_VALUES = Set.of(
             "io.github.ledgerrelay.core.domain.CommandRow",
@@ -29,7 +32,7 @@ class JdbcArchitectureTest {
     @DisplayName("어댑터가 쓰는 core는 공개 API·포트·도메인 값뿐이다 — 판단 클래스가 새로 생겨도 SQL에 새지 않게")
     void theAdapterMakesNoDecisions() {
         // then
-        classes().that().resideInAPackage("io.github.ledgerrelay.jdbc..")
+        classes().that().resideInAPackage("io.github.ledgerrelay.jdbc..").and().resideOutsideOfPackage(FIXTURES)
                 .should().onlyDependOnClassesThat(DescribedPredicate.describe(
                         "core 밖, core 공개 API, core.spi, 도메인 값(" + DOMAIN_VALUES + ")",
                         (JavaClass c) -> !c.getPackageName().startsWith("io.github.ledgerrelay.core")
@@ -43,7 +46,7 @@ class JdbcArchitectureTest {
     @DisplayName("어댑터는 JDK와 Spring JDBC·TX, core만 쓴다 — 드라이버·풀·JPA는 앱이 고른다")
     void theAdapterUsesOnlySpringJdbcAndTheJdk() {
         // then
-        classes().that().resideInAPackage("io.github.ledgerrelay.jdbc..")
+        classes().that().resideInAPackage("io.github.ledgerrelay.jdbc..").and().resideOutsideOfPackage(FIXTURES)
                 .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "javax.sql..",
                         "org.springframework.jdbc..", "org.springframework.transaction..", "org.springframework.dao..",
                         "io.github.ledgerrelay..")

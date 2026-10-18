@@ -9,13 +9,10 @@ import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.LedgerOutcomeHandler;
 import io.github.ledgerrelay.core.LedgerRelay;
 import io.github.ledgerrelay.core.testing.RecordingHandler;
+import io.github.ledgerrelay.jdbc.testing.PostgresTestDatabase;
 import io.github.ledgerrelay.tigerbeetle.testing.Account;
 import io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleContainer;
 import io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleTestLedger;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import javax.sql.DataSource;
@@ -25,7 +22,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -35,7 +31,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @DisplayName("Spring Boot로 띄운 릴레이 — PG와 TB 위에서 이체 하나가 끝까지 간다 (03b)")
 class SpringBootRelayIntegrationTest {
 
-    static final PostgreSQLContainer PG = new PostgreSQLContainer("postgres:18.6");
+    static final PostgreSQLContainer PG = PostgresTestDatabase.container();
     static final TigerBeetleContainer TB = new TigerBeetleContainer();
     static final Duration LEASE = Duration.ofSeconds(4);
 
@@ -50,7 +46,7 @@ class SpringBootRelayIntegrationTest {
         dataSource.setJdbcUrl(PG.getJdbcUrl());
         dataSource.setUsername(PG.getUsername());
         dataSource.setPassword(PG.getPassword());
-        JdbcClient.create(dataSource).sql(schema()).update();
+        PostgresTestDatabase.applySchema(dataSource);
         ledger = new TigerBeetleTestLedger(TB.newClient());
     }
 
@@ -111,13 +107,5 @@ class SpringBootRelayIntegrationTest {
             Thread.sleep(50);
         }
         throw new AssertionError(commandId + "의 결과가 " + limit + " 안에 오지 않았다");
-    }
-
-    private static String schema() {
-        try (InputStream in = io.github.ledgerrelay.jdbc.JdbcCommandStore.class.getResourceAsStream("schema.sql")) {
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
     }
 }

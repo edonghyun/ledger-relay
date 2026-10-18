@@ -1,0 +1,6 @@
+# Windows에서 받아도 셸 스크립트의 줄바꿈이 LF로 남게 한다. 그렇지 않으면 Docker 안의 ./gradlew가 깨진다
+* text=auto
+gradlew text eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+*.jar binary

@@ -24,4 +24,17 @@ class ComposeFileTest {
         // then: 맨 위 volumes: 가 있으면 그 볼륨은 down(-v 없이) 뒤에도 남는다
         assertThat(lines).as("맨 위 volumes 선언").noneMatch(line -> line.startsWith("volumes:"));
     }
+
+    @Test
+    @DisplayName("PostgreSQL과 TigerBeetle 이미지는 테스트가 쓰는 버전과 같다 — 버전 목록 한 곳만 고치고 데모를 잊지 않게")
+    void imagesMatchTheVersionCatalog() throws IOException {
+        // given
+        String compose = Files.readString(COMPOSE);
+
+        // then
+        assertThat(compose).as("compose.yaml")
+                .contains("image: postgres:" + System.getProperty("ledgerrelay.postgres.version") + "\n")
+                .contains("image: ghcr.io/tigerbeetle/tigerbeetle:" + System.getProperty("ledgerrelay.tigerbeetle.version")
+                        + "\n");
+    }
 }

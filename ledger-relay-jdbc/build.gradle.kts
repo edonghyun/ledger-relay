@@ -1,41 +1,26 @@
-import java.time.Duration
-
 plugins {
-    `java-library`
+    id("ledger-relay.library-conventions")
+    `java-test-fixtures`
 }
 
-group = "io.github.ledgerrelay"
-version = "0.1.0-SNAPSHOT"
-
-repositories {
-    mavenCentral()
-}
-
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
-
-// main 의존은 core와 Spring JDBC·TX뿐이다. 드라이버·풀·JPA는 앱이 고른다(스펙 §7).
+// main 의존은 core와 Spring JDBC·TX뿐이다. 드라이버·풀·JPA는 앱이 고른다
 dependencies {
     api(project(":ledger-relay-core"))
     implementation(libs.spring.jdbc)
     implementation(libs.spring.tx)
 
+    // PostgreSQL 테스트 컨테이너와 스키마. spring-boot 모듈과 샘플 앱의 테스트도 쓴다
+    testFixturesApi(libs.testcontainers.postgresql)
+    testFixturesImplementation(libs.spring.jdbc)
+
     testImplementation(testFixtures(project(":ledger-relay-core")))
-    testImplementation(platform(libs.junit.bom))
-    testImplementation(libs.junit.jupiter)
-    testImplementation(libs.assertj.core)
     testImplementation(libs.archunit)
     testImplementation(libs.postgresql)
     testImplementation(libs.hikaricp)
-    testImplementation(libs.testcontainers.postgresql)
-    // 앱이 JPA 트랜잭션 매니저를 쓰는 경우(R16)
+    // 앱이 JPA 트랜잭션 매니저를 쓰는 경우
     testImplementation(libs.spring.orm)
     testImplementation(libs.spring.context)
     testImplementation(libs.hibernate.core)
-    testRuntimeOnly(libs.junit.platform.launcher)
     testRuntimeOnly(libs.slf4j.simple)
 }
 
@@ -44,18 +29,9 @@ tasks.test {
         // 측정용 테스트는 기본 실행에서 뺀다(:ledger-relay-jdbc:measurement)
         excludeTags("measurement")
     }
-    // 개별 테스트 2분 timeout(아래)을 빠져나가는 매달림까지 막는 전체 상한
-    timeout = Duration.ofMinutes(15)
-    // 잠금을 기다리다 매달린 동시성 테스트를 실패로 바꾸는 안전망
-    systemProperty("junit.jupiter.execution.timeout.default", "2m")
-    testLogging {
-        events("passed", "skipped", "failed")
-        showStandardStreams = false
-        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
-    }
 }
 
-// 측정용 테스트만 돈다(02d Task 9). 판정하지 않고 실행 계획을 표준 출력에 남긴다.
+// 측정용 테스트만 돈다. 판정하지 않고 실행 계획을 표준 출력에 남긴다
 tasks.register<Test>("measurement") {
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath

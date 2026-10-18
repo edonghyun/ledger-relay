@@ -5,6 +5,7 @@ import io.github.ledgerrelay.core.spi.CommandStore;
 import io.github.ledgerrelay.core.spi.OrderingKeys;
 import io.github.ledgerrelay.core.spi.Transactions;
 import io.github.ledgerrelay.core.testing.StorageUnderTest;
+import io.github.ledgerrelay.jdbc.testing.PostgresTestDatabase;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -34,7 +35,6 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  */
 final class PostgresStorage implements StorageUnderTest {
 
-    static final String IMAGE = "postgres:18.6";
     /** 풀의 기본 격리 수준을 정하지 않는다: 드라이버와 서버의 기본(READ COMMITTED)을 따른다 */
     static final String SERVER_DEFAULT = "";
 
@@ -257,14 +257,14 @@ final class PostgresStorage implements StorageUnderTest {
     }
 
     private static PostgreSQLContainer startContainer() {
-        PostgreSQLContainer container = new PostgreSQLContainer(IMAGE);
+        PostgreSQLContainer container = PostgresTestDatabase.container();
         container.start();
         Runtime.getRuntime().addShutdownHook(new Thread(container::stop));
         try (HikariDataSource once = new HikariDataSource()) {
             once.setJdbcUrl(container.getJdbcUrl());
             once.setUsername(container.getUsername());
             once.setPassword(container.getPassword());
-            JdbcClient.create(once).sql(resource("schema.sql")).update();
+            PostgresTestDatabase.applySchema(once);
         }
         return container;
     }

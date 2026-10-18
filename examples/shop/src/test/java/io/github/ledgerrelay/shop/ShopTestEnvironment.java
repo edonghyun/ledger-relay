@@ -2,6 +2,7 @@ package io.github.ledgerrelay.shop;
 
 import com.tigerbeetle.Client;
 import com.zaxxer.hikari.HikariDataSource;
+import io.github.ledgerrelay.jdbc.testing.PostgresTestDatabase;
 import io.github.ledgerrelay.tigerbeetle.testing.ProxiedTigerBeetle;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -23,7 +24,7 @@ public final class ShopTestEnvironment {
     private final ProxiedTigerBeetle ledger;
 
     private ShopTestEnvironment() {
-        postgres = new PostgreSQLContainer("postgres:18.6");
+        postgres = PostgresTestDatabase.container();
         postgres.start();
         ledger = ProxiedTigerBeetle.start();
     }
