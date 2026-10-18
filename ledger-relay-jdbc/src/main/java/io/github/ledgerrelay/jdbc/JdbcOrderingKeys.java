@@ -32,7 +32,9 @@ public final class JdbcOrderingKeys implements OrderingKeys {
 
     /**
      * 넘길 키를 고른다. 끝났는데 맨 앞인 명령({@code ledger_command_finished_head})의 키 행을 잠근다. 다른 트랜잭션이 쥔 키
-     * 행은 건너뛰며, 건너뛴 행은 limit에 세지 않는다. 테스트가 실행 계획을 본다.
+     * 행은 건너뛰며, 건너뛴 행은 limit에 세지 않는다. 끝난 맨 앞 행은 잠그지 않는다: 누가 그 행을 쥐면(예: 예약 행, F13)
+     * 키 전체의 넘기기가 미뤄진다. 그래서 다른 워커가 이 질의의 스냅숏 뒤에 넘기고 커밋한 키도 잡힐 수 있고, 그때는
+     * {@link #MARK_NEXT_HEADS}가 이미 있는 맨 앞을 보고 아무것도 하지 않는다. 테스트가 실행 계획을 본다.
      */
     static final String LOCK_KEYS_TO_PASS_ON = """
                 SELECT k.ordering_key
@@ -57,11 +59,14 @@ public final class JdbcOrderingKeys implements OrderingKeys {
         if (keys.isEmpty()) {
             return;
         }
-        sql.sql("UPDATE ledger_ordering_key SET next_seq = next_seq WHERE ordering_key IN (:keys)")
-                .param("keys", keys).update();
+        sql.sql(REWRITE_KEY_ROWS).param("keys", keys).update();
         sql.sql(CLEAR_FINISHED_HEADS).param("keys", keys).update();
         sql.sql(MARK_NEXT_HEADS).param("keys", keys).update();
     }
+
+    static final String REWRITE_KEY_ROWS = """
+                UPDATE ledger_ordering_key SET next_seq = next_seq WHERE ordering_key IN (:keys)
+            """;
 
     static final String CLEAR_FINISHED_HEADS = """
                 UPDATE ledger_command SET is_head = false
@@ -70,7 +75,8 @@ public final class JdbcOrderingKeys implements OrderingKeys {
 
     /**
      * 키마다 가장 앞 순번의 미완료를 맨 앞으로 켠다. 키마다 따로 {@code min(seq)}를 구해야 미완료 인덱스에서 하나만 읽는다.
-     * 키들을 묶어 {@code GROUP BY}로 구하면 막힌 키 뒤의 백로그를 모두 읽는다(2만 건에 564페이지). 테스트가 실행 계획을 본다.
+     * 키들을 묶어 {@code GROUP BY}로 구하면 막힌 키 뒤의 백로그를 모두 읽는다(2만 건에 564페이지). 맨 앞이 이미 있는 키는
+     * 건드리지 않는다: 그 맨 앞은 결과를 쓰는 중일 수 있고, 그 행을 고치려 기다리면 핸들러와 교착한다. 테스트가 실행 계획을 본다.
      */
     static final String MARK_NEXT_HEADS = """
                 UPDATE ledger_command c SET is_head = true
@@ -78,5 +84,6 @@ public final class JdbcOrderingKeys implements OrderingKeys {
                 WHERE k.ordering_key IN (:keys) AND c.ordering_key = k.ordering_key
                   AND c.seq = (SELECT min(u.seq) FROM ledger_command u
                                WHERE u.ordering_key = k.ordering_key AND u.state IN ('PENDING','CLAIMED','HALTED'))
+                  AND NOT EXISTS (SELECT 1 FROM ledger_command h WHERE h.ordering_key = k.ordering_key AND h.is_head)
             """;
 }

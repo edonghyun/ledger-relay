@@ -266,11 +266,12 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 ### F33. 결과를 쓰는 트랜잭션이 키 행을 쥔 채 핸들러를 돌려 앱의 접수와 교착한다 (02e 최종 리뷰)
 
 - **깨지는 것**: 02e의 첫 구현(P2e-4)에서 완료는 `compareAndSet` 안에서 그 키의 행(`ledger_ordering_key`)을 고쳐 잠갔다. 그 잠금을 커밋까지 쥔 채 핸들러를 불렀다. 흔한 앱 코드가 반대 순서로 잡는다. 앱은 주문 행을 고친 뒤 같은 트랜잭션에서 그 주문의 키에 접수한다(접수는 순번을 받으며 키 행을 잡는다). 핸들러는 결과를 받아 같은 주문 행을 고친다. 앱은 키 행을, 핸들러는 주문 행을 기다려 PG가 한쪽을 끊는다(40P01). 앱 쪽이 끊기면 사용자 요청이 간헐적으로 실패한다. 완료 쪽이 끊기면 핸들러 실패로 backoff 뒤 다시 돈다. 또 어떤 키에 접수를 연 채 오래 머무는 앱 트랜잭션이 있으면 그 키의 완료가 기다렸고, 워커는 결과를 한 건씩 쓰므로 뒤의 다른 키 결과도 함께 멈췄다. 이 잠금은 `compareAndSet`이라는 이름 뒤에 숨어 core 코드에서 보이지 않았다.
-- **재현**: `HeadRaceTest` › 앱과 핸들러가 같은 주문 행을 고치면 › `anAppThatMarksTheOrderThenSubmitsDoesNotDeadlockWithTheHandler`. `KeyLockFreeStoreTest`(다른 트랜잭션이 키 행을 쥐어도 저장소의 넣기·찾기·후보 잠그기·결과 쓰기가 기다리지 않는다).
+- **재현**: `HeadRaceTest` › 앱과 핸들러가 같은 주문 행을 고치면 › `anAppThatMarksTheOrderThenSubmitsDoesNotDeadlockWithTheHandler`. `KeyLockFreeStoreTest`(다른 트랜잭션이 키 행을 쥐어도 저장소의 넣기·찾기·후보 잠그기·결과 쓰기가 기다리지 않는다). `HeadStatementRaceTest`(문장 사이의 경쟁 셋).
 - **구조** (P2e-7):
   - 포트를 나눴다. 키 행을 잡는 호출은 `OrderingKeys`(`lockKeyAndTakeSeq`, `passOnFinishedHeads`)에만 있다. `CommandStore`는 키 행을 잡지 않는다. jdbc에서는 `JdbcOrderingKeys`와 `JdbcCommandStore`가 나눠 맡는다.
   - 핸들러를 부르는 워커 쓰기는 `WorkerWrites`로 뗐고, 이 클래스는 `OrderingKeys`를 받지 않는다. `ArchitectureTest.theHandlerPathCannotLockAKey`가 "`onCompleted`를 부르는 클래스는 `OrderingKeys`에 의존하지 않는다"를 지킨다.
   - 완료는 맨 앞 표시를 끝난 명령에 남긴다. claim이 후보를 잠그기 전에 끝난 맨 앞의 키 행을 `FOR UPDATE SKIP LOCKED`로 잡아 다음 미완료로 넘긴다. 앱이 쥔 키는 기다리지 않고 다음 claim으로 미룬다. 잡은 키 행은 값을 그대로 두고 갱신한다. 그래야 그보다 앞서 스냅숏을 잡은 REPEATABLE READ 이상의 앱이 그 키에서 순번을 받을 때 40001로 끝나 재시도한다. 그러지 않으면 그 앱은 옛 스냅숏에서 맨 앞이 있다고 보고 새 명령을 맨 앞으로 세우지 않아 그 키가 영원히 나가지 않는다.
+  - 맨 앞 표시를 켜는 두 문장(접수의 `MARK_FIRST_UNFINISHED`, 넘기기의 `MARK_NEXT_HEADS`)은 그 키에 맨 앞이 이미 있으면 아무것도 하지 않는다. READ COMMITTED는 문장마다 스냅숏을 새로 잡으므로, 접수가 표시를 끈 뒤 같은 키의 완료가 커밋되면 맨 앞이 둘이 되어 유일 인덱스가 접수를 깨뜨렸다(23505). 넘기기 쪽에도 같은 틈이 있었다. 넘기기 질의가 스냅숏을 잡은 뒤 다른 워커가 같은 키를 넘기고 커밋하면, 늦은 질의는 그 키 행을 그대로 잡는다(`SKIP LOCKED`는 키 행만 최신으로 다시 확인한다). 그다음 켜기가 결과를 쓰는 중인 새 맨 앞 행을 고치려 기다리면 핸들러와 교착했고, 그사이 새 맨 앞이 끝나면 맨 앞이 둘이 되어 claim이 깨졌다. 끝난 맨 앞 행까지 잠그는 방법(`FOR UPDATE OF k, c`)은 쓰지 않았다. 누가 그 행을 쥐면(예: 예약 행, F13) 키 전체의 넘기기가 미뤄지고, 계약 테스트 `aLockedReservationIsStillReported`가 깨졌다. 셋 다 P2e-7 리뷰가 PG 18.6에서 재현했고, `HeadStatementRaceTest`가 문장 사이에 상대를 커밋시켜 본다.
   - `unfinished_count`를 지웠다. 넘길 키는 `ledger_command_finished_head`(끝났는데 맨 앞인 명령)에서 찾는다. 키마다 다음 미완료를 따로 `min(seq)`로 찾는다. 키들을 묶은 `GROUP BY`는 막힌 키 뒤의 백로그를 모두 읽었다(2만 건에 564페이지, 지금 30페이지).
   - 트랜잭션마다 잡는 행은 docs/development.md "트랜잭션과 잠금"에 표로 둔다.
 - **확인**:
@@ -284,6 +285,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
     - `ledger_command_finished_head`를 지우면 넘기기 페이지 테스트가 실패한다.
   - 측정(limit 128): 끝난 이력 5만 건 뒤 끝난 맨 앞 2만 개에서 넘길 키를 잠그는 데 519페이지, 0.19ms.
 - **남은 것**:
+  - 핸들러 안에서 접수하면 그 결과 쓰기 트랜잭션이 키 행을 잡는다. 접수한 뒤 주문 행을 고치는 핸들러는 "주문 행 → 접수" 앱과 교착할 수 있다. 막지 않고 docs/development.md "트랜잭션과 잠금"에 순서(주문 행을 먼저)를 적는다. 예약이 적용되면 확정을 접수하는 핸들러가 정당한 쓰임이라서다.
   - 앱 트랜잭션끼리 여러 키를 서로 다른 순서로 접수하면 키 행끼리 교착한다. 이것은 02b부터 있던 성질이다(4절).
   - REPEATABLE READ 이상의 앱은 claim의 넘기기와 겹친 접수에서 40001을 받을 수 있다. 앱은 이미 같은 키의 동시 접수에서 이 실패를 재시도해야 한다(4절).
   - 앱이 키 행을 오래 쥐면 그 키의 다음 명령은 그 앱이 커밋할 때까지 나가지 않는다. 다른 키는 영향이 없다.

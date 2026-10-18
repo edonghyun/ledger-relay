@@ -85,19 +85,28 @@ public final class JdbcCommandStore implements CommandStore {
      * 보이므로 건드리지 않고(기다리지 않고), 그 끝난 맨 앞은 다음 claim이 넘긴다.
      */
     private void settleHead(String orderingKey) {
-        sql.sql("""
+        sql.sql(CLEAR_STALE_HEAD).param("key", orderingKey).update();
+        sql.sql(MARK_FIRST_UNFINISHED).param("key", orderingKey).update();
+    }
+
+    static final String CLEAR_STALE_HEAD = """
                 UPDATE ledger_command SET is_head = false
                 WHERE ordering_key = :key AND is_head
                   AND seq IS DISTINCT FROM (SELECT min(seq) FROM ledger_command
                                             WHERE ordering_key = :key AND state IN ('PENDING','CLAIMED','HALTED'))
-                """).param("key", orderingKey).update();
-        sql.sql("""
+            """;
+
+    /**
+     * 맨 앞이 없을 때만 켠다. READ COMMITTED에서는 끄기 문장 뒤에 같은 키의 완료가 커밋될 수 있다. 그 끝난 맨 앞은 표시를
+     * 쥔 채 남으므로, 이 조건이 없으면 맨 앞이 둘이 되어 유일 인덱스가 접수를 깬다. 남은 끝난 맨 앞은 다음 claim이 넘긴다.
+     */
+    static final String MARK_FIRST_UNFINISHED = """
                 UPDATE ledger_command SET is_head = true
                 WHERE ordering_key = :key AND NOT is_head
                   AND seq = (SELECT min(seq) FROM ledger_command
                              WHERE ordering_key = :key AND state IN ('PENDING','CLAIMED','HALTED'))
-                """).param("key", orderingKey).update();
-    }
+                  AND NOT EXISTS (SELECT 1 FROM ledger_command h WHERE h.ordering_key = :key AND h.is_head)
+            """;
 
     @Override
     public Optional<CommandRecord> find(String commandId) {
