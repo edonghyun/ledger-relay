@@ -1,6 +1,7 @@
 package io.github.ledgerrelay.shop.demo;
 
 import io.github.ledgerrelay.shop.ShopProperties;
+import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -14,6 +15,9 @@ import org.springframework.stereotype.Component;
 /**
  * Cuts and restores the Toxiproxy between the app and TB. The app reaches TB only through this proxy, so the failure is
  * caused without giving the app the Docker socket. Cutting also closes connections that are already open.
+ *
+ * <p>A start restores the connection. A cut left over from before a restart would otherwise make the account setup
+ * wait forever, and the button that restores the connection lives in this app (F45).
  */
 @Component
 @Profile("demo")
@@ -26,6 +30,18 @@ class LedgerLink {
 
     LedgerLink(ShopProperties properties) {
         this.proxy = URI.create(properties.demo().toxiproxyUrl() + "/proxies/" + properties.demo().toxiproxyProxy());
+    }
+
+    /** Runs before {@code ShopBootstrap}, which waits for TB after all beans are created. */
+    @PostConstruct
+    void restoreAtStartup() {
+        try {
+            connect(true);
+        } catch (IllegalStateException e) {
+            // Toxiproxy that has only just started may not answer yet. A fresh proxy is connected anyway
+            System.getLogger(LedgerLink.class.getName()).log(System.Logger.Level.WARNING,
+                    "Could not restore the TB connection at startup: " + e.getMessage());
+        }
     }
 
     boolean connected() {

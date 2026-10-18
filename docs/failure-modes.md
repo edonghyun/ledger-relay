@@ -8,7 +8,7 @@ This document lists, one by one, the failures ledger-relay has to prevent. For e
 
 ## 1. Prevented failures
 
-F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F26 the test environment, F27–F36 defects in core, the store and the Spring module found in reviews, and F37–F44 were found while building the sample shop (F40 is a library defect found at that time).
+F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F26 the test environment, F27–F36 defects in core, the store and the Spring module found in reviews, and F37–F45 were found while building the sample shop (F40 is a library defect found at that time).
 
 ### F1. Waiting commands of a blocked key use up the claim limit and starve other keys
 
@@ -371,6 +371,13 @@ F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F
 - **Reproduction**: `ComposeFileTest` › `neitherStoreOutlivesTheOther` (compose.yaml has no top-level `volumes:`). By hand: pay and ship → `docker compose down` → `up`.
 - **Structure**: TB does not use a named volume either. The data file is inside the container. PG and TB stay with their containers (`up` after Ctrl-C, `stop`/`start`, `restart: on-failure`) and go away together (`down`).
 - **Verification**: the test above failed before the fix. After the fix, pay and ship → `down` → `up` left both empty, and consistency was ok (reconciliation 0/0, duplicates 0) (2026-10-18). Once during the check the old data was still visible after `down`, but it did not reproduce on retry, and the cause is unknown.
+
+### F45. Restarting the app while the TB connection is cut leaves it starting forever (sample shop)
+
+- **What breaks**: at startup the app creates the ledger accounts and waits for TB's answer. The TB client has no timeout. If the app restarts while the demo's Toxiproxy is still cut (scene 2, then a crash or `docker compose restart shop-a`), the account setup never ends and the web server never opens. The button that restores the connection is on that app's own screen, so there is no way back except calling the Toxiproxy API by hand.
+- **Reproduction**: `DemoRestartTest` › `startupRestoresACutConnection`. Cut the connection, then start the app with the demo profile.
+- **Structure**: in the demo profile, `LedgerLink` restores the connection when it is created, before `ShopBootstrap` waits for TB. A restart therefore ends an outage scene. If Toxiproxy does not answer yet (it has only just started), the app logs a warning and continues; a fresh proxy is connected anyway.
+- **Verification**: the test above failed before the fix with "did not finish starting within 60 s", and passes after the fix.
 
 ## 2. Open failures
 
