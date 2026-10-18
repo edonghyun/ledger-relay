@@ -21,7 +21,7 @@ import org.springframework.boot.health.contributor.Status;
 @DisplayName("health — TB 연결과 대기를 알리되, TB가 끊겨도 앱은 UP이다 (03b)")
 class LedgerRelayHealthIndicatorTest {
 
-    static final Duration PROBE_TIMEOUT = Duration.ofMillis(200);
+    static final Duration LEDGER_STALE_AFTER = Duration.ofSeconds(5);
 
     InMemoryStorage storage;
     FakeLedger fake;
@@ -65,6 +65,38 @@ class LedgerRelayHealthIndicatorTest {
     }
 
     @Test
+    @DisplayName("TB가 답하지 않아도 health는 기다리지 않는다 — probe timeout(보통 1초)에 걸려 앱이 서비스에서 빠지지 않게")
+    void healthDoesNotWaitForASilentLedger() {
+        // given
+        fake.holdLookups();
+        LedgerRelayHealthIndicator indicator = indicator(storage.transactions());
+
+        // when
+        long started = System.nanoTime();
+        indicator.health();
+        Duration took = Duration.ofNanos(System.nanoTime() - started);
+
+        // then
+        assertThat(took).as("health 한 번에 걸린 시간").isLessThan(Duration.ofMillis(100));
+    }
+
+    @Test
+    @DisplayName("TB가 답하지 않는 동안 조회는 한 번에 하나만 보낸다 — health 요청마다 TB 클라이언트에 조회가 쌓이지 않게")
+    void aSilentLedgerIsProbedOnceAtATime() {
+        // given
+        fake.holdLookups();
+        LedgerRelayHealthIndicator indicator = indicator(storage.transactions());
+
+        // when
+        for (int i = 0; i < 20; i++) {
+            indicator.health();
+        }
+
+        // then
+        assertThat(fake.lookups()).as("TB에 보낸 조회 수").isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("저장소를 읽을 수 없으면 DOWN이다 — PG 없이는 접수도 못 한다")
     void aFailingStoreIsDown() {
         // given
@@ -92,6 +124,6 @@ class LedgerRelayHealthIndicatorTest {
     }
 
     private LedgerRelayHealthIndicator indicator(Transactions transactions) {
-        return new LedgerRelayHealthIndicator(storage.store(), transactions, fake, PROBE_TIMEOUT);
+        return new LedgerRelayHealthIndicator(storage.store(), transactions, fake, LEDGER_STALE_AFTER);
     }
 }

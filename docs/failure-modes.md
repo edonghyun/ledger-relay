@@ -6,7 +6,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - 처음부터 통과하는 테스트는 코드를 일부러 망가뜨려(대조군) 정말 실패하는지 확인한다. 대조군 결과도 적는다.
 - 수치는 실제로 잰 것만 적는다. 운영 지표와 실험(스펙 §9 E1~E10)은 해당 단계에서 채운다.
 
-## 1. 막은 장애 (F1~F10은 02a core, F11~F19는 02b jdbc, F20은 1단계 리뷰, F21~F25는 03a 워커, F26은 테스트 환경, F27부터 02d 전체 리뷰, F32·F33은 02e, F34·F35는 03b)
+## 1. 막은 장애 (F1~F10은 02a core, F11~F19는 02b jdbc, F20은 1단계 리뷰, F21~F25는 03a 워커, F26은 테스트 환경, F27부터 02d 전체 리뷰, F32·F33은 02e, F34~F36은 03b)
 
 ### F1. 막힌 키의 대기 명령이 claim 한도를 다 차지해 다른 키가 굶는다
 
@@ -306,6 +306,13 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **재현**: `RelayWorkerTest` › 핸들러가 던지고 그 기록마저 실패하면 › `theHandlersFailureSurvivesAFailedRecord`.
 - **구조**: 두 번째 쓰기의 예외에 핸들러 예외를 `addSuppressed`로 실어 던진다(`WorkerWrites.finish`). 워커 이벤트 `writeFailed`가 둘을 함께 받는다.
 - **확인**: 고치기 전에는 suppressed가 비어 실패했다.
+
+### F36. TB가 끊기면 health가 느려져 앱이 서비스에서 빠진다 (03b 최종 리뷰)
+
+- **깨지는 것**: 첫 health는 요청마다 TB에 조회를 보내고 1초까지 기다렸고, 대기 명령을 모두 셌다. TB가 끊기면 health 한 번이 1초를 넘는다. 오케스트레이터의 probe timeout(Kubernetes 기본 1초)에 걸려 앱이 서비스에서 빠지거나 재시작된다. 그러면 접수까지 멈춘다. TB 없이도 접수를 받는다는 이 라이브러리의 요점과 정반대다. 장애가 길어지면 대기가 커져 health가 더 느려지고, 기다리다 끝난 조회는 TB 클라이언트에 계속 쌓였다.
+- **재현**: `LedgerRelayHealthIndicatorTest` › `healthDoesNotWaitForASilentLedger`, `aSilentLedgerIsProbedOnceAtATime`. `LockDueBoundedWorkTest` › 대기를 세면 › `countingAHugeBacklogReadsABoundedNumberOfPages`.
+- **구조**: TB 확인은 기다리지 않는다. 조회를 한 번에 하나만 보내고, 마지막 답이 5초 안이면 UP이다. 대기 수는 1,000까지만 세고(`Backlog.countsCapped`), 가장 오래된 대기는 새 인덱스 `ledger_command_waiting (id) WHERE state IN ('PENDING','CLAIMED')`의 첫 항목에서 읽는다.
+- **확인**: 고치기 전에는 TB가 답하지 않을 때 health 한 번이 probe 시간만큼 걸렸고, 요청 20번에 조회 20개가 쌓였다. 대기 5만 건에서 세는 질의가 2,856페이지를 읽었다. 상한 없는 세기로 되돌리는 변이는 대기 10만 건에서 7,191페이지로 실패한다(상한 2,500).
 
 ## 2. 열린 장애
 

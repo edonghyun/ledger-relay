@@ -21,7 +21,8 @@ java {
 dependencies {
     api(project(":ledger-relay-core"))
     implementation(project(":ledger-relay-jdbc"))
-    implementation(project(":ledger-relay-tigerbeetle"))
+    // 앱이 com.tigerbeetle.Client 빈을 직접 줄 수 있게 TB 클라이언트 타입을 노출한다
+    api(project(":ledger-relay-tigerbeetle"))
     implementation(libs.spring.boot.autoconfigure)
     implementation(libs.spring.jdbc)
     implementation(libs.spring.tx)

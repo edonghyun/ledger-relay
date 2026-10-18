@@ -845,6 +845,7 @@ public abstract class CommandStoreContract {
             assertThat(backlog.halted()).as("멈춘 명령").isEqualTo(1);
             assertThat(backlog.oldestUnfinishedAcceptedAt()).as("가장 오래 기다린 접수 시각")
                     .contains(record("pay-1").acceptedAt());
+            assertThat(backlog.countsCapped()).as("상한에 닿았는가").isFalse();
         }
 
         @Test
@@ -854,7 +855,7 @@ public abstract class CommandStoreContract {
             Backlog backlog = inTx(() -> store.backlog());
 
             // then
-            assertThat(backlog).as("대기").isEqualTo(new Backlog(0, 0, Optional.empty()));
+            assertThat(backlog).as("대기").isEqualTo(new Backlog(0, 0, Optional.empty(), false));
         }
     }
 

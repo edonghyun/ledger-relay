@@ -134,7 +134,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
                 }
             }
         }
-        return new Backlog(unfinished, halted, oldest);
+        return new Backlog(unfinished, halted, oldest, false);
     }
 
     @Override

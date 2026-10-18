@@ -29,6 +29,12 @@ class LockDueBoundedWorkTest {
     static final int READY_KEYS = 100;
     /** 키 하나의 맨 앞을 넘기는 문장의 상한: 다음 미완료를 인덱스에서 하나 찾고 그 행을 고친다. */
     static final long ONE_KEY_BUDGET = 50;
+    /**
+     * health 한 번이 대기를 세며 읽을 페이지의 상한. 세는 질의는 대기 인덱스에서 상한(1,000건)까지 읽고, visibility map이
+     * 없으면 행마다 힙을 확인해 약 2,000페이지를 읽는다. 대기 크기와는 무관하다.
+     */
+    static final long BACKLOG_BUDGET = 2_500;
+    static final int OUTAGE_BACKLOG = 100_000;
 
     PostgresStorage storage;
 
@@ -120,6 +126,26 @@ class LockDueBoundedWorkTest {
         }
     }
 
+    @Nested
+    @Order(4)
+    @DisplayName("대기를 세면 — 03b health")
+    class CountingTheBacklog {
+
+        @Test
+        @DisplayName("TB 장애로 대기가 10만 건 쌓여도 health 한 번이 읽는 양은 묶여 있다 — 장애 중에 health가 느려지지 않게")
+        void countingAHugeBacklogReadsABoundedNumberOfPages() {
+            // given: 끝난 이력 5만 건 뒤에, 키 10만 개마다 대기 명령이 하나씩 있다(TB가 멈춘 동안 쌓인 접수)
+            finishedHistory(HISTORY);
+            inserted("'wait-' || g", "'wait-' || g", "1", "now()", 1, OUTAGE_BACKLOG);
+            prepared();
+
+            // then
+            long pages = JdbcCommandStore.BACKLOG.stream().mapToLong(query -> pagesRead(plan(query, "cap",
+                    JdbcCommandStore.BACKLOG_COUNT_CAP))).sum();
+            assertThat(pages).as("대기를 세는 데 읽은 페이지").isLessThanOrEqualTo(BACKLOG_BUDGET);
+        }
+    }
+
     // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
 
     /** 지금 보낼 수 있는 키 n개. 키마다 접수 명령 하나다. */
@@ -187,10 +213,13 @@ class LockDueBoundedWorkTest {
 
     /** 실행 계획 맨 위 노드의 공유 버퍼 페이지(hit + read)가 상한 이하다. 맨 위 노드의 수는 그 아래 모두를 더한 값이다. */
     private static void assertReadAtMostPages(long budget, String plan) {
+        assertThat(pagesRead(plan)).as("claim 한 번이 읽은 페이지 (실행 계획:%n%s)", plan).isLessThanOrEqualTo(budget);
+    }
+
+    private static long pagesRead(String plan) {
         Matcher top = Pattern.compile("Buffers: shared(?: hit=(\\d+))?(?: read=(\\d+))?").matcher(plan);
         assertThat(top.find()).as("실행 계획에 버퍼 수가 있다:%n%s", plan).isTrue();
-        long pages = (top.group(1) == null ? 0 : Long.parseLong(top.group(1)))
+        return (top.group(1) == null ? 0 : Long.parseLong(top.group(1)))
                 + (top.group(2) == null ? 0 : Long.parseLong(top.group(2)));
-        assertThat(pages).as("claim 한 번이 읽은 페이지 (실행 계획:%n%s)", plan).isLessThanOrEqualTo(budget);
     }
 }

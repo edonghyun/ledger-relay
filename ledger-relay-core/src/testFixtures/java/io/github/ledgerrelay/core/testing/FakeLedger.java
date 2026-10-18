@@ -30,6 +30,7 @@ public final class FakeLedger implements LedgerClient {
     private RuntimeException nextThrow;
     private boolean nextNull;
     private boolean holdingLookups;
+    private int lookups;
     /** TB가 기록한 이체(Created·Exists로 답한 것). 대사가 조회한다. */
     private final Map<BigInteger, LedgerTransfer> stored = new HashMap<>();
 
@@ -86,6 +87,11 @@ public final class FakeLedger implements LedgerClient {
                 t.ledger(), t.code(), t.kind()));
     }
 
+    /** 받은 조회 요청 수. */
+    public synchronized int lookups() {
+        return lookups;
+    }
+
     /** 이후 조회에 답하지 않는다. */
     public synchronized void holdLookups() {
         holdingLookups = true;
@@ -93,6 +99,7 @@ public final class FakeLedger implements LedgerClient {
 
     @Override
     public synchronized CompletableFuture<List<LedgerTransfer>> lookup(List<BigInteger> transferIds) {
+        lookups++;
         if (holdingLookups) {
             return new CompletableFuture<>();
         }

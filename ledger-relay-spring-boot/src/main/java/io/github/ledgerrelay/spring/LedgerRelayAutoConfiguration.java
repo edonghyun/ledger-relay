@@ -135,7 +135,7 @@ public class LedgerRelayAutoConfiguration {
         @ConditionalOnMissingBean
         LedgerRelayHealthIndicator ledgerRelayHealthIndicator(CommandStore store, Transactions transactions,
                 LedgerClient ledger) {
-            return new LedgerRelayHealthIndicator(store, transactions, ledger, Duration.ofSeconds(1));
+            return new LedgerRelayHealthIndicator(store, transactions, ledger, Duration.ofSeconds(5));
         }
     }
 

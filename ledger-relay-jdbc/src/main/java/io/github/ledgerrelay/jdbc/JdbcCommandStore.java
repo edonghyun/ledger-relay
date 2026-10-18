@@ -118,17 +118,28 @@ public final class JdbcCommandStore implements CommandStore {
     }
 
     /** 쌓인 일을 센다(health). 미완료 인덱스({@code ledger_command_unfinished})의 행만 읽는다. */
+    /** 대기를 셀 때 이 수까지만 센다(health). 넘으면 "이 이상"으로 알린다. 정확한 수는 지표(03c)가 맡는다. */
+    static final int BACKLOG_COUNT_CAP = 1_000;
+
+    /**
+     * health가 쌓인 일을 세는 질의 셋. 장애로 대기가 커질수록 health가 느려지지 않게 읽는 양을 묶는다: 개수는 상한까지만
+     * 세고, 가장 오래된 대기는 {@code ledger_command_waiting}(대기·처리 중 명령의 id 인덱스)의 첫 항목에서 읽는다. 실행 계획
+     * 테스트가 본다.
+     */
+    static final List<String> BACKLOG = List.of(
+            "SELECT count(*) FROM (SELECT 1 FROM ledger_command WHERE state IN ('PENDING','CLAIMED') ORDER BY id"
+                    + " LIMIT :cap) w",
+            "SELECT count(*) FROM (SELECT 1 FROM ledger_command WHERE state = 'HALTED' LIMIT :cap) h",
+            "SELECT accepted_at FROM ledger_command WHERE state IN ('PENDING','CLAIMED') ORDER BY id LIMIT 1");
+
     @Override
     public Backlog backlog() {
-        return sql.sql("""
-                SELECT count(*) FILTER (WHERE state IN ('PENDING','CLAIMED')) AS unfinished,
-                       count(*) FILTER (WHERE state = 'HALTED') AS halted,
-                       min(accepted_at) FILTER (WHERE state IN ('PENDING','CLAIMED')) AS oldest
-                FROM ledger_command WHERE state IN ('PENDING','CLAIMED','HALTED')
-                """).query((rs, rowNum) -> new Backlog(rs.getLong("unfinished"), rs.getLong("halted"),
-                        Optional.ofNullable(rs.getObject("oldest", java.time.OffsetDateTime.class))
-                                .map(java.time.OffsetDateTime::toInstant)))
-                .single();
+        long unfinished = sql.sql(BACKLOG.get(0)).param("cap", BACKLOG_COUNT_CAP).query(Long.class).single();
+        long halted = sql.sql(BACKLOG.get(1)).param("cap", BACKLOG_COUNT_CAP).query(Long.class).single();
+        Optional<java.time.Instant> oldest = sql.sql(BACKLOG.get(2)).query(java.time.OffsetDateTime.class).optional()
+                .map(java.time.OffsetDateTime::toInstant);
+        return new Backlog(unfinished, halted, oldest,
+                unfinished >= BACKLOG_COUNT_CAP || halted >= BACKLOG_COUNT_CAP);
     }
 
     /** 최종 상태로 끝난 명령을 행 순서로 읽는다(대사). 기본 키 순서로 읽으며 최종 상태가 아닌 행은 걸러 낸다. */

@@ -16,6 +16,8 @@ public interface LedgerRelay {
      * @throws ReservationNotFoundException post·void의 참조가 같은 키에 이미 커밋된 reserve 명령이 아님. 같은 앱
      *                                      트랜잭션에서 접수한 예약도 여기에 든다(P2b-1)
      * @throws InvalidCommandException      U+0000·짝 없는 서로게이트가 들었거나 512바이트를 넘는 ID 등 명령을 만들 수 없음
+     * @throws RuntimeException             트랜잭션 밖에서 불렀다(G1). 타입은 트랜잭션 어댑터가 정한다: jdbc 어댑터는 Spring의
+     *                                      {@code IllegalTransactionStateException}, 메모리 저장소는 {@code IllegalStateException}
      */
     CommandReceipt submit(LedgerCommand command);
 

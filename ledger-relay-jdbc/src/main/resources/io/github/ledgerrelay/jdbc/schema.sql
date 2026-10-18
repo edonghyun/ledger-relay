@@ -140,3 +140,7 @@ CREATE INDEX ledger_command_finished_head ON ledger_command (id)
 
 -- 멈춘 명령 목록(운영자 포트, 03b). 멈춘 명령만 담으므로 작다.
 CREATE INDEX ledger_command_halted ON ledger_command (id) WHERE state = 'HALTED';
+
+-- 대기·처리 중 명령(health, 03b). 가장 오래된 대기를 첫 항목에서 읽고, 개수를 상한까지만 센다. 장애로 대기가 커져도 health가
+-- 그만큼 느려지지 않게 한다.
+CREATE INDEX ledger_command_waiting ON ledger_command (id) WHERE state IN ('PENDING','CLAIMED');
