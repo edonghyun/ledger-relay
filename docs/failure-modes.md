@@ -6,7 +6,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - 처음부터 통과하는 테스트는 코드를 일부러 망가뜨려(대조군) 정말 실패하는지 확인한다. 대조군 결과도 적는다.
 - 수치는 실제로 잰 것만 적는다. 운영 지표와 실험(스펙 §9 E1~E10)은 해당 단계에서 채운다.
 
-## 1. 막은 장애 (F1~F10은 02a core, F11~F19는 02b jdbc, F20은 1단계 리뷰, F21~F25는 03a 워커, F26은 테스트 환경, F27부터 02d 전체 리뷰, F32·F33은 02e)
+## 1. 막은 장애 (F1~F10은 02a core, F11~F19는 02b jdbc, F20은 1단계 리뷰, F21~F25는 03a 워커, F26은 테스트 환경, F27부터 02d 전체 리뷰, F32·F33은 02e, F34·F35는 03b)
 
 ### F1. 막힌 키의 대기 명령이 claim 한도를 다 차지해 다른 키가 굶는다
 
@@ -291,15 +291,30 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
   - REPEATABLE READ 이상의 앱은 claim의 넘기기와 겹친 접수에서 40001을 받을 수 있다. 앱은 이미 같은 키의 동시 접수에서 이 실패를 재시도해야 한다(4절).
   - 앱이 키 행을 오래 쥐면 그 키의 다음 명령은 그 앱이 커밋할 때까지 나가지 않는다. 다른 키는 영향이 없다.
 
+### F34. 워커의 in-flight 슬롯이 새거나, 설정의 상한과 다른 슬롯으로 돈다 (02d 리뷰 I5·I7, 03b)
+
+- **깨지는 것**:
+  - `LedgerClient.submit`이 future 대신 `null`을 돌려주면, 그 배치의 슬롯을 future에 맡긴 직후 `NullPointerException`이 나 슬롯이 영영 돌아오지 않았다. 몇 번 반복되면 슬롯이 바닥나 그 프로세스의 claim이 멈춘다.
+  - `RelayWorker`는 `WorkerSettings.maxInFlight`와 `InFlightLimit`을 따로 받았다. 둘이 다르면 설정을 바꿔도 실제 동시 요청 수가 바뀌지 않는다.
+- **재현**: `RelayWorkerTest` › TB 클라이언트가 future 대신 null을 주면 › `aNullReplyGivesTheSlotsBackAndReleasesTheBatch`. 설정과 슬롯이 어긋나면 › `aWorkerRefusesSlotsThatDisagreeWithMaxInFlight`.
+- **구조**: `null`은 보내는 자리에서 던진 실패와 같은 경로(알리고, 되돌리고, 슬롯 반납)를 탄다. `InFlightLimit`은 만든 슬롯 수(`capacity()`)를 기억하고, `RelayWorker`는 그것이 `maxInFlight`와 다르면 만들어지지 않는다. Spring 자동 설정은 같은 설정값에서 슬롯을 만든다(`LedgerRelayAutoConfigurationTest.slotsFollowMaxInFlight`).
+- **확인**: 고치기 전 null 장은 `NullPointerException`으로, 불일치 장은 "거부가 없음"으로 실패했다. 자동 설정에서 슬롯을 1024로 고정하는 변이는 `slotsFollowMaxInFlight`가 잡는다.
+
+### F35. 핸들러 실패를 기록하는 쓰기마저 실패하면 핸들러 예외가 사라진다 (02d 리뷰 I6, 03b)
+
+- **깨지는 것**: 핸들러가 던지면 그 트랜잭션을 롤백하고 새 트랜잭션에 "받은 결과와 핸들러 실패"를 남긴다(§5.4). 이 두 번째 쓰기가 DB 오류로 실패하면 워커는 DB 오류만 받았다. 처음 원인인 핸들러 예외는 어디에도 남지 않아 운영자가 핸들러 버그를 볼 수 없었다.
+- **재현**: `RelayWorkerTest` › 핸들러가 던지고 그 기록마저 실패하면 › `theHandlersFailureSurvivesAFailedRecord`.
+- **구조**: 두 번째 쓰기의 예외에 핸들러 예외를 `addSuppressed`로 실어 던진다(`WorkerWrites.finish`). 워커 이벤트 `writeFailed`가 둘을 함께 받는다.
+- **확인**: 고치기 전에는 suppressed가 비어 실패했다.
+
 ## 2. 열린 장애
 
 | # | 장애 | 막을 곳 |
 |---|---|---|
 | O2 | 워커가 어느 지점에서 죽어도 중복 없이 복구되는가(kill -9) | 4단계 E1 |
-| O5 | 멈춘 명령을 목록으로 볼 방법이 없다. 알림을 놓치면 `abandonHalted`에 넘길 commandId를 SQL로 찾아야 한다 | 3단계. 멈춘 명령 조회 |
 | O7 | 덤프·복원이나 다른 클러스터로 옮긴 DB에서는 옮겨 온 `accepted_xact`가 새 트랜잭션 ID와 우연히 같아져, 이미 커밋된 예약을 참조한 정상 확정이 `ReservationNotFoundException`으로 거부될 수 있다. 재현 테스트는 두지 않았다. 클러스터 이전을 재현하는 비용이 절차 한 줄보다 크다 | 이전 절차: 복원 직후 `UPDATE ledger_command SET accepted_xact = '0'`(docs/development.md) |
 
-닫힌 열린 장애: O1(행 잠금 동시성)은 F11~F15로, O3(응답 유실 뒤 재전송)은 F23으로, O4(TB 기동 panic)는 F26으로 옮겼다(F26은 완화). O6(연결이 묶이지 않은 접수)은 F18로 막았다.
+닫힌 열린 장애: O1(행 잠금 동시성)은 F11~F15로, O3(응답 유실 뒤 재전송)은 F23으로, O4(TB 기동 panic)는 F26으로 옮겼다(F26은 완화). O6(연결이 묶이지 않은 접수)은 F18로 막았다. O5(멈춘 명령을 볼 방법이 없음)는 03b의 운영자 포트 `LedgerRelayOperator.haltedCommands`(멈춘 이유와 시각 포함)로 닫았다.
 
 ## 3. 데드레터큐를 쓰지 않는 이유
 

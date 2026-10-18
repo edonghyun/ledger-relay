@@ -32,9 +32,10 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 
 ### 큐 테이블 운영 (02d)
 
-- `ledger_command`의 부분 인덱스는 넷이다: `ledger_command_unfinished`, `ledger_command_ready`, `ledger_command_one_head`, `ledger_command_finished_head`(02e). 상태가 바뀌거나, lease·다음 시도 시각이 바뀌거나(`ready_at`), 맨 앞 표시가 바뀌면(`is_head`) 인덱스 컬럼이 바뀌어 HOT 갱신이 되지 않는다. 죽은 튜플이 작은 인덱스에 빨리 쌓이므로 테이블별 autovacuum을 낮게 잡는다(예: `autovacuum_vacuum_scale_factor = 0.01`, `autovacuum_vacuum_cost_limit` 상향). `fillfactor = 80`을 두면 `markSubmitted` 같은 인덱스 밖 갱신이 같은 페이지에 들어갈 여지가 생긴다. 수치는 아직 재지 않았다.
+- `ledger_command`의 부분 인덱스는 다섯이다: `ledger_command_unfinished`, `ledger_command_ready`, `ledger_command_one_head`, `ledger_command_finished_head`(02e), `ledger_command_halted`(03b). 상태가 바뀌거나, lease·다음 시도 시각이 바뀌거나(`ready_at`), 맨 앞 표시가 바뀌면(`is_head`) 인덱스 컬럼이 바뀌어 HOT 갱신이 되지 않는다. 죽은 튜플이 작은 인덱스에 빨리 쌓이므로 테이블별 autovacuum을 낮게 잡는다(예: `autovacuum_vacuum_scale_factor = 0.01`, `autovacuum_vacuum_cost_limit` 상향). `fillfactor = 80`을 두면 `markSubmitted` 같은 인덱스 밖 갱신이 같은 페이지에 들어갈 여지가 생긴다. 수치는 아직 재지 않았다.
 - 맨 앞 표시(`is_head`)는 넣을 때 키에 맨 앞이 없으면 켜고, 명령이 끝나면 다음 claim이 넘긴다(F32, F33). claim은 이 표시만 보고 후보를 고른다. **DB를 직접 고친 뒤**(행 삭제, 상태 수정, 키 바꾸기)에는 표시가 행과 어긋난다. 어긋나면 그 키가 영원히 후보에서 빠지거나 맨 앞이 아닌 명령이 먼저 나갈 수 있다. 워커를 멈추고, 고친 트랜잭션을 커밋한 뒤, `ledger-relay-jdbc` jar의 `io/github/ledgerrelay/jdbc/rebuild-heads.sql`을 한 트랜잭션에서 실행하고(`psql -1 -f rebuild-heads.sql`) 나서 워커를 다시 켠다. 스크립트는 먼저 `ledger_ordering_key`를 표 잠금하므로 트랜잭션 밖에서는 실행되지 않는다. 잠금은 커밋까지 앱의 접수를 기다리게 한다. 이 SQL은 테스트의 직접 SQL 준비도 쓴다(`PostgresStorage.rebuildHeads`).
 - **02e 스키마 변경**: 열 `ledger_command.is_head`, `ledger_command.ready_at`(생성 컬럼)과 인덱스 `ledger_command_ready`, `ledger_command_one_head`, `ledger_command_finished_head`를 더하고 `ledger_command_due`를 지웠다. 0.1 출시 전이라 마이그레이션 파일은 두지 않는다. 기존 개발 DB는 워커를 멈추고 열과 인덱스를 `schema.sql`대로 더한 뒤 `rebuild-heads.sql`을 실행한다.
+- **03b 스키마 변경**: 열 `halt_reason`, `halted_at`, 제약 `ledger_command_halt_check`, 인덱스 `ledger_command_halted`를 더했다. 기존 개발 DB는 두 열과 인덱스를 `schema.sql`대로 더하고, 이미 멈춘 행에 `UPDATE ledger_command SET halt_reason = 'MALFORMED_ROW', halted_at = now() WHERE state = 'HALTED'`를 실행한 뒤 제약을 더한다(이유를 알 수 없는 옛 멈춤은 "이상 행"으로 둔다).
 - `ledger_ordering_key`의 행은 지우지 않는다. 지우는 작업이 진행 중인 접수와 겹치면 다음 접수의 순번이 1로 돌아가 순서가 뒤집히거나 앱 트랜잭션이 깨진다(02d P2d-11). 행 하나는 수십 바이트다.
 
 ### 트랜잭션과 잠금 (02e F33)
@@ -53,6 +54,13 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 - **핸들러 안에서 접수하면**(예: 예약이 적용되면 같은 키에 확정을 접수) 그 결과 쓰기 트랜잭션이 키 행을 잡는다. 이때는 주문 행을 먼저 고친 뒤 접수한다. 반대로 접수한 뒤 주문 행을 고치면, 주문 행을 고친 뒤 같은 키에 접수하는 앱 트랜잭션과 교착할 수 있다(PG가 한쪽을 `40P01`로 끊는다). 핸들러가 커밋할 때까지 그 키의 넘기기도 미뤄진다. ArchUnit 규칙은 이 경로를 보지 못한다. 앱의 `LedgerRelay`를 거치기 때문이다.
 - 남는 교착은 앱 트랜잭션끼리다. 한 앱 트랜잭션에서 여러 키에 접수하면 키 이름 순서로 접수한다(failure-modes 4절).
 - 앱이 접수를 연 채 오래 머물면 그 키의 다음 명령은 그 앱이 커밋할 때까지 나가지 않는다. 다른 키는 영향이 없다.
+
+### Spring Boot로 띄울 때 (03b)
+
+- 워커 루프는 `ledger-relay.worker.concurrency`개 스레드(`ledger-relay-worker-N`)다. 한 바퀴가 예외를 던지면 로그를 남기고 `backoff.initial`만큼 쉰 뒤 계속한다. 스레드가 죽어 처리가 조용히 멈추지 않게 하려는 것이다.
+- 종료: 새 바퀴를 막고, 돌고 있는 바퀴를 `lease-duration`까지 기다린다. 바퀴는 TB 응답을 `submit-timeout`까지 기다린 뒤 결과를 쓰므로 보통 그 안에 끝난다. 그래도 남으면 인터럽트한다. 그 명령은 lease가 끝난 뒤 다른 워커가 같은 이체 ID로 다시 보내므로 돈이 두 번 움직이지 않는다.
+- 워커 설정(lease ≥ submit-timeout×2, batch-size ≤ 8189, max-in-flight ≥ batch-size)은 워커를 꺼도 기동에서 검사한다.
+- health(`spring-boot-health`가 있을 때): TB가 끊겨도 UP이고 세부 `ledger`만 DOWN이다. 접수는 TB 없이도 되므로, health가 DOWN이면 부하 분산기가 접수까지 막는 일이 생긴다. 저장소를 읽을 수 없을 때만 DOWN이다. TB 클라이언트에는 ping이 없어 이체 하나를 1초 timeout으로 조회해 본다.
 
 ### DB를 옮길 때
 

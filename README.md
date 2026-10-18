@@ -12,12 +12,30 @@ PG와 TB는 한 트랜잭션으로 묶을 수 없다. TB 응답은 유실될 수
 |---|---|
 | `ledger-relay-core` | 명령 모델과 검증, 내용 해시, 상태 전이표·결과 분류표, 순서 게이트, 서비스(접수, claim, 결과 쓰기, 멈춤·포기), 워커 한 바퀴(`RelayWorker`: 묶음 제출, in-flight 상한, submit-timeout). JDK만 쓴다 |
 | `ledger-relay-jdbc` | PostgreSQL 저장소(`JdbcCommandStore`)와 Spring 트랜잭션 어댑터(`JdbcTransactions`), 스키마 `schema.sql`. DataSource·JPA 트랜잭션 매니저에서 앱 트랜잭션에 합류한다 |
-| `ledger-relay-tigerbeetle` | TB 0.17.9 Java 클라이언트 어댑터(`TigerBeetleLedgerClient`)와 Testcontainers 픽스처 |
+| `ledger-relay-tigerbeetle` | TB 0.17.9 Java 클라이언트 어댑터(`TigerBeetleLedgerClient`: 제출, 대사용 조회), 시간순 이체 ID 생성기(`TigerBeetleTransferIds`), Testcontainers 픽스처 |
+| `ledger-relay-spring-boot` | Spring Boot 4.0 자동 설정, 워커 루프와 정상 종료, health, 운영자 포트 빈 |
+
+운영자 포트 `LedgerRelayOperator`: 멈춘 명령 목록(이유·시각), 포기, PG와 TB의 대사.
+
+## 앱에서 쓰기 (Spring Boot)
+
+1. 의존성 `io.github.ledgerrelay:ledger-relay-spring-boot`를 더하고, `schema.sql`(jdbc jar의 `io/github/ledgerrelay/jdbc/schema.sql`)을 마이그레이션 도구로 적용한다. 라이브러리는 스키마를 자동 적용하지 않는다.
+2. 설정:
+
+```yaml
+ledger-relay:
+  tigerbeetle: { cluster-id: 0, addresses: "127.0.0.1:3000" }   # 또는 com.tigerbeetle.Client 빈
+  worker: { concurrency: 4, batch-size: 128, max-in-flight: 1024, lease-duration: 30s, submit-timeout: 5s }
+  backoff: { initial: 200ms, max: 30s }
+```
+
+3. 명령이 끝났을 때 앱의 데이터에 결과를 반영하는 `LedgerOutcomeHandler` 빈을 하나 등록한다. 핸들러는 결과 쓰기와 같은 트랜잭션에서 돈다. 핸들러 안에서 다시 접수할 때는 **앱의 행을 먼저 고친 뒤 접수한다**(`docs/development.md` "트랜잭션과 잠금").
+4. 앱 트랜잭션 안에서 `LedgerRelay.submit(...)`으로 접수한다. 업무 데이터와 함께 커밋되거나 함께 롤백된다.
 
 ## 아직 안 되는 것
 
-- Spring Boot 자동 설정, 워커 스레드·주기·정상 종료, Micrometer 지표, health, 운영자 공개 포트(멈춘 명령 목록·포기), 운영용 이체 ID 생성기(3b 단계)
-- 샘플 앱(`examples/wallet-app`), 장애 실험(E1~E10), 보관 작업
+- Micrometer 지표와 대시보드(3c 단계)
+- 샘플 쇼핑몰 앱(`examples/shop`, 3b-2 단계), 장애 실험(E1~E10), 보관 작업
 
 ## 문서
 
