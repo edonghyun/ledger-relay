@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relay Shop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shop.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">Relay<span>Shop</span> <small class="mono">ledger-relay sample</small></div>
+    <nav class="nav">
+      <button data-tab="store" class="on">Store</button>
+      <button data-tab="operator">Operator <span class="badge" id="halted-badge" hidden></span></button>
+      <button data-tab="scenarios">Scenarios</button>
+    </nav>
+    <div class="status">
+      <span title="화면이 서버에서 숫자를 받고 있는가"><span class="dot" id="pg-dot"></span>PostgreSQL</span>
+      <span title="라이브러리 health의 TigerBeetle 확인"><span class="dot" id="tb-dot"></span><span id="tb-label">TigerBeetle</span></span>
+    </div>
+  </header>
+
+  <!-- 항상 보이는 숫자. 탭을 바꿔도 장면의 효과를 바로 본다 -->
+  <section class="hero">
+    <div>
+      <h1>Every order moves money<br><em>exactly once.</em></h1>
+      <p class="lead">주문 저장과 원장 명령이 한 트랜잭션에서 커밋되고, 워커가 TigerBeetle에 보내고, 결과가 다시 주문에 반영됩니다. TB가 끊겨도 주문은 계속 받고, 다시 이어지면 빠짐없이 한 번씩 처리합니다.</p>
+    </div>
+    <div class="tiles">
+      <div class="tile w3"><div class="n mono" id="t-accepted">—</div><div class="l">commands accepted</div></div>
+      <div class="tile w3"><div class="n mono" id="t-completed">—</div><div class="l">completed</div></div>
+      <div class="tile" id="t-backlog-tile"><div class="n mono" id="t-backlog">—</div><div class="l">backlog</div></div>
+      <div class="tile"><div class="n mono" id="t-p99">—</div><div class="l">p99 accept→done</div></div>
+      <div class="tile good" id="t-double-tile"><div class="n mono" id="t-double">—</div><div class="l">double transfers</div></div>
+    </div>
+  </section>
+
+  <!-- Store -->
+  <main data-view="store" class="grid">
+    <div class="col">
+      <div class="panel">
+        <div class="ph"><b>Store</b><span class="mute">authorize on pay · capture on ship</span></div>
+        <div class="pb">
+          <div class="buyers"><span class="mute mono">buyer</span><span id="buyers"></span></div>
+          <div id="products"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="ph"><b>Orders</b><span class="tabs"><span data-filter="all" class="on">all</span><span data-filter="halted">halted</span></span></div>
+        <div class="pb" id="orders"><div class="empty">아직 주문이 없습니다. 위에서 결제해 보세요.</div></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="panel">
+        <div class="ph"><b>Behind the counter</b><span class="mute mono">live · 1s</span></div>
+        <div class="pb">
+          <div class="pipe" id="pipe">
+            <div class="wire w1"></div><div class="wire w2"></div><div class="wire w3"></div>
+            <div class="stage s1"><div class="box"><div class="k">PostgreSQL</div><div class="v mono" id="p-pending">0</div><div class="s">pending</div></div></div>
+            <div class="stage s2"><div class="box"><div class="k" id="p-workers-label">Workers</div><div class="v mono" id="p-claimed">0</div><div class="s">claimed</div></div></div>
+            <div class="stage s3"><div class="box"><div class="k">TigerBeetle</div><div class="v mono" id="p-applied">0</div><div class="s">applied</div></div></div>
+            <div class="stage s4"><div class="box"><div class="k">Handler</div><div class="v mono" id="p-completed">0</div><div class="s">orders updated</div></div></div>
+          </div>
+          <div class="instances mono" id="instances" title="인스턴스마다 이 프로세스가 뜬 뒤 TigerBeetle에 보낸 명령 수"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="ph"><b id="tl-title">Order timeline</b><span id="tl-state"></span></div>
+        <div class="pb tl" id="timeline"><div class="empty">주문을 누르면 단계별 시각, 이체 ID, 잔액이 보입니다.</div></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Operator -->
+  <main data-view="operator" class="grid one" hidden>
+    <div class="panel">
+      <div class="ph"><b>Halted commands</b><span class="mute">한 순서 키만 막고 나머지는 흐른다</span></div>
+      <div class="pb" id="halted"><div class="empty">멈춘 명령이 없습니다.</div></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><b>Reconciliation</b><span class="mute">PostgreSQL ↔ TigerBeetle, 명령마다</span></div>
+      <div class="pb">
+        <div class="ctl"><div>전체 대사<div class="h">끝난 명령을 처음부터 모두 TB의 이체와 맞춰 봅니다. 화면 아래 정합성 칸은 새로 끝난 명령만 이어서 맞춥니다.</div></div><button class="ghost" id="reconcile">Run full reconciliation</button></div>
+        <div id="reconcile-result"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Scenarios -->
+  <main data-view="scenarios" class="grid one" hidden>
+    <div class="panel">
+      <div class="ph"><b>Scenarios</b><span class="mute">break it on purpose</span></div>
+      <div class="pb" id="scenario-controls">
+        <div class="demo-off" id="demo-off" hidden>데모 조작은 <code>demo</code> 프로필에서만 열립니다.</div>
+        <div class="ctl"><div>① 정상 결제<div class="h">Store에서 결제 → 결제 승인됨(구매자 돈이 묶임) → Ship → 결제 완료(가맹점으로 이동).</div></div><button class="ghost" data-goto="store">Store로</button></div>
+        <div class="ctl"><div>② TigerBeetle 연결<div class="h">끊으면 주문은 계속 접수되고 backlog가 쌓입니다. 다시 이으면 한 번씩 비워지고 정합성은 초록 그대로입니다.</div></div><div class="sw" id="tb-switch" role="switch" aria-label="TigerBeetle 연결"><i></i></div></div>
+        <div class="ctl"><div>③ 잘못된 확정 넣기<div class="h">예약보다 앞 순번의 확정 → 그 주문만 멈추고 나머지는 흐릅니다. Operator 탭에서 포기하면 주문은 취소됨으로 끝납니다.</div></div><button class="ghost red" id="inject">Inject bad post</button></div>
+        <div class="ctl"><div>④ 더블 클릭<div class="h">같은 Idempotency-Key로 결제 요청 둘을 동시에 보냅니다. 주문 하나, 예약 하나여야 합니다.</div><div class="h mono" id="double-result"></div></div><button class="ghost" id="double">Double click</button></div>
+        <div class="ctl"><div>⑤ 출고 전 취소<div class="h">결제 승인된 주문의 Cancel → 예약 해제, 묶였던 돈이 풀립니다.</div></div><button class="ghost" data-goto="store">Store로</button></div>
+        <div class="ctl"><div>주문 50건 몰아넣기<div class="h">여러 구매자의 주문을 각기 다른 키로 한꺼번에 넣습니다. 워커 둘이 같은 명령을 함께 집지 않고 나눠 처리합니다(Store의 인스턴스별 보낸 수).</div></div><button class="ghost" id="burst">Burst ×50</button></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 맨 아래 정합성 칸. 모든 탭에서 보인다 -->
+  <section class="panel consistency">
+    <div class="ph"><b>Consistency</b><span class="mute mono" id="c-stale"></span></div>
+    <div class="pb">
+      <div class="ledger">
+        <div class="lc"><div class="k">merchant posted (TigerBeetle)</div><div class="v" id="c-posted">—</div></div>
+        <div class="lc"><div class="k">paid orders (PostgreSQL)</div><div class="v" id="c-paid">—</div></div>
+        <div class="lc"><div class="k">reconciled commands</div><div class="v" id="c-reconciled">—</div></div>
+      </div>
+      <div class="eq" id="c-verdict"><span>Σ merchant posted = Σ paid orders · reconcile mismatches 0</span><span>…</span></div>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast" hidden></div>
+<script src="shop.js"></script>
+</body>
+</html>
