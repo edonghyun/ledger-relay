@@ -6,7 +6,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - 처음부터 통과하는 테스트는 코드를 일부러 망가뜨려(대조군) 정말 실패하는지 확인한다. 대조군 결과도 적는다.
 - 수치는 실제로 잰 것만 적는다. 운영 지표와 실험(스펙 §9 E1~E10)은 해당 단계에서 채운다.
 
-## 1. 막은 장애 (F1~F10은 02a core, F11~F19는 02b jdbc, F20은 1단계 리뷰, F21~F25는 03a 워커, F26은 테스트 환경, F27부터 02d 전체 리뷰, F32·F33은 02e, F34~F36은 03b)
+## 1. 막은 장애 (F1~F10은 02a core, F11~F19는 02b jdbc, F20은 1단계 리뷰, F21~F25는 03a 워커, F26은 테스트 환경, F27부터 02d 전체 리뷰, F32·F33은 02e, F34~F36은 03b, F37부터 샘플 쇼핑몰)
 
 ### F1. 막힌 키의 대기 명령이 claim 한도를 다 차지해 다른 키가 굶는다
 
@@ -313,6 +313,20 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **재현**: `LedgerRelayHealthIndicatorTest` › `healthDoesNotWaitForASilentLedger`, `aSilentLedgerIsProbedOnceAtATime`. `LockDueBoundedWorkTest` › 대기를 세면 › `countingAHugeBacklogReadsABoundedNumberOfPages`.
 - **구조**: TB 확인은 기다리지 않는다. 조회를 한 번에 하나만 보내고, 마지막 답이 5초 안이면 UP이다. 대기 수는 1,000까지만 세고(`Backlog.countsCapped`), 가장 오래된 대기는 새 인덱스 `ledger_command_waiting (id) WHERE state IN ('PENDING','CLAIMED')`의 첫 항목에서 읽는다.
 - **확인**: 고치기 전에는 TB가 답하지 않을 때 health 한 번이 probe 시간만큼 걸렸고, 요청 20번에 조회 20개가 쌓였다. 대기 5만 건에서 세는 질의가 2,856페이지를 읽었다. 상한 없는 세기로 되돌리는 변이는 대기 10만 건에서 7,191페이지로 실패한다(상한 2,500).
+
+### F37. 샘플 앱 두 대가 빈 DB에 동시에 뜨면 한쪽이 스키마를 만들다 죽는다 (03b-2 샘플 쇼핑몰)
+
+- **깨지는 것**: compose는 같은 DB를 쓰는 앱 둘을 함께 띄운다. 둘 다 "표가 없으면 만든다"를 하면 같은 순간에 `CREATE TABLE`이 겹친다. 늦은 쪽이 `duplicate key value violates unique constraint "pg_type_typname_nsp_index"`(23505)로 실패해 기동하지 못한다. 면접관이 `docker compose up`을 처음 했을 때 인스턴스 하나가 죽어 있는 장면이 된다(03b 반목표 "처음 띄울 때 실패").
+- **재현**: `ShopBootstrapTest` › 빈 DB에서 › `twoInstancesStartingTogetherApplyTheSchemaOnce`. 빈 database에 두 스레드가 함께 `ShopSchema.apply`를 부른다.
+- **구조**: `ShopSchema.apply`는 한 트랜잭션에서 `pg_advisory_xact_lock(764)`를 잡은 뒤, `shop_order`가 없을 때만 라이브러리 `schema.sql`과 `shop-schema.sql`을 적용한다. 늦은 쪽은 앞쪽이 커밋할 때까지 lock에서 기다렸다가 표가 있는 것을 보고 지나간다. 적용은 `SmartInitializingSingleton`에서 하므로 워커 루프가 시작하기 전에 끝난다. 라이브러리는 여전히 스키마를 자동 적용하지 않는다. 이것은 샘플 앱만의 편의다.
+- **확인**: lock 줄을 지운 대조군에서 위 테스트가 5번 중 5번 23505로 실패했다.
+
+### F39. TB 클라이언트에 호스트 이름 주소를 주면 앱이 기동하지 못한다 (03b-2 샘플 쇼핑몰)
+
+- **깨지는 것**: TB Java 클라이언트(0.17.9)는 `IPv4:포트`만 받는다. compose 안에서 TB 앞의 Toxiproxy는 `toxiproxy:3001`처럼 이름으로만 찾을 수 있다. 이 값을 그대로 넘기면 `Client`를 만드는 순간 `Replica addresses format is invalid`로 실패해 앱이 뜨지 않는다.
+- **재현**: `ShopBootstrapTest` › TB 주소를 정하면 › `theClientRefusesAHostName`(TB의 동작을 고정하는 학습 테스트), `aHostNameBecomesAnIpv4Address`.
+- **구조**: 샘플 앱이 `shop.tigerbeetle.address`를 기동할 때 IPv4로 바꿔 `Client` 빈을 직접 만든다(`TigerBeetleClientConfig`). 라이브러리 자동 설정은 앱이 준 `Client`를 쓴다. 라이브러리의 `ledger-relay.tigerbeetle.addresses`도 같은 제약을 받으므로 그 설정에는 IP를 쓴다(docs/development.md).
+- **확인**: `localhost:<포트>`로 클라이언트를 만들면 위 메시지로 실패하고, 바꾼 `127.0.0.1:<포트>`로는 조회가 된다(2026-10-18, 테스트 컨테이너).
 
 ## 2. 열린 장애
 
