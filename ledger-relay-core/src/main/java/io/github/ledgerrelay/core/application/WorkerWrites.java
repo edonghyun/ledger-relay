@@ -1,5 +1,7 @@
 package io.github.ledgerrelay.core.application;
 
+import io.github.ledgerrelay.core.CannotAbandonException;
+import io.github.ledgerrelay.core.CommandNotFoundException;
 import io.github.ledgerrelay.core.CommandStatus;
 import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.LedgerOutcomeHandler;
@@ -66,21 +68,21 @@ final class WorkerWrites {
     WriteResult abandonHalted(String commandId) {
         requireOutsideTransaction(transactions);
         if (!LedgerCommand.isAcceptableId(commandId)) {
-            throw new IllegalArgumentException("접수한 적 없는 명령입니다: " + commandId);
+            throw new CommandNotFoundException(commandId);
         }
         try {
             return transactions.inTransaction(() -> {
                 CommandRecord current = store.find(commandId)
-                        .orElseThrow(() -> new IllegalArgumentException("접수한 적 없는 명령입니다: " + commandId));
+                        .orElseThrow(() -> new CommandNotFoundException(commandId));
                 if (current.row().state() != StoredState.HALTED) {
-                    throw new IllegalStateException("멈춘(HALTED) 명령만 포기할 수 있습니다: " + commandId + "는 "
-                            + current.row().state());
+                    throw new CannotAbandonException(commandId, CannotAbandonException.Reason.NOT_HALTED,
+                            "멈춘(HALTED) 명령만 포기할 수 있습니다: " + commandId + "는 " + current.row().state());
                 }
                 // 포기는 "TB에 한 번도 가지 않았다"는 뜻이다(SkipReason.ABANDONED_BY_OPERATOR). 보낸 적이 있으면 TB에서
                 // 이미 확정됐을 수 있어, 포기하면 돈은 움직였는데 PG와 핸들러는 적용 안 됨으로 남는다(F27)
                 if (current.row().submitCount() > 0 || current.row().knownResult().isPresent()) {
-                    throw new IllegalStateException("이미 TB에 보낸 적이 있어 포기할 수 없습니다: " + commandId
-                            + ". TB에서 이체를 확인한 뒤 수동으로 정리하세요");
+                    throw new CannotAbandonException(commandId, CannotAbandonException.Reason.ALREADY_SUBMITTED,
+                            "이미 TB에 보낸 적이 있어 포기할 수 없습니다: " + commandId + ". TB에서 이체를 확인한 뒤 수동으로 정리하세요");
                 }
                 StepResult.Moved moved = (StepResult.Moved) CommandStateMachine.apply(current.row(), new Step.Abandon());
                 return land(current, StoredState.HALTED, current.row().leaseToken(), moved);

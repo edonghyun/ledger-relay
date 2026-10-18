@@ -116,6 +116,15 @@ public final class JdbcCommandStore implements CommandStore {
                 .optional();
     }
 
+    /** 멈춘 명령을 행 순서로 읽는다. {@code ledger_command_halted} 인덱스만 읽는다(03b). */
+    @Override
+    public List<CommandRecord> findHalted(long afterRowId, int limit) {
+        return sql.sql("SELECT " + COLUMNS + ", " + ACCEPTED_HERE
+                + " FROM ledger_command c WHERE c.state = 'HALTED' AND c.id > :after ORDER BY c.id LIMIT :limit")
+                .param("after", afterRowId).param("limit", limit)
+                .query((rs, rowNum) -> CommandRows.read(rs)).list();
+    }
+
     /**
      * {@link #lockDue}의 질의. 실행 계획 테스트가 같은 질의를 본다. 맨 앞 표시와 보낼 시각 인덱스({@code ledger_command_ready})로
      * 지금 보낼 수 있는 맨 앞만 시각 순서로 읽는다(02e P2e-1·P2e-3). 마지막 조건은 lease가 끝나는 바로 그 시각의 처리 중

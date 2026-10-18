@@ -1,5 +1,7 @@
 package io.github.ledgerrelay.core.testing;
 
+import io.github.ledgerrelay.core.CannotAbandonException;
+import io.github.ledgerrelay.core.CommandNotFoundException;
 import io.github.ledgerrelay.core.HaltReason;
 import static io.github.ledgerrelay.core.LedgerResultCode.Created;
 import static io.github.ledgerrelay.core.LedgerResultCode.ExceedsCredits;
@@ -1134,7 +1136,9 @@ public abstract class LedgerRelayContract {
 
             // then
             assertThatThrownBy(abandoning).as("멈춘 명령이 아니라 거부되기를 기대했다")
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("HALTED");
+                    .isInstanceOfSatisfying(CannotAbandonException.class, refused -> assertThat(refused.reason())
+                            .as("거부 이유").isEqualTo(CannotAbandonException.Reason.NOT_HALTED))
+                    .hasMessageContaining("HALTED");
             assertRow("pay-1", CommandRow.accepted());
         }
 
@@ -1146,7 +1150,7 @@ public abstract class LedgerRelayContract {
 
             // then
             assertThatThrownBy(abandoning).as("없는 명령이라 거부되기를 기대했다")
-                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("never-accepted");
+                    .isInstanceOf(CommandNotFoundException.class).hasMessageContaining("never-accepted");
         }
 
         @Test
@@ -1160,7 +1164,7 @@ public abstract class LedgerRelayContract {
 
             // then
             assertThatThrownBy(abandoning).as("접수될 수 없는 id라 없는 명령으로 거부되기를 기대했다")
-                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("접수한 적 없는 명령");
+                    .isInstanceOf(CommandNotFoundException.class).hasMessageContaining("접수한 적 없는 명령");
             assertRow("pay-?", CommandRow.accepted());
         }
 
@@ -1360,7 +1364,9 @@ public abstract class LedgerRelayContract {
 
         private void assertRefusedAsAlreadySent(ThrowingCallable abandoning) {
             assertThatThrownBy(abandoning).as("이미 TB에 보낸 명령의 포기가 거부되기")
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("이미 TB에 보낸 적이 있어");
+                    .isInstanceOfSatisfying(CannotAbandonException.class, refused -> assertThat(refused.reason())
+                            .as("거부 이유").isEqualTo(CannotAbandonException.Reason.ALREADY_SUBMITTED))
+                    .hasMessageContaining("이미 TB에 보낸 적이 있어");
         }
     }
 

@@ -108,6 +108,11 @@ class ClaimIsolationTest {
         }
 
         @Override
+        public List<CommandRecord> findHalted(long afterRowId, int limit) {
+            return real.findHalted(afterRowId, limit);
+        }
+
+        @Override
         public List<DueCommand> lockDue(int limit) {
             List<DueCommand> due = new ArrayList<>(real.lockDue(limit));
             extra.forEach(id -> due.add(new DueCommand(real.find(id).orElseThrow(), Optional.empty())));

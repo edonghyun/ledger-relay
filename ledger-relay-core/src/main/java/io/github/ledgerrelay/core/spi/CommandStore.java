@@ -24,6 +24,9 @@ public interface CommandStore {
      */
     List<DueCommand> lockDue(int limit);
 
+    /** 멈춘(HALTED) 명령을 행 순서로 {@code afterRowId} 다음부터 limit개까지 낸다(운영자 포트). */
+    List<CommandRecord> findHalted(long afterRowId, int limit);
+
     /** 행이 있고 상태와 토큰이 기대와 같으면 바꾸고 true. 아니면 아무것도 바꾸지 않고 false. */
     boolean compareAndSet(RowChange change);
 }

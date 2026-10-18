@@ -766,6 +766,57 @@ public abstract class CommandStoreContract {
         }
     }
 
+    @Nested
+    @Order(9)
+    @DisplayName("멈춘 명령을 찾으면 — 03b 운영자 포트(O5)")
+    class FindingHalted {
+
+        @Test
+        @DisplayName("멈춘 명령만 행 순서로 낸다")
+        void findsOnlyHaltedInRowOrder() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            inserted(newTransfer("pay-2", "order-2", 1));
+            inserted(newTransfer("pay-3", "order-3", 1));
+            inserted(newTransfer("pay-4", "order-4", 1));
+            halted("pay-3");
+            halted("pay-1");
+
+            // when
+            List<String> found = commandIds(inTx(() -> store.findHalted(0, 10)));
+
+            // then
+            assertThat(found).as("멈춘 명령").containsExactly("pay-1", "pay-3");
+        }
+
+        @Test
+        @DisplayName("다음 페이지는 앞 페이지의 마지막 행 다음부터다 — 그사이 새로 멈춘 명령이 있어도 반복하거나 빠뜨리지 않는다")
+        void pagingContinuesAfterTheCursorWhileNewHaltsArrive() {
+            // given: 셋이 멈췄고 첫 페이지(2개)를 읽었다
+            inserted(newTransfer("pay-1", "order-1", 1));
+            inserted(newTransfer("pay-2", "order-2", 1));
+            inserted(newTransfer("pay-3", "order-3", 1));
+            inserted(newTransfer("pay-4", "order-4", 1));
+            halted("pay-1");
+            halted("pay-2");
+            halted("pay-3");
+            List<CommandRecord> first = inTx(() -> store.findHalted(0, 2));
+            halted("pay-4");
+
+            // when
+            long cursor = first.get(first.size() - 1).rowId();
+            List<String> second = commandIds(inTx(() -> store.findHalted(cursor, 2)));
+
+            // then
+            assertThat(commandIds(first)).as("첫 페이지").containsExactly("pay-1", "pay-2");
+            assertThat(second).as("둘째 페이지").containsExactly("pay-3", "pay-4");
+        }
+
+        private static List<String> commandIds(List<CommandRecord> records) {
+            return records.stream().map(CommandRecord::commandId).toList();
+        }
+    }
+
     // ── 행을 만드는 말: 값은 숨기지 않는다. 이체 ID는 101부터, 해시는 "hash-of-<id>"다 ─────────
 
     protected static NewCommand newTransfer(String commandId, String orderingKey, long seq) {

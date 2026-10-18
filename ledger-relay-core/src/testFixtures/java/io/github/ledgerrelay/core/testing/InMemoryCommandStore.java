@@ -116,6 +116,16 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
     }
 
     @Override
+    public List<CommandRecord> findHalted(long afterRowId, int limit) {
+        requireTransaction();
+        return rows.values().stream()
+                .filter(row -> row.record().rowId() > afterRowId)
+                .filter(row -> row.record().row().state() == io.github.ledgerrelay.core.domain.StoredState.HALTED)
+                .sorted(Comparator.comparingLong(row -> row.record().rowId()))
+                .limit(limit).map(this::recordOf).toList();
+    }
+
+    @Override
     public Optional<CommandRecord> find(String commandId) {
         requireTransaction();
         return Optional.ofNullable(rowIdByCommandId.get(commandId)).map(rows::get).map(this::recordOf);

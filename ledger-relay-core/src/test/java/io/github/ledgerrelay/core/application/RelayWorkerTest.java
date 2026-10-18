@@ -572,6 +572,11 @@ class RelayWorkerTest {
         }
 
         @Override
+        public List<CommandRecord> findHalted(long afterRowId, int limit) {
+            return real.findHalted(afterRowId, limit);
+        }
+
+        @Override
         public List<DueCommand> lockDue(int limit) {
             return real.lockDue(limit);
         }

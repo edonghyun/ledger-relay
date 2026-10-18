@@ -189,8 +189,8 @@ public final class CommandLifecycle implements LedgerRelay {
      * 운영자가 멈춘(HALTED) 명령을 포기한다(§5.2 HALT, docs/failure-modes.md F9). TB에 보내지 않고 건너뜀으로 끝내며,
      * 같은 트랜잭션에서 핸들러가 '운영자 포기' 사유를 받는다. 핸들러가 실패하면 멈춘 그대로 남는다. 트랜잭션 밖에서 부른다.
      *
-     * @throws IllegalArgumentException 접수한 적 없는 명령
-     * @throws IllegalStateException    멈춘 명령이 아니거나, 이미 TB에 보낸 적이 있다(F27)
+     * @throws io.github.ledgerrelay.core.CommandNotFoundException 접수한 적 없는 명령
+     * @throws io.github.ledgerrelay.core.CannotAbandonException   멈춘 명령이 아니거나, 이미 TB에 보낸 적이 있다(F27)
      */
     public WriteResult abandonHalted(String commandId) {
         return workerWrites.abandonHalted(commandId);
