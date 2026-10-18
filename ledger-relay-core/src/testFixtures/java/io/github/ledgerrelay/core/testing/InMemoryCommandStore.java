@@ -2,6 +2,7 @@ package io.github.ledgerrelay.core.testing;
 
 import io.github.ledgerrelay.core.domain.CommandRow;
 import io.github.ledgerrelay.core.domain.QueuedCommand;
+import io.github.ledgerrelay.core.spi.Backlog;
 import io.github.ledgerrelay.core.spi.CommandRecord;
 import io.github.ledgerrelay.core.spi.CommandStore;
 import io.github.ledgerrelay.core.spi.DueCommand;
@@ -113,6 +114,27 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
         rows.put(rowId, new Row(record, null, now, transactionNumber));
         rowIdByCommandId.put(c.commandId(), rowId);
         return Optional.empty();
+    }
+
+    @Override
+    public Backlog backlog() {
+        requireTransaction();
+        long unfinished = 0;
+        long halted = 0;
+        Optional<Instant> oldest = Optional.empty();
+        for (Row row : rows.values()) {
+            switch (row.record().row().state()) {
+                case PENDING, CLAIMED -> {
+                    unfinished++;
+                    Instant accepted = row.record().acceptedAt();
+                    oldest = oldest.filter(o -> !o.isAfter(accepted)).or(() -> Optional.of(accepted));
+                }
+                case HALTED -> halted++;
+                default -> {
+                }
+            }
+        }
+        return new Backlog(unfinished, halted, oldest);
     }
 
     @Override

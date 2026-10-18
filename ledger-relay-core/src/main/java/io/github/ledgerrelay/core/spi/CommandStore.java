@@ -24,6 +24,9 @@ public interface CommandStore {
      */
     List<DueCommand> lockDue(int limit);
 
+    /** 지금 쌓인 일을 센다(health). */
+    Backlog backlog();
+
     /** 최종 상태로 끝난 명령을 행 순서로 {@code afterRowId} 다음부터 limit개까지 낸다(대사). */
     List<CommandRecord> findFinished(long afterRowId, int limit);
 

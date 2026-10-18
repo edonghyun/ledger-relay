@@ -113,6 +113,11 @@ class CommandLifecycleRaceTest {
         }
 
         @Override
+        public io.github.ledgerrelay.core.spi.Backlog backlog() {
+            return real.backlog();
+        }
+
+        @Override
         public List<CommandRecord> findFinished(long afterRowId, int limit) {
             return real.findFinished(afterRowId, limit);
         }

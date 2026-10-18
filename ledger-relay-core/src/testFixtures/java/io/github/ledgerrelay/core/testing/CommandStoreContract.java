@@ -1,5 +1,6 @@
 package io.github.ledgerrelay.core.testing;
 
+import io.github.ledgerrelay.core.spi.Backlog;
 import io.github.ledgerrelay.core.spi.HaltMark;
 import io.github.ledgerrelay.core.HaltReason;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -814,6 +815,46 @@ public abstract class CommandStoreContract {
 
         private static List<String> commandIds(List<CommandRecord> records) {
             return records.stream().map(CommandRecord::commandId).toList();
+        }
+    }
+
+    @Nested
+    @Order(10)
+    @DisplayName("대기를 세면 — 03b health")
+    class CountingTheBacklog {
+
+        @Test
+        @DisplayName("끝나지 않은 명령과 멈춘 명령을 따로 세고, 가장 오래 기다린 접수 시각을 낸다")
+        void backlogCountsUnfinishedAndHalted() {
+            // given: 대기 둘, 처리 중 하나, 멈춤 하나, 끝남 하나
+            inserted(newTransfer("pay-1", "order-1", 1));
+            inserted(newTransfer("pay-2", "order-2", 1));
+            inserted(newTransfer("pay-3", "order-3", 1));
+            inserted(newTransfer("pay-4", "order-4", 1));
+            inserted(newTransfer("pay-5", "order-5", 1));
+            claimed("pay-3", 1);
+            halted("pay-4");
+            claimed("pay-5", 1);
+            finished("pay-5", appliedRow(1));
+
+            // when
+            Backlog backlog = inTx(() -> store.backlog());
+
+            // then
+            assertThat(backlog.unfinished()).as("끝나지 않은 명령(멈춤 제외)").isEqualTo(3);
+            assertThat(backlog.halted()).as("멈춘 명령").isEqualTo(1);
+            assertThat(backlog.oldestUnfinishedAcceptedAt()).as("가장 오래 기다린 접수 시각")
+                    .contains(record("pay-1").acceptedAt());
+        }
+
+        @Test
+        @DisplayName("빈 저장소에는 가장 오래 기다린 명령이 없다")
+        void anEmptyStoreHasNoOldest() {
+            // when
+            Backlog backlog = inTx(() -> store.backlog());
+
+            // then
+            assertThat(backlog).as("대기").isEqualTo(new Backlog(0, 0, Optional.empty()));
         }
     }
 

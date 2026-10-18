@@ -3,6 +3,7 @@ package io.github.ledgerrelay.jdbc;
 import io.github.ledgerrelay.core.domain.CommandRow;
 import io.github.ledgerrelay.core.domain.QueuedCommand;
 import io.github.ledgerrelay.core.domain.StoredState;
+import io.github.ledgerrelay.core.spi.Backlog;
 import io.github.ledgerrelay.core.spi.CommandRecord;
 import io.github.ledgerrelay.core.spi.CommandStore;
 import io.github.ledgerrelay.core.spi.DueCommand;
@@ -114,6 +115,20 @@ public final class JdbcCommandStore implements CommandStore {
                 .param("id", commandId)
                 .query((rs, rowNum) -> CommandRows.read(rs))
                 .optional();
+    }
+
+    /** 쌓인 일을 센다(health). 미완료 인덱스({@code ledger_command_unfinished})의 행만 읽는다. */
+    @Override
+    public Backlog backlog() {
+        return sql.sql("""
+                SELECT count(*) FILTER (WHERE state IN ('PENDING','CLAIMED')) AS unfinished,
+                       count(*) FILTER (WHERE state = 'HALTED') AS halted,
+                       min(accepted_at) FILTER (WHERE state IN ('PENDING','CLAIMED')) AS oldest
+                FROM ledger_command WHERE state IN ('PENDING','CLAIMED','HALTED')
+                """).query((rs, rowNum) -> new Backlog(rs.getLong("unfinished"), rs.getLong("halted"),
+                        Optional.ofNullable(rs.getObject("oldest", java.time.OffsetDateTime.class))
+                                .map(java.time.OffsetDateTime::toInstant)))
+                .single();
     }
 
     /** 최종 상태로 끝난 명령을 행 순서로 읽는다(대사). 기본 키 순서로 읽으며 최종 상태가 아닌 행은 걸러 낸다. */

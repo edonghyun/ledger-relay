@@ -21,10 +21,12 @@ import io.github.ledgerrelay.jdbc.JdbcOrderingKeys;
 import io.github.ledgerrelay.jdbc.JdbcTransactions;
 import io.github.ledgerrelay.tigerbeetle.TigerBeetleLedgerClient;
 import io.github.ledgerrelay.tigerbeetle.TigerBeetleTransferIds;
+import java.time.Duration;
 import java.util.Arrays;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -122,6 +124,19 @@ public class LedgerRelayAutoConfiguration {
     @ConditionalOnMissingBean
     WorkerEvents ledgerRelayWorkerEvents() {
         return new LoggingWorkerEvents();
+    }
+
+    /** 앱이 health(actuator)를 쓸 때만 켜진다. */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "org.springframework.boot.health.contributor.HealthIndicator")
+    static class HealthContributor {
+
+        @Bean
+        @ConditionalOnMissingBean
+        LedgerRelayHealthIndicator ledgerRelayHealthIndicator(CommandStore store, Transactions transactions,
+                LedgerClient ledger) {
+            return new LedgerRelayHealthIndicator(store, transactions, ledger, Duration.ofSeconds(1));
+        }
     }
 
     /** 워커: 같은 maxInFlight에서 슬롯을 만들어 설정과 실제 상한이 어긋날 수 없다(02d I5). */
