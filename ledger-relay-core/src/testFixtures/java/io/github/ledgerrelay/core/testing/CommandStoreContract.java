@@ -1,5 +1,7 @@
 package io.github.ledgerrelay.core.testing;
 
+import io.github.ledgerrelay.core.spi.HaltMark;
+import io.github.ledgerrelay.core.HaltReason;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -728,6 +730,42 @@ public abstract class CommandStoreContract {
         }
     }
 
+    @Nested
+    @Order(8)
+    @DisplayName("멈추면 — 03b 운영자 포트")
+    class HaltRecord {
+
+        @Test
+        @DisplayName("멈춘 이유와 시각을 남긴다")
+        void haltingRecordsWhyAndWhen() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+
+            // when
+            halted("pay-1");
+
+            // then
+            HaltMark halt = record("pay-1").halt().orElseThrow(() -> new AssertionError("멈춘 기록이 없다"));
+            assertThat(halt.reason()).as("멈춘 이유").isEqualTo(HaltReason.RESERVATION_NOT_EARLIER);
+            assertThat(halt.haltedAt()).as("멈춘 시각").isNotNull();
+        }
+
+        @Test
+        @DisplayName("포기해 끝나면 멈춘 기록을 지운다")
+        void abandoningClearsTheHaltRecord() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            halted("pay-1");
+
+            // when
+            finished("pay-1", new CommandRow(StoredState.SKIPPED, 1, 0, Optional.empty(), Optional.empty(), 0,
+                    Optional.of(SkipReason.ABANDONED_BY_OPERATOR)));
+
+            // then
+            assertThat(record("pay-1").halt()).as("멈춘 기록").isEmpty();
+        }
+    }
+
     // ── 행을 만드는 말: 값은 숨기지 않는다. 이체 ID는 101부터, 해시는 "hash-of-<id>"다 ─────────
 
     protected static NewCommand newTransfer(String commandId, String orderingKey, long seq) {
@@ -808,12 +846,12 @@ public abstract class CommandStoreContract {
                 new RowChange.Stamp.LeaseFor(LEASE)));
     }
 
-    /** 전제: 접수된 이 행이 토큰 1의 멈춤(HALTED)이 된다. */
+    /** 전제: 접수된 이 행이 토큰 1의 멈춤(HALTED)이 된다. 이유는 예약 순서 위반이다. */
     protected void halted(String commandId) {
         CommandRecord r = record(commandId);
         changed(new RowChange(r.rowId(), StoredState.PENDING, r.row().leaseToken(),
                 new CommandRow(StoredState.HALTED, r.row().leaseToken() + 1, 0, Optional.empty(), Optional.empty(), 0),
-                new RowChange.Stamp.Halt()));
+                new RowChange.Stamp.Halt(HaltReason.RESERVATION_NOT_EARLIER)));
     }
 
     /** 전제: 이 행이 finalRow로 끝난다. */

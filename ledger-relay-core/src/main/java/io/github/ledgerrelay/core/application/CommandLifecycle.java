@@ -4,6 +4,7 @@ import io.github.ledgerrelay.core.CommandConflictException;
 import io.github.ledgerrelay.core.CommandKind;
 import io.github.ledgerrelay.core.CommandReceipt;
 import io.github.ledgerrelay.core.CommandStatus;
+import io.github.ledgerrelay.core.HaltReason;
 import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.LedgerOutcomeHandler;
 import io.github.ledgerrelay.core.LedgerRelay;
@@ -111,10 +112,15 @@ public final class CommandLifecycle implements LedgerRelay {
                 boolean leaseExpired = candidate.row().state() == StoredState.CLAIMED;
                 GateDecision gate;
                 StepResult result;
+                HaltReason haltReason = HaltReason.MALFORMED_ROW;
                 try {
                     gate = OrderingGate.decide(candidate.kind(), candidate.reservationCommandId(), candidate.seq(),
                             due.reservation().stream().toList());
                     result = CommandStateMachine.apply(candidate.row(), new Step.Claim(gate, leaseExpired));
+                    if (gate == GateDecision.HALT) {
+                        haltReason = OrderingGate.explainHalt(candidate.kind(), candidate.reservationCommandId(),
+                                candidate.seq(), due.reservation().stream().toList());
+                    }
                 } catch (RuntimeException malformed) {
                     // 행의 데이터가 규칙과 어긋났다(DB 직접 수정, 저장소 버그). 판단은 순수 Java라 트랜잭션은 멀쩡하다.
                     // 그 행만 멈춰 그 키만 막고, 다른 후보는 계속 판단한다(F29). 멈추게도 못 하면 건너뛴다. 어느 쪽이든
@@ -134,7 +140,7 @@ public final class CommandLifecycle implements LedgerRelay {
                 }
                 // 멈출 명령은 HALTED로 주차해 그 키만 막는다. 다시 후보가 되지 않으므로 알림은 이때 한 번이다(F9)
                 boolean halting = moved.row().state() == StoredState.HALTED;
-                RowChange.Stamp stamp = halting ? new RowChange.Stamp.Halt() : new RowChange.Stamp.LeaseFor(lease);
+                RowChange.Stamp stamp = halting ? new RowChange.Stamp.Halt(haltReason) : new RowChange.Stamp.LeaseFor(lease);
                 if (!store.compareAndSet(new RowChange(candidate.rowId(), candidate.row().state(),
                         candidate.row().leaseToken(), moved.row(), stamp))) {
                     continue;

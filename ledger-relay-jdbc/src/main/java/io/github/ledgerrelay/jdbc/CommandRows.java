@@ -1,11 +1,13 @@
 package io.github.ledgerrelay.jdbc;
 
 import io.github.ledgerrelay.core.CommandKind;
+import io.github.ledgerrelay.core.HaltReason;
 import io.github.ledgerrelay.core.LedgerResultCode;
 import io.github.ledgerrelay.core.SkipReason;
 import io.github.ledgerrelay.core.domain.CommandRow;
 import io.github.ledgerrelay.core.domain.StoredState;
 import io.github.ledgerrelay.core.spi.CommandRecord;
+import io.github.ledgerrelay.core.spi.HaltMark;
 import io.github.ledgerrelay.core.spi.NewCommand;
 import io.github.ledgerrelay.core.spi.TransferBody;
 import java.math.BigDecimal;
@@ -48,6 +50,9 @@ final class CommandRows {
                 resultCode(rs, "result_code"),
                 rs.getInt("handler_failures"),
                 Optional.ofNullable(rs.getString("skip_reason")).map(SkipReason::valueOf));
+        String haltReason = rs.getString("halt_reason");
+        Optional<HaltMark> halt = haltReason == null ? Optional.empty()
+                : Optional.of(new HaltMark(HaltReason.valueOf(haltReason), instant(rs, "halted_at")));
         return new CommandRecord(
                 rs.getLong("id"),
                 rs.getString("command_id"),
@@ -60,7 +65,8 @@ final class CommandRows {
                 row,
                 instant(rs, "accepted_at"),
                 Optional.ofNullable(rs.getObject("completed_at", OffsetDateTime.class)).map(OffsetDateTime::toInstant),
-                rs.getBoolean("accepted_in_this_transaction"));
+                rs.getBoolean("accepted_in_this_transaction"),
+                halt);
     }
 
     /** {@code INSERT}의 이름 붙은 인자. */

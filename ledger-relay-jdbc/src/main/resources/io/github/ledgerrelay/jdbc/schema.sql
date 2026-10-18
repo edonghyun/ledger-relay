@@ -44,6 +44,9 @@ CREATE TABLE ledger_command (
     accepted_xact          xid8 NOT NULL DEFAULT pg_current_xact_id(),
     accepted_at            timestamptz NOT NULL DEFAULT now(),
     completed_at           timestamptz,
+    -- 멈춘(HALTED) 행만: 왜, 언제 멈췄는가(03b 운영자 포트). 포기해 끝나면 비운다
+    halt_reason            text CHECK (halt_reason IN ('RESERVATION_MISSING','RESERVATION_NOT_EARLIER','MALFORMED_ROW')),
+    halted_at              timestamptz,
     -- 그 키에서 지금 차례인 명령인가. 넣을 때 키에 맨 앞이 없으면 켠다. 명령이 끝나도 그대로 두고, 다음 claim이 그 키
     -- 행을 잡아 다음 미완료로 넘긴다(02e P2e-7). DB를 직접 고친 뒤에는 rebuild-heads.sql로 다시 계산한다(P2e-5)
     is_head                boolean NOT NULL DEFAULT false,
@@ -60,6 +63,9 @@ CREATE TABLE ledger_command (
         (kind IN ('POST','VOID')) = (reservation_command_id IS NOT NULL AND pending_transfer_id IS NOT NULL)),
     -- 처리 중인데 lease 만료 시각이 없으면 영원히 다시 잡히지 않는다
     CONSTRAINT ledger_command_claimed_lease_check CHECK (state <> 'CLAIMED' OR lease_expires_at IS NOT NULL),
+    -- 멈춘 행은 이유와 시각을 갖고, 그 밖의 행은 갖지 않는다
+    CONSTRAINT ledger_command_halt_check CHECK ((state = 'HALTED') = (halt_reason IS NOT NULL AND halted_at IS NOT NULL)
+        AND (halt_reason IS NULL) = (halted_at IS NULL)),
     -- 결과 코드는 저장 이름(wireName) 68개 중 하나다. 모르는 값이 있으면 claim이 그 행을 읽다 전체가 멈춘다(F29).
     -- TB를 올려 코드가 늘면 이 목록도 함께 고친다(JdbcCommandStoreTest의 everyWireNameIsAccepted가 어긋남을 잡는다, F8)
     CONSTRAINT ledger_command_known_result_check CHECK (known_result IN (
@@ -131,3 +137,6 @@ CREATE INDEX ledger_command_ready ON ledger_command (ready_at, id)
 -- 끝났는데 아직 맨 앞인 명령. claim이 넘길 키를 찾는다. 넘기고 나면 빠지므로 방금 끝난 명령만 담긴다(02e P2e-7).
 CREATE INDEX ledger_command_finished_head ON ledger_command (id)
     WHERE is_head AND state IN ('APPLIED','REJECTED','CONFLICT','SKIPPED');
+
+-- 멈춘 명령 목록(운영자 포트, 03b). 멈춘 명령만 담으므로 작다.
+CREATE INDEX ledger_command_halted ON ledger_command (id) WHERE state = 'HALTED';

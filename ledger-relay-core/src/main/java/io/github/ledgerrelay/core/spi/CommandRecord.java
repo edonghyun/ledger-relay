@@ -14,6 +14,7 @@ import java.util.Optional;
  * @param row         상태 기계가 보는 부분
  * @param completedAt              끝나기 전에는 없다
  * @param acceptedInThisTransaction 이 행을 지금 부른 쪽의 트랜잭션이 넣었는가. 커밋된 뒤 다시 읽으면 false(P2b-2)
+ * @param halt                     멈춘(HALTED) 행에만 있다
  */
 public record CommandRecord(
         long rowId,
@@ -27,7 +28,8 @@ public record CommandRecord(
         CommandRow row,
         Instant acceptedAt,
         Optional<Instant> completedAt,
-        boolean acceptedInThisTransaction) {
+        boolean acceptedInThisTransaction,
+        Optional<HaltMark> halt) {
 
     public CommandRecord {
         Objects.requireNonNull(commandId, "commandId");
@@ -39,6 +41,7 @@ public record CommandRecord(
         Objects.requireNonNull(row, "row");
         Objects.requireNonNull(acceptedAt, "acceptedAt");
         Objects.requireNonNull(completedAt, "completedAt");
+        Objects.requireNonNull(halt, "halt");
     }
 
     public CommandKind kind() {

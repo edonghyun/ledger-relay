@@ -1,5 +1,6 @@
 package io.github.ledgerrelay.core.testing;
 
+import io.github.ledgerrelay.core.HaltReason;
 import static io.github.ledgerrelay.core.LedgerResultCode.Created;
 import static io.github.ledgerrelay.core.LedgerResultCode.ExceedsCredits;
 import static io.github.ledgerrelay.core.LedgerResultCode.ExistsWithDifferentAmount;
@@ -992,6 +993,7 @@ public abstract class LedgerRelayContract {
 
             // then
             assertQueryState("capture-1", State.HALTED);
+            assertHaltReason("capture-1", HaltReason.RESERVATION_NOT_EARLIER);
         }
 
         @Test
@@ -1202,6 +1204,7 @@ public abstract class LedgerRelayContract {
             assertHalted(batch, "capture-1");
             assertThat(batch.problems()).as("문제가 있던 후보의 이유").singleElement()
                     .satisfies(problem -> assertThat(problem.halted()).as("멈춤으로 세웠는가").isTrue());
+            assertHaltReason("capture-1", HaltReason.MALFORMED_ROW);
         }
     }
 
@@ -1444,6 +1447,12 @@ public abstract class LedgerRelayContract {
     protected CommandStatus status(String commandId) {
         return relay.status(commandId).orElseThrow(
                 () -> new AssertionError(commandId + "가 접수되어 있기를 기대했지만 조회되지 않음"));
+    }
+
+    protected void assertHaltReason(String commandId, HaltReason expected) {
+        HaltReason reason = storage.transactions().inTransaction(() -> storage.store().find(commandId)).orElseThrow()
+                .halt().orElseThrow(() -> new AssertionError(commandId + "의 멈춘 기록이 없다")).reason();
+        assertThat(reason).as("%s가 멈춘 이유", commandId).isEqualTo(expected);
     }
 
     protected void assertQueryState(String commandId, State expected) {

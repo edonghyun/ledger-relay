@@ -37,7 +37,7 @@ public final class JdbcCommandStore implements CommandStore {
             c.pending_transfer_id, c.debit_account_id, c.credit_account_id, c.amount, c.ledger, c.code,
             c.timeout_seconds, c.user_data_64, c.user_data_32, c.content_hash, c.state, c.lease_token,
             c.submit_count, c.known_result, c.result_code, c.handler_failures, c.skip_reason, c.accepted_at,
-            c.completed_at""";
+            c.completed_at, c.halt_reason, c.halted_at""";
 
     /** 이 행을 지금 트랜잭션이 넣었는가(P2b-2). 아직 쓰기를 하지 않은 트랜잭션은 ID가 없으므로 false다. */
     private static final String ACCEPTED_HERE =
@@ -169,6 +169,7 @@ public final class JdbcCommandStore implements CommandStore {
                 .param("handler_failures", next.handlerFailures())
                 .param("skip_reason", next.skipReason().map(Enum::name).orElse(null))
                 .param("seconds", stampSeconds(change.stamp()))
+                .param("halt_reason", change.stamp() instanceof RowChange.Stamp.Halt halt ? halt.reason().name() : null)
                 .param("id", change.rowId())
                 .param("expected_state", change.expectedState().name())
                 .param("expected_token", change.expectedToken())
@@ -188,8 +189,8 @@ public final class JdbcCommandStore implements CommandStore {
             case RowChange.Stamp.LeaseFor lease -> ", lease_expires_at = now() + make_interval(secs => :seconds)";
             case RowChange.Stamp.FirstSubmission submission -> ", first_submitted_at = coalesce(first_submitted_at, now())";
             case RowChange.Stamp.RetryAfter retry -> ", next_attempt_at = now() + make_interval(secs => :seconds)";
-            case RowChange.Stamp.Completion completion -> ", completed_at = now()";
-            case RowChange.Stamp.Halt halt -> "";
+            case RowChange.Stamp.Completion completion -> ", completed_at = now(), halt_reason = NULL, halted_at = NULL";
+            case RowChange.Stamp.Halt halt -> ", halt_reason = :halt_reason, halted_at = now()";
         };
     }
 

@@ -1,6 +1,7 @@
 package io.github.ledgerrelay.core.domain;
 
 import io.github.ledgerrelay.core.CommandKind;
+import io.github.ledgerrelay.core.HaltReason;
 import io.github.ledgerrelay.core.LedgerCommand;
 import java.util.List;
 import java.util.Optional;
@@ -66,5 +67,19 @@ public final class OrderingGate {
         // 예약이 미완료인데 위의 earlierUnfinished에 걸리지 않았다면 예약 seq가 후보보다 크거나 같다.
         // 접수 검사가 막았어야 하는 순서다. 조용히 기다리면 키가 영원히 멈추므로 멈추고 알린다.
         return GateDecision.HALT;
+    }
+
+    /**
+     * {@link #decide}가 {@link GateDecision#HALT}를 낸 같은 입력에서, 왜 멈췄는지 답한다. 참조한 예약이 같은 키 명령들 속에
+     * 없으면 예약 없음, 있으면 예약이 앞 순번이 아닌 것이다.
+     */
+    public static HaltReason explainHalt(CommandKind kind, Optional<String> reservationCommandId, long candidateSeq,
+            List<QueuedCommand> sameKey) {
+        if (!kind.referencesReservation()) {
+            throw new IllegalArgumentException("버그: 예약을 참조하지 않는 " + kind + "는 게이트에서 멈추지 않는다");
+        }
+        String reservationId = reservationCommandId.orElseThrow();
+        boolean present = sameKey.stream().anyMatch(q -> q.commandId().equals(reservationId));
+        return present ? HaltReason.RESERVATION_NOT_EARLIER : HaltReason.RESERVATION_MISSING;
     }
 }

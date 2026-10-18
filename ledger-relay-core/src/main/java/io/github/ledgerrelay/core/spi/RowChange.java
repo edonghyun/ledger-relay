@@ -1,5 +1,6 @@
 package io.github.ledgerrelay.core.spi;
 
+import io.github.ledgerrelay.core.HaltReason;
 import io.github.ledgerrelay.core.domain.CommandRow;
 import io.github.ledgerrelay.core.domain.StoredState;
 import java.time.Duration;
@@ -35,11 +36,14 @@ public record RowChange(long rowId, StoredState expectedState, long expectedToke
         record RetryAfter(Duration backoff) implements Stamp {
         }
 
-        /** 멈춤: 시각 컬럼은 바꾸지 않는다. */
-        record Halt() implements Stamp {
+        /** 멈춤: 이유와 halted_at = now를 남긴다. */
+        record Halt(HaltReason reason) implements Stamp {
+            public Halt {
+                Objects.requireNonNull(reason, "reason");
+            }
         }
 
-        /** 최종 상태: completed_at = now. */
+        /** 최종 상태: completed_at = now. 멈춘 기록은 지운다. */
         record Completion() implements Stamp {
         }
     }

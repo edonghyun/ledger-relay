@@ -6,6 +6,7 @@ import static io.github.ledgerrelay.core.domain.StoredState.REJECTED;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.ledgerrelay.core.CommandKind;
+import io.github.ledgerrelay.core.HaltReason;
 import io.github.ledgerrelay.core.LedgerCommand;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -287,6 +288,34 @@ class OrderingGateTest {
     }
 
     // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+
+    @Nested
+    @Order(8)
+    @DisplayName("멈춘 이유를 물으면 — 운영자가 무엇을 고칠지 알게 (03b)")
+    class WhyHalted {
+
+        @Test
+        @DisplayName("참조한 예약이 같은 키 명령들 속에 없으면 예약 없음이다")
+        void aMissingReservationIsExplained() {
+            // when
+            HaltReason reason = OrderingGate.explainHalt(CommandKind.POST, java.util.Optional.of("hold-1"), 2,
+                    sameKey(queued("capture-1", 2, PENDING)));
+
+            // then
+            assertThat(reason).as("멈춘 이유").isEqualTo(HaltReason.RESERVATION_MISSING);
+        }
+
+        @Test
+        @DisplayName("참조한 예약이 확정보다 앞 순번이 아니면 예약 순서 위반이다")
+        void aReservationNotEarlierIsExplained() {
+            // when
+            HaltReason reason = OrderingGate.explainHalt(CommandKind.POST, java.util.Optional.of("hold-1"), 1,
+                    sameKey(queued("capture-1", 1, PENDING), queued("hold-1", 2, PENDING)));
+
+            // then
+            assertThat(reason).as("멈춘 이유").isEqualTo(HaltReason.RESERVATION_NOT_EARLIER);
+        }
+    }
 
     private static LedgerCommand aTransfer(String commandId) {
         return LedgerCommand.transfer(commandId).orderingKey("order-42")

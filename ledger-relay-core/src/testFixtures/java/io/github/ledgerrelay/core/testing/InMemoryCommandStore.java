@@ -5,6 +5,7 @@ import io.github.ledgerrelay.core.domain.QueuedCommand;
 import io.github.ledgerrelay.core.spi.CommandRecord;
 import io.github.ledgerrelay.core.spi.CommandStore;
 import io.github.ledgerrelay.core.spi.DueCommand;
+import io.github.ledgerrelay.core.spi.HaltMark;
 import io.github.ledgerrelay.core.spi.NewCommand;
 import io.github.ledgerrelay.core.spi.OrderingKeys;
 import io.github.ledgerrelay.core.spi.RowChange;
@@ -108,7 +109,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
         Instant now = clock.get();
         CommandRecord record = new CommandRecord(rowId, c.commandId(), c.orderingKey(), c.seq(),
                 c.reservationCommandId(), c.transferId(), c.contentHash(), c.body(), CommandRow.accepted(), now,
-                Optional.empty(), false);
+                Optional.empty(), false, Optional.empty());
         rows.put(rowId, new Row(record, null, now, transactionNumber));
         rowIdByCommandId.put(c.commandId(), rowId);
         return Optional.empty();
@@ -160,16 +161,16 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
         Instant now = clock.get();
         Row next = switch (change.stamp()) {
             case RowChange.Stamp.LeaseFor lease -> row.with(change.next(), now.plus(lease.lease()), row.nextAttemptAt(),
-                    row.record().completedAt());
+                    row.record().completedAt(), Optional.empty());
             // first_submitted_at은 조회 결과에 나가지 않으므로 메모리 저장소는 기록하지 않는다
             case RowChange.Stamp.FirstSubmission submission -> row.with(change.next(), row.leaseExpiresAt(),
-                    row.nextAttemptAt(), row.record().completedAt());
+                    row.nextAttemptAt(), row.record().completedAt(), Optional.empty());
             case RowChange.Stamp.RetryAfter retry -> row.with(change.next(), row.leaseExpiresAt(),
-                    now.plus(retry.backoff()), row.record().completedAt());
+                    now.plus(retry.backoff()), row.record().completedAt(), Optional.empty());
             case RowChange.Stamp.Completion completion -> row.with(change.next(), row.leaseExpiresAt(),
-                    row.nextAttemptAt(), Optional.of(now));
+                    row.nextAttemptAt(), Optional.of(now), Optional.empty());
             case RowChange.Stamp.Halt halt -> row.with(change.next(), row.leaseExpiresAt(), row.nextAttemptAt(),
-                    row.record().completedAt());
+                    row.record().completedAt(), Optional.of(new HaltMark(halt.reason(), now)));
         };
         rows.put(change.rowId(), next);
         return true;
@@ -189,7 +190,7 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
         CommandRecord r = row.record();
         return new CommandRecord(r.rowId(), r.commandId(), r.orderingKey(), r.seq(), r.reservationCommandId(),
                 r.transferId(), r.contentHash(), r.body(), r.row(), r.acceptedAt(), r.completedAt(),
-                row.acceptedIn() == transactionNumber);
+                row.acceptedIn() == transactionNumber, r.halt());
     }
 
     private void requireTransaction() {
@@ -239,11 +240,12 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
                     : nextAttemptAt;
         }
 
-        Row with(CommandRow newRow, Instant newLeaseExpiresAt, Instant newNextAttemptAt, Optional<Instant> completedAt) {
+        Row with(CommandRow newRow, Instant newLeaseExpiresAt, Instant newNextAttemptAt, Optional<Instant> completedAt,
+                Optional<HaltMark> halt) {
             CommandRecord r = record;
             return new Row(new CommandRecord(r.rowId(), r.commandId(), r.orderingKey(), r.seq(),
                     r.reservationCommandId(), r.transferId(), r.contentHash(), r.body(), newRow, r.acceptedAt(),
-                    completedAt, false), newLeaseExpiresAt, newNextAttemptAt, acceptedIn);
+                    completedAt, false, halt), newLeaseExpiresAt, newNextAttemptAt, acceptedIn);
         }
     }
 }
