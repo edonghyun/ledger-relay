@@ -35,7 +35,7 @@
       <div class="tile w3"><div class="n mono" id="t-completed">—</div><div class="l">completed</div></div>
       <div class="tile" id="t-backlog-tile"><div class="n mono" id="t-backlog">—</div><div class="l">backlog</div></div>
       <div class="tile"><div class="n mono" id="t-p99">—</div><div class="l">p99 accept→done</div></div>
-      <div class="tile good" id="t-double-tile"><div class="n mono" id="t-double">—</div><div class="l">double transfers</div></div>
+      <div class="tile good" id="t-double-tile" title="Orders whose posts in TigerBeetle add up to more than the order amount. The same transfer id twice cannot happen: TigerBeetle refuses it"><div class="n mono" id="t-double">—</div><div class="l">orders charged twice</div></div>
     </div>
   </section>
 
@@ -66,7 +66,7 @@
             <div class="stage s3"><div class="box"><div class="k">TigerBeetle</div><div class="v mono" id="p-applied">0</div><div class="s">applied</div></div></div>
             <div class="stage s4"><div class="box"><div class="k">Handler</div><div class="v mono" id="p-completed">0</div><div class="s">orders updated</div></div></div>
           </div>
-          <div class="instances mono" id="instances" title="Commands each instance has sent to TigerBeetle since its process started"></div>
+          <div class="instances mono" id="instances" title="Commands each instance has sent to TigerBeetle since its process started, resends included"></div>
         </div>
       </div>
 

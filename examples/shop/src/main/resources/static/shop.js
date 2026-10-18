@@ -310,7 +310,7 @@ function renderConsistency(c) {
   const words = {
     ok: `${baht(c.merchantPostedSatang)} = ${baht(c.paidOrdersSatang)} · mismatches 0 ✓`,
     settling: 'Writing results — totals will match shortly',
-    broken: `Mismatch: mismatches ${c.mismatches} · double transfers ${c.doubleTransfers} ✗`,
+    broken: `Mismatch: mismatches ${c.mismatches} · orders charged twice ${c.doubleTransfers} ✗`,
     unknown: 'No numbers from TB yet',
   };
   box.replaceChildren(h('span', {}, 'Σ merchant posted = Σ paid orders · reconcile mismatches 0'), h('span', {}, words[c.verdict] ?? c.verdict));
