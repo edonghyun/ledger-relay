@@ -9,6 +9,7 @@ import io.github.ledgerrelay.core.spi.CommandStore;
 import io.github.ledgerrelay.core.spi.DueCommand;
 import io.github.ledgerrelay.core.spi.NewCommand;
 import io.github.ledgerrelay.core.spi.RowChange;
+import io.github.ledgerrelay.core.spi.WaitingCounts;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
@@ -146,6 +147,31 @@ public final class JdbcCommandStore implements CommandStore {
                 .map(java.time.OffsetDateTime::toInstant);
         return new Backlog(unfinished, halted, oldest,
                 unfinished >= BACKLOG_COUNT_CAP || halted >= BACKLOG_COUNT_CAP);
+    }
+
+    /**
+     * The two queries that count waiting commands exactly (metrics, {@code LedgerRelayOperator.backlog}). With no cap
+     * they read every waiting row, but only through the partial indexes of waiting rows ({@code
+     * ledger_command_waiting}, {@code ledger_command_halted}), so finished history adds nothing. A query plan test
+     * checks them. The oldest acceptance time reuses the health query.
+     */
+    static final List<String> WAITING_COUNTS = List.of("""
+            SELECT count(*) FILTER (WHERE state = 'PENDING') AS pending,
+                   count(*) FILTER (WHERE state = 'CLAIMED') AS claimed,
+                   now() AS read_at
+            FROM ledger_command WHERE state IN ('PENDING','CLAIMED')
+            """,
+            "SELECT count(*) FROM ledger_command WHERE state = 'HALTED'",
+            BACKLOG.get(2));
+
+    @Override
+    public WaitingCounts waitingCounts() {
+        long halted = sql.sql(WAITING_COUNTS.get(1)).query(Long.class).single();
+        Optional<java.time.Instant> oldest = sql.sql(WAITING_COUNTS.get(2)).query(java.time.OffsetDateTime.class)
+                .optional().map(java.time.OffsetDateTime::toInstant);
+        return sql.sql(WAITING_COUNTS.get(0)).query((row, n) -> new WaitingCounts(row.getLong("pending"),
+                row.getLong("claimed"), halted, oldest, row.getObject("read_at", java.time.OffsetDateTime.class).toInstant()))
+                .single();
     }
 
     /** Reads finished commands in row order (reconciliation). Reads in primary key order and skips non-final rows. */

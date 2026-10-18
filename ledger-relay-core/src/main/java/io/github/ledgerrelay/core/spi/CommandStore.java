@@ -32,6 +32,12 @@ public interface CommandStore {
     Backlog backlog();
 
     /**
+     * Counts waiting commands exactly, by state, with the oldest waiting acceptance time and the store's clock. Reads
+     * only waiting rows: the cost does not grow with finished history.
+     */
+    WaitingCounts waitingCounts();
+
+    /**
      * Returns up to limit commands in a final state, in row order, starting after {@code afterRowId} (reconciliation).
      */
     List<CommandRecord> findFinished(long afterRowId, int limit);

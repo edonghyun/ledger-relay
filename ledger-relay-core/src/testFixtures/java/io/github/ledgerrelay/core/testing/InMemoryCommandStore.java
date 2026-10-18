@@ -2,6 +2,7 @@ package io.github.ledgerrelay.core.testing;
 
 import io.github.ledgerrelay.core.domain.CommandRow;
 import io.github.ledgerrelay.core.domain.QueuedCommand;
+import io.github.ledgerrelay.core.domain.StoredState;
 import io.github.ledgerrelay.core.spi.Backlog;
 import io.github.ledgerrelay.core.spi.CommandRecord;
 import io.github.ledgerrelay.core.spi.CommandStore;
@@ -11,6 +12,7 @@ import io.github.ledgerrelay.core.spi.NewCommand;
 import io.github.ledgerrelay.core.spi.OrderingKeys;
 import io.github.ledgerrelay.core.spi.RowChange;
 import io.github.ledgerrelay.core.spi.Transactions;
+import io.github.ledgerrelay.core.spi.WaitingCounts;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -117,6 +119,32 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
         rows.put(rowId, new Row(record, null, now, transactionNumber));
         rowIdByCommandId.put(c.commandId(), rowId);
         return Optional.empty();
+    }
+
+    @Override
+    public WaitingCounts waitingCounts() {
+        requireTransaction();
+        long pending = 0;
+        long claimed = 0;
+        long halted = 0;
+        Optional<Instant> oldest = Optional.empty();
+        for (Row row : rows.values()) {
+            switch (row.record().row().state()) {
+                case PENDING, CLAIMED -> {
+                    if (row.record().row().state() == StoredState.PENDING) {
+                        pending++;
+                    } else {
+                        claimed++;
+                    }
+                    Instant accepted = row.record().acceptedAt();
+                    oldest = oldest.filter(o -> !o.isAfter(accepted)).or(() -> Optional.of(accepted));
+                }
+                case HALTED -> halted++;
+                default -> {
+                }
+            }
+        }
+        return new WaitingCounts(pending, claimed, halted, oldest, clock.get());
     }
 
     @Override

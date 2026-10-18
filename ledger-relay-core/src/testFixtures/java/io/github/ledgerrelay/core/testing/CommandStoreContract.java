@@ -1,6 +1,7 @@
 package io.github.ledgerrelay.core.testing;
 
 import io.github.ledgerrelay.core.spi.Backlog;
+import io.github.ledgerrelay.core.spi.WaitingCounts;
 import io.github.ledgerrelay.core.spi.HaltMark;
 import io.github.ledgerrelay.core.HaltReason;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -857,6 +858,77 @@ public abstract class CommandStoreContract {
 
             // then
             assertThat(backlog).as("backlog").isEqualTo(new Backlog(0, 0, Optional.empty(), false));
+        }
+    }
+
+    @Nested
+    @Order(11)
+    @DisplayName("When waiting commands are counted exactly — metrics and the operator's backlog")
+    class CountingWaitingCommandsExactly {
+
+        @Test
+        @DisplayName("Each waiting state is counted exactly, past the health cap of 1,000, and finished commands are not counted")
+        void countsEachWaitingStateExactly() {
+            // given: 1,200 pending, 3 in progress, 2 halted, 5 finished
+            for (int i = 1; i <= 1210; i++) {
+                inserted(newTransfer("pay-" + i, "order-" + i, 1));
+            }
+            for (int i = 1201; i <= 1203; i++) {
+                claimed("pay-" + i, 1);
+            }
+            halted("pay-1204");
+            halted("pay-1205");
+            for (int i = 1206; i <= 1210; i++) {
+                claimed("pay-" + i, 1);
+                finished("pay-" + i, appliedRow(1));
+            }
+
+            // when
+            WaitingCounts counts = inTx(() -> store.waitingCounts());
+
+            // then
+            assertWaiting(counts, 1200, 3, 2);
+        }
+
+        @Test
+        @DisplayName("The longest-waiting command is the oldest pending or in-progress one — halted and finished ones do not count")
+        void oldestIgnoresHaltedAndFinished() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            inserted(newTransfer("pay-2", "order-2", 1));
+            inserted(newTransfer("pay-3", "order-3", 1));
+            halted("pay-1");
+            claimed("pay-2", 1);
+            finished("pay-2", appliedRow(1));
+
+            // when
+            WaitingCounts counts = inTx(() -> store.waitingCounts());
+
+            // then
+            assertThat(counts.oldestWaitingAcceptedAt()).as("acceptance time of the longest-waiting command")
+                    .contains(record("pay-3").acceptedAt());
+        }
+
+        @Test
+        @DisplayName("With nothing waiting, every count is 0 and there is no longest-waiting command")
+        void noWaitingCommandsGivesNoOldest() {
+            // given
+            inserted(newTransfer("pay-1", "order-1", 1));
+            claimed("pay-1", 1);
+            finished("pay-1", appliedRow(1));
+
+            // when
+            WaitingCounts counts = inTx(() -> store.waitingCounts());
+
+            // then
+            assertWaiting(counts, 0, 0, 0);
+            assertThat(counts.oldestWaitingAcceptedAt()).as("longest-waiting command").isEmpty();
+        }
+
+        private static void assertWaiting(WaitingCounts counts, long pending, long claimed, long halted) {
+            assertThat(counts.pending()).as("pending commands").isEqualTo(pending);
+            assertThat(counts.claimed()).as("in-progress commands").isEqualTo(claimed);
+            assertThat(counts.halted()).as("halted commands").isEqualTo(halted);
         }
     }
 

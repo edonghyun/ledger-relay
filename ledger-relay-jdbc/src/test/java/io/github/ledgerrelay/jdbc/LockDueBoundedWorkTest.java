@@ -37,6 +37,8 @@ class LockDueBoundedWorkTest {
      */
     static final long BACKLOG_BUDGET = 2_500;
     static final int OUTAGE_BACKLOG = 100_000;
+    /** Ten waiting rows sit on a handful of index and heap pages. 20,000 finished rows fill over 300 heap pages. */
+    static final long EXACT_BACKLOG_BUDGET = 40;
 
     PostgresStorage storage;
 
@@ -145,6 +147,25 @@ class LockDueBoundedWorkTest {
             long pages = JdbcCommandStore.BACKLOG.stream().mapToLong(query -> pagesRead(plan(query, "cap",
                     JdbcCommandStore.BACKLOG_COUNT_CAP))).sum();
             assertThat(pages).as("pages read to count the backlog").isLessThanOrEqualTo(BACKLOG_BUDGET);
+        }
+    }
+
+    @Nested
+    @Order(5)
+    @DisplayName("When counting waiting commands exactly — metrics")
+    class CountingWaitingCommandsExactly {
+
+        @Test
+        @DisplayName("Behind 20,000 rows of finished history, counting 10 waiting commands reads only the waiting rows — so the metric does not slow down as history grows")
+        void exactBacklogReadsOnlyWaitingRows() {
+            // given
+            finishedHistory(20_000);
+            inserted("'wait-' || g", "'wait-' || g", "1", "now()", 1, 10);
+            prepared();
+
+            // then
+            long pages = JdbcCommandStore.WAITING_COUNTS.stream().mapToLong(query -> pagesRead(plan(query))).sum();
+            assertThat(pages).as("pages read to count waiting commands exactly").isLessThanOrEqualTo(EXACT_BACKLOG_BUDGET);
         }
     }
 

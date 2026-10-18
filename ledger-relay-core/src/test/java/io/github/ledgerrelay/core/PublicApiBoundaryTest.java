@@ -15,6 +15,7 @@ class PublicApiBoundaryTest {
      * hand.
      */
     static final List<String> PUBLIC_TYPES = List.of(
+            "CommandBacklog",
             "CommandConflictException",
             "CommandKind",
             "CommandReceipt",

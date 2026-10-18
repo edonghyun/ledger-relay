@@ -2,6 +2,7 @@ package io.github.ledgerrelay.core.application;
 
 import io.github.ledgerrelay.core.AbandonOutcome;
 import io.github.ledgerrelay.core.CannotAbandonException;
+import io.github.ledgerrelay.core.CommandBacklog;
 import io.github.ledgerrelay.core.HaltedCommand;
 import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.LedgerRelayOperator;
@@ -15,6 +16,7 @@ import io.github.ledgerrelay.core.spi.LedgerTransfer;
 import io.github.ledgerrelay.core.spi.LedgerUnavailableException;
 import io.github.ledgerrelay.core.spi.Transactions;
 import io.github.ledgerrelay.core.spi.TransferBody;
+import io.github.ledgerrelay.core.spi.WaitingCounts;
 import java.math.BigInteger;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -48,6 +50,16 @@ public final class RelayOperator implements LedgerRelayOperator {
         this.lifecycle = lifecycle;
         this.ledger = ledger;
         this.lookupTimeout = lookupTimeout;
+    }
+
+    @Override
+    public CommandBacklog backlog() {
+        WaitingCounts counts = transactions.inTransaction(store::waitingCounts);
+        // A row accepted after the store read its clock would give a negative age. Report it as zero
+        Optional<Duration> age = counts.oldestWaitingAcceptedAt()
+                .map(accepted -> Duration.between(accepted, counts.readAt()))
+                .map(between -> between.isNegative() ? Duration.ZERO : between);
+        return new CommandBacklog(counts.pending(), counts.claimed(), counts.halted(), age, counts.readAt());
     }
 
     /**

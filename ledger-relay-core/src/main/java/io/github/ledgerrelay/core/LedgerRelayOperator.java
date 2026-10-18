@@ -39,4 +39,11 @@ public interface LedgerRelayOperator {
      *                                                                   time
      */
     ReconciliationReport reconcile(long afterPosition, int limit);
+
+    /**
+     * Counts the commands waiting right now, exactly, with how long the oldest has waited. The cost is proportional to
+     * the number of waiting commands (it grows during a TB outage), not to finished history. Finished commands are not
+     * counted.
+     */
+    CommandBacklog backlog();
 }

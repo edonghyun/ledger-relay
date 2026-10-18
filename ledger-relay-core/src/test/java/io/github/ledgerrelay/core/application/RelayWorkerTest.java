@@ -594,6 +594,11 @@ class RelayWorkerTest {
         }
 
         @Override
+        public io.github.ledgerrelay.core.spi.WaitingCounts waitingCounts() {
+            return real.waitingCounts();
+        }
+
+        @Override
         public List<CommandRecord> findFinished(long afterRowId, int limit) {
             return real.findFinished(afterRowId, limit);
         }

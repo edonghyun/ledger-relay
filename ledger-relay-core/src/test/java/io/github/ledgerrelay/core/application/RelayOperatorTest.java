@@ -1,5 +1,7 @@
 package io.github.ledgerrelay.core.application;
 
+import io.github.ledgerrelay.core.CommandBacklog;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -137,6 +139,29 @@ class RelayOperatorTest {
     }
 
     // ── Helpers used only in this file ──────────────────────────────────────────
+
+    @Nested
+    @Order(3)
+    @DisplayName("When the backlog is read")
+    class ReadingTheBacklog {
+
+        @Test
+        @DisplayName("It counts each waiting state and measures the longest wait on the store's clock")
+        void backlogReportsAgeFromTheStoreClock() {
+            // given: hold-1 waits behind the halted capture-1 for 90 seconds
+            storage.elapse(Duration.ofSeconds(90));
+
+            // when
+            CommandBacklog backlog = operator.backlog();
+
+            // then
+            assertThat(backlog.pending()).as("pending commands").isEqualTo(1);
+            assertThat(backlog.claimed()).as("in-progress commands").isZero();
+            assertThat(backlog.halted()).as("halted commands").isEqualTo(1);
+            assertThat(backlog.oldestWaitingAge()).as("longest wait").contains(Duration.ofSeconds(90));
+            assertThat(backlog.readAt()).as("read at").isEqualTo(storage.clock().get());
+        }
+    }
 
     private void insertedPastTheChecks(NewCommand row) {
         if (storage.transactions().inTransaction(() -> storage.store().insertIfAbsent(row)).isPresent()) {
