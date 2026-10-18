@@ -38,32 +38,15 @@ public final class Accounts {
 
     /** Creates the accounts and tops up the buyers. Waits until TB answers. Changes nothing if already done. */
     public static void ensure(Client client) {
-        AccountBatch accounts = new AccountBatch(BUYERS.size() + 2);
-        add(accounts, FUNDING, AccountFlags.NONE);
-        add(accounts, MERCHANT, AccountFlags.NONE);
-        for (long buyer : BUYERS) {
-            // A buyer cannot hold or send more than the balance, so a payment with insufficient funds is rejected
-            add(accounts, buyer, AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS);
-        }
-        TransferBatch topUps = new TransferBatch(BUYERS.size());
-        for (long buyer : BUYERS) {
-            topUps.add();
-            topUps.setId(TOP_UP_TRANSFER_BASE + buyer);
-            topUps.setDebitAccountId(FUNDING);
-            topUps.setCreditAccountId(buyer);
-            topUps.setAmount(STARTING_BALANCE_SATANG);
-            topUps.setLedger(LEDGER);
-            topUps.setCode(TOP_UP_CODE);
-        }
         try {
-            CreateAccountResultBatch accountResults = client.createAccounts(accounts);
+            CreateAccountResultBatch accountResults = client.createAccounts(accounts());
             while (accountResults.next()) {
                 CreateAccountStatus status = accountResults.getStatus();
                 if (status != CreateAccountStatus.Created && status != CreateAccountStatus.Exists) {
                     throw new IllegalStateException("Could not create the ledger accounts: " + status);
                 }
             }
-            CreateTransferResultBatch topUpResults = client.createTransfers(topUps);
+            CreateTransferResultBatch topUpResults = client.createTransfers(topUps());
             while (topUpResults.next()) {
                 CreateTransferStatus status = topUpResults.getStatus();
                 if (status != CreateTransferStatus.Created && status != CreateTransferStatus.Exists) {
@@ -74,6 +57,31 @@ public final class Accounts {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while preparing the ledger accounts", e);
         }
+    }
+
+    private static AccountBatch accounts() {
+        AccountBatch accounts = new AccountBatch(BUYERS.size() + 2);
+        add(accounts, FUNDING, AccountFlags.NONE);
+        add(accounts, MERCHANT, AccountFlags.NONE);
+        for (long buyer : BUYERS) {
+            // A buyer cannot hold or send more than the balance, so a payment with insufficient funds is rejected
+            add(accounts, buyer, AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS);
+        }
+        return accounts;
+    }
+
+    private static TransferBatch topUps() {
+        TransferBatch topUps = new TransferBatch(BUYERS.size());
+        for (long buyer : BUYERS) {
+            topUps.add();
+            topUps.setId(TOP_UP_TRANSFER_BASE + buyer);
+            topUps.setDebitAccountId(FUNDING);
+            topUps.setCreditAccountId(buyer);
+            topUps.setAmount(STARTING_BALANCE_SATANG);
+            topUps.setLedger(LEDGER);
+            topUps.setCode(TOP_UP_CODE);
+        }
+        return topUps;
     }
 
     /** Actual balance of an account in TB. */

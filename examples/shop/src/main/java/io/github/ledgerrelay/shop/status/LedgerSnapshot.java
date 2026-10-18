@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -162,20 +163,21 @@ class LedgerSnapshot {
      * keeps adding.
      */
     private long countDoubleTransfers() {
-        while (true) {
-            AccountFilter filter = new AccountFilter();
-            filter.setAccountId(Accounts.MERCHANT);
-            filter.setCredits(true);
-            filter.setTimestampMin(transfersAfter + 1);
-            filter.setLimit(TRANSFER_PAGE);
-            TransferBatch page;
-            try {
-                page = client.getAccountTransfers(filter);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException(e);
-            }
-            int read = 0;
+        addNewMerchantPosts();
+        if (capturedByOrder.isEmpty()) {
+            return 0;
+        }
+        Map<Long, Long> amounts = orderAmounts(capturedByOrder.keySet());
+        return capturedByOrder.entrySet().stream()
+                .filter(captured -> captured.getValue() > amounts.getOrDefault(captured.getKey(), 0L)).count();
+    }
+
+    /** Reads the merchant's credits after the last one read, page by page, and adds each post to its order's total. */
+    private void addNewMerchantPosts() {
+        int read;
+        do {
+            TransferBatch page = merchantCreditsAfter(transfersAfter);
+            read = 0;
             while (page.next()) {
                 read++;
                 transfersAfter = page.getTimestamp();
@@ -183,18 +185,27 @@ class LedgerSnapshot {
                     capturedByOrder.merge(page.getUserData64(), page.getAmount().longValueExact(), Long::sum);
                 }
             }
-            if (read < TRANSFER_PAGE) {
-                break;
-            }
+        } while (read == TRANSFER_PAGE);
+    }
+
+    private TransferBatch merchantCreditsAfter(long timestamp) {
+        AccountFilter filter = new AccountFilter();
+        filter.setAccountId(Accounts.MERCHANT);
+        filter.setCredits(true);
+        filter.setTimestampMin(timestamp + 1);
+        filter.setLimit(TRANSFER_PAGE);
+        try {
+            return client.getAccountTransfers(filter);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
         }
-        if (capturedByOrder.isEmpty()) {
-            return 0;
-        }
+    }
+
+    private Map<Long, Long> orderAmounts(Set<Long> orderIds) {
         Map<Long, Long> amounts = new HashMap<>();
-        sql.sql("SELECT id, amount_satang FROM shop_order WHERE id = ANY(?)")
-                .param(capturedByOrder.keySet().toArray(Long[]::new))
+        sql.sql("SELECT id, amount_satang FROM shop_order WHERE id = ANY(?)").param(orderIds.toArray(Long[]::new))
                 .query((row, n) -> amounts.put(row.getLong("id"), row.getLong("amount_satang"))).list();
-        return capturedByOrder.entrySet().stream()
-                .filter(captured -> captured.getValue() > amounts.getOrDefault(captured.getKey(), 0L)).count();
+        return amounts;
     }
 }
