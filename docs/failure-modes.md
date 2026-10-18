@@ -6,7 +6,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - 처음부터 통과하는 테스트는 코드를 일부러 망가뜨려(대조군) 정말 실패하는지 확인한다. 대조군 결과도 적는다.
 - 수치는 실제로 잰 것만 적는다. 운영 지표와 실험(스펙 §9 E1~E10)은 해당 단계에서 채운다.
 
-## 1. 막은 장애 (F1~F10은 02a core, F11~F19는 02b jdbc, F20은 1단계 리뷰, F21~F25는 03a 워커, F26은 테스트 환경, F27부터 02d 전체 리뷰)
+## 1. 막은 장애 (F1~F10은 02a core, F11~F19는 02b jdbc, F20은 1단계 리뷰, F21~F25는 03a 워커, F26은 테스트 환경, F27부터 02d 전체 리뷰, F32는 02e)
 
 ### F1. 막힌 키의 대기 명령이 claim 한도를 다 차지해 다른 키가 굶는다
 
@@ -142,7 +142,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 
 - **깨지는 것**: `lockDue`는 접수 순서(`ORDER BY c.id LIMIT n`)로 후보를 고른다. 이 조건을 받치는 인덱스가 없으면 플래너가 기본 키 순서로 훑으면서 끝난 행을 하나씩 걸러 낸다. 워커가 짧은 간격으로 폴링하므로 DB 부하가 이력 크기에 비례해 커진다. 보관 정책은 기본값이 꺼져 있다.
 - **재현**: `LockDueScanTest` › 끝난 명령 20만 건 뒤에 접수된 명령 100건이 있으면 › `theDueQueryDoesNotFilterThroughFinishedRows`. 같은 질의의 `EXPLAIN ANALYZE`에서 "Rows Removed by Filter"를 더한 값이 100 이하여야 한다. 접수된 명령이 1건뿐이면 기존 부분 인덱스(`ledger_command_unfinished`)가 쓰여 재현되지 않았다. 100건으로 늘리자 기본 키 스캔이 골라졌다.
-- **구조**: 부분 인덱스 `ledger_command_due ON (id) WHERE state IN ('PENDING','CLAIMED')`.
+- **구조**: 부분 인덱스 `ledger_command_due ON (id) WHERE state IN ('PENDING','CLAIMED')`(02e에서 `ledger_command_ready`로 바뀜. 맨 앞만 담으므로 끝난 이력도 읽지 않는다, F32). `theDueQueryDoesNotFilterThroughFinishedRows`는 새 질의에서도 그대로 지난다.
 - **확인**: 인덱스 전에는 걸러 낸 행이 200,000, 실행 21.8ms였다. 인덱스 뒤에는 테스트가 통과한다(리뷰어 측정: 100만 건에서 151ms → 0.047ms).
 
 ### F20. U+0000이 든 문자열이 접수를 SQL 오류로 깨고, 짝 없는 서로게이트가 해시를 충돌시킨다 (1단계 리뷰 M-2)
@@ -240,6 +240,29 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **재현**: `JdbcCommandStoreTest` › jdbc 전용: 스키마가 지키는 것 › `idColumnsCompareByteForByte`(4), `aDuplicateTransferIdIsRefused`, `rowsThatBreakTheInvariantsAreRefused`(3), `findSurvivesAnAddedColumn`. 마지막 것은 앱 트랜잭션 안의 조회로 재현했다. 트랜잭션 밖에서는 pgjdbc가 스스로 다시 준비해 재현되지 않았다.
 - **구조**: ID 컬럼은 `COLLATE "C"`로 둔다. 이름 붙은 제약으로 `ledger_command_transfer_id_key UNIQUE`, `ledger_command_seq_check`, `ledger_command_reference_check`, `ledger_command_claimed_lease_check`, `ledger_command_skipped_reason_check`를 둔다. 질의는 공용 컬럼 목록(`JdbcCommandStore.COLUMNS`)을 쓴다. 계약 테스트의 행 빌더는 키마다 다른 이체 ID를 낸다(`TestTransferIds`).
 - **확인**: 넣기 전에 9건이 실패했다(collation 4, 이체 ID 1, CHECK 3, 컬럼 추가 1).
+
+### F32. claim 폴링 비용이 막힌 키 뒤의 백로그에 비례한다 (02d 전체 리뷰 R-jdbc-I1, 02e)
+
+- **깨지는 것**: 옛 `lockDue`는 후보마다 "같은 키에 앞선 미완료가 있는가"를 찾았다(`NOT EXISTS`, 실행 계획에서는 Nested Loop Anti Join). 맨 앞이 backoff 중이거나 처리 중인 키 하나 뒤에 대기 명령 10만 건이 쌓이면, 폴링 한 번이 그 10만 건을 하나씩 확인한다. 앞선 미완료 찾기가 10만 번, 약 40만 페이지, 576~680ms였다(기준 0.2ms). 후보가 limit보다 적으면 `LIMIT`이 일찍 멈추지 못하고, 플래너는 대부분 통과한다고 잘못 추정했다. F19의 검사("Rows Removed by Filter")는 이 비용을 보지 못한다. 맨 앞이 backoff 중인 키가 많을 때도 같은 비례가 생긴다. TB 회복 직후 보낼 수 있는 맨 앞이 몰리면 접수 순서(id)로 정렬해야 한다. `FOR UPDATE`가 정렬과 `LIMIT` 사이에 끼어 상위 N개 정렬을 쓰지 못해, 실험에서 21ms가 걸리고 디스크 정렬로 넘어갔다.
+- **재현**: `LockDueBoundedWorkTest`의 세 테스트가 limit 128에서 실행 계획 맨 위 노드의 페이지를 1,000 이하로 본다. `aBacklogBehindABlockedKeyIsNotRead`(막힌 키 뒤 대기 2만 건 + 보낼 수 있는 키 100개), `headsWaitingForTheirRetryAreNotRead`(맨 앞이 1시간 backoff인 키 2만 개 + 100개), `manyReadyHeadsStopAtTheLimit`(끝난 이력 5만 건 뒤에 보낼 수 있는 맨 앞 2만 개). 측정은 `LockDueBacklogMeasurementTest`(`./gradlew :ledger-relay-jdbc:measurement`)의 네 장면이다.
+- **구조**:
+  - 후보 순서는 "보낼 수 있게 된 시각"이다. 접수 명령은 다음 시도 시각, 처리 중 명령은 lease 만료 시각이 그 시각이고, 같으면 접수 순서다(P2e-1). 포트 계약 `CommandStore.lockDue`가 정하고, 메모리와 PG 저장소가 같은 계약 테스트를 지난다. 같은 키 안의 순서는 맨 앞이 하나뿐이라 바뀌지 않는다.
+  - jdbc 어댑터는 `ledger_command.is_head`(키의 맨 앞 미완료인가), `ready_at`(보낼 시각, 생성 컬럼), `ledger_ordering_key.unfinished_count`(미완료 개수)를 둔다(P2e-2).
+  - 인덱스는 둘이다(P2e-3). `ledger_command_ready ON (ready_at, id) WHERE is_head AND state IN ('PENDING','CLAIMED')`는 claim이 읽는다. 유일 `ledger_command_one_head ON (ordering_key) WHERE is_head`는 키당 맨 앞 둘을 막는다. `ledger_command_due`는 지웠다.
+  - 넣기와, 미완료를 최종 상태로 바꾸는 `compareAndSet`이 같은 트랜잭션에서 키 행의 개수를 고치고 맨 앞을 다시 정한다(P2e-4). 키 행 갱신이 같은 키의 접수와 완료를 줄 세운다. READ COMMITTED에서는 늦은 쪽이 기다렸다가 새 스냅숏으로 맨 앞을 정한다. 더 높은 격리 수준에서는 늦은 쪽이 40001로 끝나 재시도된다.
+  - DB를 직접 고친 뒤에는 `rebuild-heads.sql`로 다시 계산한다(P2e-5, docs/development.md). core 서비스 코드는 바뀌지 않았다.
+- **확인**:
+  - 옛 질의에서 페이지 테스트 둘이 실패했다(2만 건 백로그 61,097페이지·126ms, backoff 맨 앞 2만 개 1,447페이지).
+  - 새 순서 계약 테스트 둘(`aRetriedCommandQueuesAtItsRetryTime`, `anExpiredLeaseQueuesAtItsExpiry`)은 메모리와 PG에서 모두 실패했다.
+  - 변이 확인:
+    - `is_head` 조건을 빼면 jdbc 17건이 실패한다.
+    - `ORDER BY c.id`로 바꾸면 순서 계약 2건과 회복 몰림 페이지 테스트(1,993페이지)가 실패한다.
+    - 완료 쪽 키 행 갱신을 빼면 `HeadRaceTest` 4건이 실패한다. 접수와 완료가 서로 기다리지 않게 된다.
+  - 모든 계약 테스트 뒤에 장부가 행과 맞는지 검사한다(`PostgresStorage.assertHeadsConsistent`).
+  - 측정(limit 128, 10만 건, 세 번 실행): 기준 112페이지 0.12ms, 백로그 10만 건 121페이지 0.13ms(옛 576~680ms), backoff 맨 앞 10만 개 201페이지 0.10ms, 보낼 수 있는 맨 앞 10만 개 194페이지 0.11ms.
+- **남은 것**:
+  - 완료가 키 행을 잠그므로, 핸들러가 다른 키에 접수하거나 앱이 여러 키를 다른 순서로 접수하면 교착이 생길 수 있다. PG가 한쪽을 끊는다(40P01). 완료 쪽이 끊기면 핸들러 실패와 같은 경로로 재시도된다. 막지 않고 문서로 남긴다(P2e-6, docs/development.md).
+  - DB를 직접 고치고 `rebuild-heads.sql`을 돌리지 않으면 그 키가 후보에서 빠지거나 맨 앞이 아닌 명령이 나갈 수 있다.
 
 ## 2. 열린 장애
 

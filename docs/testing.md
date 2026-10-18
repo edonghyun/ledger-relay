@@ -162,7 +162,7 @@ core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다
 |---|---|
 | `newTransfer("pay-1", "order-1", 1)`, `newReserve(…)`, `newPost("capture-1", "order-1", 2, "hold-1")` | (저장소 계약) 넣을 행. 이체 ID는 100+순번, 해시는 `hash-of-<id>` |
 | `inserted(row)` / `claimed(id, token)` / `finished(id, row)` / `released(id)` / `halted(id)` | (저장소 계약) **전제**: 행이 들어감 / 처리 중이 됨 / 끝남 / 되돌아감 / 멈춤 |
-| `assertDue(ids…)` / `assertDueWithLimit(n, ids…)` / `assertNothingDue()` | (저장소 계약) claim 후보가 정확히 이것(접수 순서) / 없음 |
+| `assertDue(ids…)` / `assertDueWithLimit(n, ids…)` / `assertNothingDue()` | (저장소 계약) claim 후보가 정확히 이것(보낼 수 있게 된 순서, 같으면 접수 순서) / 없음 |
 | `transfer("pay-1", "order-1", 500)`, `reserve(…)`, `post("capture-1", "order-1", "hold-1")`, `voidOf(…)` | (서비스 계약) 명령. 키와 금액을 숨기지 않는다 |
 | `submit(command)` | (서비스 계약) 앱처럼 트랜잭션 안에서 접수한다 |
 | `acceptedPastTheChecks(postRow("capture-1", "order-1", 1, "hold-1", 102))`, `reserveRow(…)` | (서비스 계약) **전제**: 접수 검사를 거치지 않은 행이 들어감 |
@@ -173,7 +173,7 @@ core 테스트의 효과 이름은 그 파일 안의 private 메서드로 둔다
 | `handler.failNextCalls(1)` | 다음 핸들러 호출이 기록 전에 던진다 |
 | `handler.crashNextCall()` | 다음 핸들러 호출이 기록 전에 `Error`를 던진다(JVM 수준 실패 흉내) |
 | `assertQueryState(id, State.X)` | 조회 상태(§4.2) |
-| `assertClaimed(batch, ids…)` / `assertNothingClaimed(batch)` | 정확히 이 명령들이 접수 순서로 잡힘 / 아무것도 안 잡힘 |
+| `assertClaimed(batch, ids…)` / `assertNothingClaimed(batch)` | 정확히 이 명령들이 보낼 수 있게 된 순서로 잡힘 / 아무것도 안 잡힘 |
 | `assertWritten(r)` / `assertFenced(r)` / `assertHandlerFailed(r)` | 쓰기가 반영됨 / 0행으로 막힘 / 핸들러가 던져 취소됨 |
 | `assertHandlerRanOnceFor(id, State.X)` / `assertHandlerNeverRanFor(id)` | 핸들러가 끝까지 한 번 실행됨 / 한 번도 끝까지 실행되지 않음 |
 | `assertRejection(id, category, code)` | 거절·충돌 사유 |
