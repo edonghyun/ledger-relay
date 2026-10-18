@@ -59,16 +59,24 @@ public final class JdbcOrderingKeys implements OrderingKeys {
         }
         sql.sql("UPDATE ledger_ordering_key SET next_seq = next_seq WHERE ordering_key IN (:keys)")
                 .param("keys", keys).update();
-        sql.sql("""
+        sql.sql(CLEAR_FINISHED_HEADS).param("keys", keys).update();
+        sql.sql(MARK_NEXT_HEADS).param("keys", keys).update();
+    }
+
+    static final String CLEAR_FINISHED_HEADS = """
                 UPDATE ledger_command SET is_head = false
                 WHERE ordering_key IN (:keys) AND is_head AND state IN ('APPLIED','REJECTED','CONFLICT','SKIPPED')
-                """).param("keys", keys).update();
-        sql.sql("""
+            """;
+
+    /**
+     * 키마다 가장 앞 순번의 미완료를 맨 앞으로 켠다. 키마다 따로 {@code min(seq)}를 구해야 미완료 인덱스에서 하나만 읽는다.
+     * 키들을 묶어 {@code GROUP BY}로 구하면 막힌 키 뒤의 백로그를 모두 읽는다(2만 건에 564페이지). 테스트가 실행 계획을 본다.
+     */
+    static final String MARK_NEXT_HEADS = """
                 UPDATE ledger_command c SET is_head = true
-                FROM (SELECT ordering_key, min(seq) AS seq FROM ledger_command
-                      WHERE ordering_key IN (:keys) AND state IN ('PENDING','CLAIMED','HALTED')
-                      GROUP BY ordering_key) h
-                WHERE c.ordering_key = h.ordering_key AND c.seq = h.seq
-                """).param("keys", keys).update();
-    }
+                FROM ledger_ordering_key k
+                WHERE k.ordering_key IN (:keys) AND c.ordering_key = k.ordering_key
+                  AND c.seq = (SELECT min(u.seq) FROM ledger_command u
+                               WHERE u.ordering_key = k.ordering_key AND u.state IN ('PENDING','CLAIMED','HALTED'))
+            """;
 }

@@ -27,6 +27,8 @@ class LockDueBoundedWorkTest {
      */
     static final int HISTORY = 50_000;
     static final int READY_KEYS = 100;
+    /** 키 하나의 맨 앞을 넘기는 문장의 상한: 다음 미완료를 인덱스에서 하나 찾고 그 행을 고친다. */
+    static final long ONE_KEY_BUDGET = 50;
 
     PostgresStorage storage;
 
@@ -101,6 +103,21 @@ class LockDueBoundedWorkTest {
             // then
             assertReadAtMostPages(PAGE_BUDGET, plan(JdbcOrderingKeys.LOCK_KEYS_TO_PASS_ON));
         }
+
+        @Test
+        @DisplayName("막힌 키의 맨 앞이 끝나 넘길 때 그 뒤 대기 2만 건은 읽지 않는다 — 다음 미완료 하나만 찾는다 (P2e-7)")
+        void passingOnABlockedKeyDoesNotReadItsBacklog() {
+            // given: 키 hot의 맨 앞 hot-1이 방금 끝났고, 그 뒤에 2만 건이 기다린다
+            inserted("'hot-' || g", "'hot'", "g", "now()", 1, MANY + 1);
+            prepared();
+            storage.sql().sql("UPDATE ledger_command SET state = 'APPLIED', completed_at = now() WHERE command_id = 'hot-1'")
+                    .update();
+            storage.transactions().inTransaction(() -> storage.sql().sql(JdbcOrderingKeys.CLEAR_FINISHED_HEADS)
+                    .param("keys", java.util.List.of("hot")).update());
+
+            // then
+            assertReadAtMostPages(ONE_KEY_BUDGET, plan(JdbcOrderingKeys.MARK_NEXT_HEADS, "keys", java.util.List.of("hot")));
+        }
     }
 
     // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
@@ -159,8 +176,12 @@ class LockDueBoundedWorkTest {
     }
 
     private String plan(String query) {
+        return plan(query, "limit", LIMIT);
+    }
+
+    private String plan(String query, String name, Object value) {
         return storage.transactions().inTransaction(() -> storage.sql()
-                .sql("EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) " + query).param("limit", LIMIT)
+                .sql("EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) " + query).param(name, value)
                 .query(String.class).list().stream().reduce("", (a, b) -> a + b + "\n"));
     }
 
