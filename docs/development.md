@@ -26,17 +26,32 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 
 ### 앱이 JPA를 쓸 때
 
-- `JdbcTransactions(transactionManager, dataSource)`와 `JdbcCommandStore(dataSource)`에는 트랜잭션 매니저가 쥔 것과 같은 DataSource 객체를 준다. 다르면 접수가 거부된다(F18).
+- `JdbcTransactions(transactionManager, dataSource)`, `JdbcOrderingKeys(dataSource)`, `JdbcCommandStore(dataSource)`에는 트랜잭션 매니저가 쥔 것과 같은 DataSource 객체를 준다. 다르면 접수가 거부된다(F18).
 - `JpaTransactionManager`에 같은 DataSource를 알려 주고(`setDataSource`), JPA dialect는 `HibernateJpaDialect`(Spring이 Hibernate에 쓰는 기본)를 바꾸지 않는다. 이 dialect가 JDBC 커넥션을 트랜잭션에 노출해야 `JdbcClient`가 같은 트랜잭션에 합류한다(F16).
 - `DefaultJpaDialect`는 격리 수준 지정을 거부한다(`InvalidIsolationLevelException`). 워커 단계는 READ COMMITTED를 명시하므로(P2b-16) 이 dialect에서는 시작하지 못한다. JTA(`JtaTransactionManager`)는 지원하지 않는다. JTA에서는 트랜잭션이 시작될 때 DataSource 커넥션이 Spring 트랜잭션에 묶이지 않아, 접수 앞의 확인(F18)이 거부한다. 필요해지면 따로 결정한다.
 
 ### 큐 테이블 운영 (02d)
 
-- `ledger_command`의 부분 인덱스는 셋이다: `ledger_command_unfinished`, `ledger_command_ready`, `ledger_command_one_head`(02e). 상태가 바뀌거나, lease·다음 시도 시각이 바뀌거나(`ready_at`), 맨 앞 표시가 바뀌면(`is_head`) 인덱스 컬럼이 바뀌어 HOT 갱신이 되지 않는다. 죽은 튜플이 작은 인덱스에 빨리 쌓이므로 테이블별 autovacuum을 낮게 잡는다(예: `autovacuum_vacuum_scale_factor = 0.01`, `autovacuum_vacuum_cost_limit` 상향). `fillfactor = 80`을 두면 `markSubmitted` 같은 인덱스 밖 갱신이 같은 페이지에 들어갈 여지가 생긴다. 수치는 아직 재지 않았다.
-- 맨 앞 표시(`is_head`)와 키 행의 미완료 개수(`unfinished_count`)는 저장소가 넣기와 완료 때 고친다. claim은 이 표시만 보고 후보를 고른다(F32). **DB를 직접 고친 뒤**(행 삭제, 상태 수정, 키 바꾸기)에는 표시가 행과 어긋난다. 어긋나면 그 키가 영원히 후보에서 빠지거나 맨 앞이 아닌 명령이 먼저 나갈 수 있다. 워커를 멈추고, 고친 트랜잭션을 커밋한 뒤, `ledger-relay-jdbc` jar의 `io/github/ledgerrelay/jdbc/rebuild-heads.sql`을 한 트랜잭션에서 실행하고(`psql -1 -f rebuild-heads.sql`) 나서 워커를 다시 켠다. 스크립트는 먼저 `ledger_ordering_key`를 표 잠금하므로 트랜잭션 밖에서는 실행되지 않는다. 잠금은 커밋까지 앱의 접수를 기다리게 한다. 그래야 계산하는 동안 커밋된 접수를 옛 개수로 덮어쓰지 않는다. 이 SQL은 테스트의 직접 SQL 준비도 쓴다(`PostgresStorage.rebuildHeads`).
-- 완료 트랜잭션은 그 키의 행(`ledger_ordering_key`)을 잠근다(P2e-4). 그래서 두 경우에 교착이 생길 수 있다. 하나는 완료 핸들러가 다른 키에 접수하는데 그 키를 잡은 앱 트랜잭션이 이 키에 접수하려는 경우다. 다른 하나는 앱 트랜잭션들이 여러 키를 서로 다른 순서로 접수하는 경우다. PG가 교착을 감지해 한쪽을 `40P01`로 끊는다. 완료 쪽이 끊기면 핸들러 실패와 같은 경로로 롤백되고 다시 시도된다. 앱 쪽이 끊기면 앱이 재시도한다. 막지 않는다(P2e-6). 한 앱 트랜잭션에서 여러 키에 접수하면 키 이름 순서로 접수해 줄일 수 있다.
-- **02e 스키마 변경**: 열 `ledger_command.is_head`, `ledger_command.ready_at`(생성 컬럼), `ledger_ordering_key.unfinished_count`와 인덱스 `ledger_command_ready`, `ledger_command_one_head`를 더하고 `ledger_command_due`를 지웠다. 0.1 출시 전이라 마이그레이션 파일은 두지 않는다. 기존 개발 DB는 워커를 멈추고 열과 인덱스를 `schema.sql`대로 더한 뒤 `rebuild-heads.sql`을 실행한다.
+- `ledger_command`의 부분 인덱스는 넷이다: `ledger_command_unfinished`, `ledger_command_ready`, `ledger_command_one_head`, `ledger_command_finished_head`(02e). 상태가 바뀌거나, lease·다음 시도 시각이 바뀌거나(`ready_at`), 맨 앞 표시가 바뀌면(`is_head`) 인덱스 컬럼이 바뀌어 HOT 갱신이 되지 않는다. 죽은 튜플이 작은 인덱스에 빨리 쌓이므로 테이블별 autovacuum을 낮게 잡는다(예: `autovacuum_vacuum_scale_factor = 0.01`, `autovacuum_vacuum_cost_limit` 상향). `fillfactor = 80`을 두면 `markSubmitted` 같은 인덱스 밖 갱신이 같은 페이지에 들어갈 여지가 생긴다. 수치는 아직 재지 않았다.
+- 맨 앞 표시(`is_head`)는 넣을 때 키에 맨 앞이 없으면 켜고, 명령이 끝나면 다음 claim이 넘긴다(F32, F33). claim은 이 표시만 보고 후보를 고른다. **DB를 직접 고친 뒤**(행 삭제, 상태 수정, 키 바꾸기)에는 표시가 행과 어긋난다. 어긋나면 그 키가 영원히 후보에서 빠지거나 맨 앞이 아닌 명령이 먼저 나갈 수 있다. 워커를 멈추고, 고친 트랜잭션을 커밋한 뒤, `ledger-relay-jdbc` jar의 `io/github/ledgerrelay/jdbc/rebuild-heads.sql`을 한 트랜잭션에서 실행하고(`psql -1 -f rebuild-heads.sql`) 나서 워커를 다시 켠다. 스크립트는 먼저 `ledger_ordering_key`를 표 잠금하므로 트랜잭션 밖에서는 실행되지 않는다. 잠금은 커밋까지 앱의 접수를 기다리게 한다. 이 SQL은 테스트의 직접 SQL 준비도 쓴다(`PostgresStorage.rebuildHeads`).
+- **02e 스키마 변경**: 열 `ledger_command.is_head`, `ledger_command.ready_at`(생성 컬럼)과 인덱스 `ledger_command_ready`, `ledger_command_one_head`, `ledger_command_finished_head`를 더하고 `ledger_command_due`를 지웠다. 0.1 출시 전이라 마이그레이션 파일은 두지 않는다. 기존 개발 DB는 워커를 멈추고 열과 인덱스를 `schema.sql`대로 더한 뒤 `rebuild-heads.sql`을 실행한다.
 - `ledger_ordering_key`의 행은 지우지 않는다. 지우는 작업이 진행 중인 접수와 겹치면 다음 접수의 순번이 1로 돌아가 순서가 뒤집히거나 앱 트랜잭션이 깨진다(02d P2d-11). 행 하나는 수십 바이트다.
+
+### 트랜잭션과 잠금 (02e F33)
+
+트랜잭션마다 잡는 행이다. 잡은 행은 커밋까지 놓지 않는다. 주문 행은 앱의 테이블 행(예: `orders`)이다.
+
+| 트랜잭션 | 여는 쪽 | 잡는 순서 | 그 안에서 앱 코드가 도나 |
+|---|---|---|---|
+| 접수(`submit`) | 앱 | (앱이 고친 주문 행) → 키 행 → 새 명령 행 | 앱 트랜잭션 그 자체 |
+| claim | 워커 | 끝난 맨 앞의 키 행(쥔 쪽이 있으면 건너뜀) → 후보 명령 행(건너뜀) | 아니오 |
+| 결과 쓰기(`complete`, `skip`, `abandonHalted`) | 워커, 운영자 | 그 명령 행 → 핸들러가 고치는 주문 행 | 예(핸들러) |
+| 제출 기록·되돌리기(`markSubmitted`, `release`) | 워커 | 그 명령 행 | 아니오 |
+| `rebuild-heads.sql` | 운영자 | 키 표 전체 → 명령 행들 | 아니오 |
+
+- 키 행과 주문 행을 둘 다 잡는 트랜잭션은 앱의 접수뿐이다. 그래서 워커와 앱이 둘을 반대 순서로 잡아 교착할 일이 없다. 이 성질은 코드 구조가 지킨다. 키 행을 잡는 호출은 `OrderingKeys`에만 있고, 핸들러를 부르는 `WorkerWrites`는 그 포트를 받지 않는다(`ArchitectureTest`). jdbc의 `CommandStore`가 속으로 키 행을 잡지 않는 것은 `KeyLockFreeStoreTest`가 본다.
+- 남는 교착은 앱 트랜잭션끼리다. 한 앱 트랜잭션에서 여러 키에 접수하면 키 이름 순서로 접수한다(failure-modes 4절).
+- 앱이 접수를 연 채 오래 머물면 그 키의 다음 명령은 그 앱이 커밋할 때까지 나가지 않는다. 다른 키는 영향이 없다.
 
 ### DB를 옮길 때
 

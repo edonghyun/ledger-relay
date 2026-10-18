@@ -6,7 +6,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - 처음부터 통과하는 테스트는 코드를 일부러 망가뜨려(대조군) 정말 실패하는지 확인한다. 대조군 결과도 적는다.
 - 수치는 실제로 잰 것만 적는다. 운영 지표와 실험(스펙 §9 E1~E10)은 해당 단계에서 채운다.
 
-## 1. 막은 장애 (F1~F10은 02a core, F11~F19는 02b jdbc, F20은 1단계 리뷰, F21~F25는 03a 워커, F26은 테스트 환경, F27부터 02d 전체 리뷰, F32는 02e)
+## 1. 막은 장애 (F1~F10은 02a core, F11~F19는 02b jdbc, F20은 1단계 리뷰, F21~F25는 03a 워커, F26은 테스트 환경, F27부터 02d 전체 리뷰, F32·F33은 02e)
 
 ### F1. 막힌 키의 대기 명령이 claim 한도를 다 차지해 다른 키가 굶는다
 
@@ -226,7 +226,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 
 ### F30. 긴 commandId·순서 키가 접수를 SQL 오류로 깬다 (전체 리뷰에서 발견)
 
-- **깨지는 것**: `command_id`와 `ordering_key`는 b-tree 인덱스가 걸린 `text`다. PG는 약 2.7KB를 넘는 인덱스 항목을 거부한다. 앱이 그보다 긴 ID를 보내면 `nextSeq`의 upsert가 "index row size exceeds maximum"으로 끝나고 앱 트랜잭션 전체가 중단된다. F20과 같은 종류다.
+- **깨지는 것**: `command_id`와 `ordering_key`는 b-tree 인덱스가 걸린 `text`다. PG는 약 2.7KB를 넘는 인덱스 항목을 거부한다. 앱이 그보다 긴 ID를 보내면 순번(`lockKeyAndTakeSeq`)의 upsert가 "index row size exceeds maximum"으로 끝나고 앱 트랜잭션 전체가 중단된다. F20과 같은 종류다.
 - **재현**: `LedgerCommandTest` › 규칙을 어긴 명령을 만들면 › "commandId가 UTF-8 513바이트면", "순서 키가 한글 171자(513바이트)면". 512바이트는 담긴다(`aCommandIdOf512BytesIsAccepted`). `isAcceptableId`도 513바이트면 false다.
 - **구조**: `LedgerCommand.MAX_ID_BYTES = 512`다. commandId, orderingKey, reservationCommandId에 적용하고, `isAcceptableId`도 같은 상한을 본다.
 - **확인**: 넣기 전에 세 테스트가 실패했다.
@@ -247,22 +247,46 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 - **재현**: `LockDueBoundedWorkTest`의 세 테스트가 limit 128에서 실행 계획 맨 위 노드의 페이지를 1,000 이하로 본다. `aBacklogBehindABlockedKeyIsNotRead`(막힌 키 뒤 대기 2만 건 + 보낼 수 있는 키 100개), `headsWaitingForTheirRetryAreNotRead`(맨 앞이 1시간 backoff인 키 2만 개 + 100개), `manyReadyHeadsStopAtTheLimit`(끝난 이력 5만 건 뒤에 보낼 수 있는 맨 앞 2만 개). 측정은 `LockDueBacklogMeasurementTest`(`./gradlew :ledger-relay-jdbc:measurement`)의 네 장면이다.
 - **구조**:
   - 후보 순서는 "보낼 수 있게 된 시각"이다. 접수 명령은 다음 시도 시각, 처리 중 명령은 lease 만료 시각이 그 시각이고, 같으면 접수 순서다(P2e-1). 포트 계약 `CommandStore.lockDue`가 정하고, 메모리와 PG 저장소가 같은 계약 테스트를 지난다. 같은 키 안의 순서는 맨 앞이 하나뿐이라 바뀌지 않는다.
-  - jdbc 어댑터는 `ledger_command.is_head`(키의 맨 앞 미완료인가), `ready_at`(보낼 시각, 생성 컬럼), `ledger_ordering_key.unfinished_count`(미완료 개수)를 둔다(P2e-2).
+  - jdbc 어댑터는 `ledger_command.is_head`(키에서 지금 차례인 명령인가)와 `ready_at`(보낼 시각, 생성 컬럼)을 둔다(P2e-2).
   - 인덱스는 둘이다(P2e-3). `ledger_command_ready ON (ready_at, id) WHERE is_head AND state IN ('PENDING','CLAIMED')`는 claim이 읽는다. 유일 `ledger_command_one_head ON (ordering_key) WHERE is_head`는 키당 맨 앞 둘을 막는다. `ledger_command_due`는 지웠다.
-  - 넣기와, 미완료를 최종 상태로 바꾸는 `compareAndSet`이 같은 트랜잭션에서 키 행의 개수를 고치고 맨 앞을 다시 정한다(P2e-4). 키 행 갱신이 같은 키의 접수와 완료를 줄 세운다. READ COMMITTED에서는 늦은 쪽이 기다렸다가 새 스냅숏으로 맨 앞을 정한다. 더 높은 격리 수준에서는 늦은 쪽이 40001로 끝나 재시도된다.
-  - DB를 직접 고친 뒤에는 `rebuild-heads.sql`로 다시 계산한다(P2e-5, docs/development.md). core 서비스 코드는 바뀌지 않았다.
+  - 넣을 때 키에 맨 앞이 없으면 새 명령이 맨 앞이 된다. 명령이 끝나도 표시는 그대로 두고, 다음 claim이 그 키 행을 잡아 다음 미완료로 넘긴다(P2e-7, F33). 처음에는 완료가 키 행의 미완료 개수를 고치며 넘겼으나(P2e-4), 그 잠금이 핸들러와 교착해 바꿨다.
+  - DB를 직접 고친 뒤에는 `rebuild-heads.sql`로 다시 계산한다(P2e-5, docs/development.md).
 - **확인**:
   - 옛 질의에서 페이지 테스트 둘이 실패했다(2만 건 백로그 61,097페이지·126ms, backoff 맨 앞 2만 개 1,447페이지).
   - 새 순서 계약 테스트 둘(`aRetriedCommandQueuesAtItsRetryTime`, `anExpiredLeaseQueuesAtItsExpiry`)은 메모리와 PG에서 모두 실패했다.
   - 변이 확인:
     - `is_head` 조건을 빼면 jdbc 17건이 실패한다.
     - `ORDER BY c.id`로 바꾸면 순서 계약 2건과 회복 몰림 페이지 테스트(1,993페이지)가 실패한다.
-    - 완료 쪽 키 행 갱신을 빼면 `HeadRaceTest` 4건이 실패한다. 접수와 완료가 서로 기다리지 않게 된다.
-  - 모든 계약 테스트 뒤에 장부가 행과 맞는지 검사한다(`PostgresStorage.assertHeadsConsistent`).
+  - 모든 계약 테스트 뒤에 표시가 행과 맞는지 검사한다(`PostgresStorage.assertHeadsConsistent`).
   - 측정(limit 128, 10만 건, 세 번 실행): 기준 112페이지 0.12ms, 백로그 10만 건 121페이지 0.13ms(옛 576~680ms), backoff 맨 앞 10만 개 201페이지 0.10ms, 보낼 수 있는 맨 앞 10만 개 194페이지 0.11ms.
 - **남은 것**:
-  - 완료가 키 행을 잠그므로, 핸들러가 다른 키에 접수하거나 앱이 여러 키를 다른 순서로 접수하면 교착이 생길 수 있다. PG가 한쪽을 끊는다(40P01). 완료 쪽이 끊기면 핸들러 실패와 같은 경로로 재시도된다. 막지 않고 문서로 남긴다(P2e-6, docs/development.md).
-  - DB를 직접 고치고 `rebuild-heads.sql`을 돌리지 않으면 그 키가 후보에서 빠지거나 맨 앞이 아닌 명령이 나갈 수 있다. 개수가 실제보다 작아지면 그 키의 마지막 완료가 `CHECK (unfinished_count >= 0)`에 걸린다(23514). 결과를 쓰지 못해 lease가 끝날 때마다 다시 잡혀 TB에 다시 간다. 스크립트는 접수와 겹쳐도 개수가 틀어지지 않게 `ledger_ordering_key`를 표 잠금한다(`HeadBookkeepingTest.rebuildWaitsForAnOpenSubmit`. 잠금 없이는 개수가 2 대신 1이었다).
+  - DB를 직접 고치고 `rebuild-heads.sql`을 돌리지 않으면 그 키가 후보에서 빠지거나 맨 앞이 아닌 명령이 나갈 수 있다. 스크립트는 접수·claim과 겹치지 않게 `ledger_ordering_key`를 표 잠금한다(`HeadBookkeepingTest.rebuildWaitsForAnOpenSubmit`).
+  - 통계가 오래됐거나 일반 계획(generic plan)으로 바뀌어 플래너가 `ledger_command_ready` 대신 다른 인덱스와 정렬을 고르는 경우는 테스트하지 않았다.
+
+### F33. 결과를 쓰는 트랜잭션이 키 행을 쥔 채 핸들러를 돌려 앱의 접수와 교착한다 (02e 최종 리뷰)
+
+- **깨지는 것**: 02e의 첫 구현(P2e-4)에서 완료는 `compareAndSet` 안에서 그 키의 행(`ledger_ordering_key`)을 고쳐 잠갔다. 그 잠금을 커밋까지 쥔 채 핸들러를 불렀다. 흔한 앱 코드가 반대 순서로 잡는다. 앱은 주문 행을 고친 뒤 같은 트랜잭션에서 그 주문의 키에 접수한다(접수는 순번을 받으며 키 행을 잡는다). 핸들러는 결과를 받아 같은 주문 행을 고친다. 앱은 키 행을, 핸들러는 주문 행을 기다려 PG가 한쪽을 끊는다(40P01). 앱 쪽이 끊기면 사용자 요청이 간헐적으로 실패한다. 완료 쪽이 끊기면 핸들러 실패로 backoff 뒤 다시 돈다. 또 어떤 키에 접수를 연 채 오래 머무는 앱 트랜잭션이 있으면 그 키의 완료가 기다렸고, 워커는 결과를 한 건씩 쓰므로 뒤의 다른 키 결과도 함께 멈췄다. 이 잠금은 `compareAndSet`이라는 이름 뒤에 숨어 core 코드에서 보이지 않았다.
+- **재현**: `HeadRaceTest` › 앱과 핸들러가 같은 주문 행을 고치면 › `anAppThatMarksTheOrderThenSubmitsDoesNotDeadlockWithTheHandler`. `KeyLockFreeStoreTest`(다른 트랜잭션이 키 행을 쥐어도 저장소의 넣기·찾기·후보 잠그기·결과 쓰기가 기다리지 않는다).
+- **구조** (P2e-7):
+  - 포트를 나눴다. 키 행을 잡는 호출은 `OrderingKeys`(`lockKeyAndTakeSeq`, `passOnFinishedHeads`)에만 있다. `CommandStore`는 키 행을 잡지 않는다. jdbc에서는 `JdbcOrderingKeys`와 `JdbcCommandStore`가 나눠 맡는다.
+  - 핸들러를 부르는 워커 쓰기는 `WorkerWrites`로 뗐고, 이 클래스는 `OrderingKeys`를 받지 않는다. `ArchitectureTest.theHandlerPathCannotLockAKey`가 "`onCompleted`를 부르는 클래스는 `OrderingKeys`에 의존하지 않는다"를 지킨다.
+  - 완료는 맨 앞 표시를 끝난 명령에 남긴다. claim이 후보를 잠그기 전에 끝난 맨 앞의 키 행을 `FOR UPDATE SKIP LOCKED`로 잡아 다음 미완료로 넘긴다. 앱이 쥔 키는 기다리지 않고 다음 claim으로 미룬다. 잡은 키 행은 값을 그대로 두고 갱신한다. 그래야 그보다 앞서 스냅숏을 잡은 REPEATABLE READ 이상의 앱이 그 키에서 순번을 받을 때 40001로 끝나 재시도한다. 그러지 않으면 그 앱은 옛 스냅숏에서 맨 앞이 있다고 보고 새 명령을 맨 앞으로 세우지 않아 그 키가 영원히 나가지 않는다.
+  - `unfinished_count`를 지웠다. 넘길 키는 `ledger_command_finished_head`(끝났는데 맨 앞인 명령)에서 찾는다. 키마다 다음 미완료를 따로 `min(seq)`로 찾는다. 키들을 묶은 `GROUP BY`는 막힌 키 뒤의 백로그를 모두 읽었다(2만 건에 564페이지, 지금 30페이지).
+  - 트랜잭션마다 잡는 행은 docs/development.md "트랜잭션과 잠금"에 표로 둔다.
+- **확인**:
+  - 고치기 전: 교착 테스트가 `deadlock detected`로 끝났고(완료 쪽이 끊겨 핸들러 실패), `KeyLockFreeStoreTest`의 결과 쓰기와 넣기가 2초 안에 끝나지 않았다.
+  - 변이 확인:
+    - 결과 쓰기에 키 행 잠금을 되살리면 6건이 실패한다(교착, 기다리지 않음 4, 저장소 1).
+    - 넘기기를 비우면 24건이 실패한다.
+    - 키 행 갱신을 빼면 RR·SERIALIZABLE 스냅숏 테스트 2건이 실패한다.
+    - `SKIP LOCKED`를 빼면 "앱이 쥔 키만 미룬다" 테스트가 실패한다.
+    - `WorkerWrites`에 `OrderingKeys` 필드를 넣으면 ArchUnit 규칙이 실패한다.
+    - `ledger_command_finished_head`를 지우면 넘기기 페이지 테스트가 실패한다.
+  - 측정(limit 128): 끝난 이력 5만 건 뒤 끝난 맨 앞 2만 개에서 넘길 키를 잠그는 데 519페이지, 0.19ms.
+- **남은 것**:
+  - 앱 트랜잭션끼리 여러 키를 서로 다른 순서로 접수하면 키 행끼리 교착한다. 이것은 02b부터 있던 성질이다(4절).
+  - REPEATABLE READ 이상의 앱은 claim의 넘기기와 겹친 접수에서 40001을 받을 수 있다. 앱은 이미 같은 키의 동시 접수에서 이 실패를 재시도해야 한다(4절).
+  - 앱이 키 행을 오래 쥐면 그 키의 다음 명령은 그 앱이 커밋할 때까지 나가지 않는다. 다른 키는 영향이 없다.
 
 ## 2. 열린 장애
 
@@ -298,6 +322,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 | 이 commandId가 이미 있나 | 유니크 제약 + `ON CONFLICT DO NOTHING` | F15 |
 | 이 키에서 내 순번은 몇 번인가 | 키 행 잠금(커밋까지 유지). 그리고 `UNIQUE (ordering_key, seq)` | F14 |
 | 이 키의 맨 앞 명령이 나인가(`NOT EXISTS`) | 키 행 잠금 덕분에 나보다 앞 순번이 나중에 생길 수 없다 | F12 |
+| 이 키의 맨 앞 표시(`is_head`)를 누가 갖나 | 표시를 정하는 접수와 claim의 넘기기가 둘 다 키 행을 잡는다. 넘기기는 키 행을 갱신해, 옛 스냅숏으로 접수하는 높은 수준의 앱을 40001로 돌려보낸다 | F32, F33 |
 | 이 명령을 내가 가져가도 되나 (행 하나) | `FOR UPDATE OF c SKIP LOCKED` | F12, F13 |
 | 결과를 써도 되나 (행 하나) | 상태·토큰 조건부 쓰기 | F2 |
 
@@ -306,7 +331,7 @@ ledger-relay가 막아야 하는 장애를 하나씩 적는다. 장애마다 **�
 **높은 수준에서 바뀌는 것은 기다림이 에러가 된다는 것뿐이다.**
 
 - 워커 단계는 우리가 새로 여는 트랜잭션이라 READ COMMITTED로 명시한다(F17, P2b-16).
-- 접수는 앱 트랜잭션에 합류하므로 앱의 수준을 따른다(P2b-17). REPEATABLE READ·SERIALIZABLE에서 같은 키나 같은 commandId의 동시 접수는 늦은 쪽이 직렬화 실패(SQLSTATE 40001)로 끝난다. 행은 하나만 남고 순번은 꼬이지 않는다. 앱은 40001을 보고 재시도한다. 확인: `HigherIsolationSubmitTest`의 세 장, 두 수준. 모두 6건이다(셋째 장은 02c에 더한 "다른 순서 키의 같은 commandId"). READ COMMITTED의 같은 경우는 `ReadCommittedSubmitTest`가 본다(02d).
+- 접수는 앱 트랜잭션에 합류하므로 앱의 수준을 따른다(P2b-17). REPEATABLE READ·SERIALIZABLE에서 같은 키나 같은 commandId의 동시 접수는 늦은 쪽이 직렬화 실패(SQLSTATE 40001)로 끝난다. 행은 하나만 남고 순번은 꼬이지 않는다. 앱은 40001을 보고 재시도한다. 확인: `HigherIsolationSubmitTest`의 세 장, 두 수준. 모두 6건이다(셋째 장은 02c에 더한 "다른 순서 키의 같은 commandId"). READ COMMITTED의 같은 경우는 `ReadCommittedSubmitTest`가 본다(02d). claim이 끝난 맨 앞을 넘긴 키에 그보다 앞선 스냅숏으로 접수해도 40001이다(`HeadRaceTest`, 02e F33).
 - 대조군(02b, 앞의 두 장 4건 기준): 순번을 키 잠금 없이 `max(seq)+1`로 내면 4건 중 1건(같은 키, REPEATABLE READ)만 실패한다. 늦은 쪽이 재시도 가능한 40001이 아니라 유일성 위반(23505)으로 끝난다. 나머지 3건이 통과하는 이유는 `UNIQUE (ordering_key, seq)`가 순번 공유를 막고, SERIALIZABLE에서는 PostgreSQL이 동시 트랜잭션의 유일성 위반을 40001로 바꾸기 때문이다. 높은 수준에서는 키 잠금 말고 방어선이 하나 더 있는 셈이다. READ COMMITTED에서 키 잠금이 빠진 것은 F14가 잡는다.
 
 모든 트랜잭션을 SERIALIZABLE로 강제하지 않는 이유: 워커끼리 부딪힐 때마다 재시도가 생겨 처리량이 떨어진다. 이미 잠금으로 막은 문제를 비싸게 한 번 더 막는 셈이다.
