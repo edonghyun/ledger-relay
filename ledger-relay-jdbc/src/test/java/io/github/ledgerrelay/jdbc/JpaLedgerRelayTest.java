@@ -7,6 +7,7 @@ import io.github.ledgerrelay.core.CommandStatus.State;
 import io.github.ledgerrelay.core.testing.LedgerRelayContract;
 import io.github.ledgerrelay.core.testing.StorageUnderTest;
 import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
@@ -18,6 +19,12 @@ class JpaLedgerRelayTest extends LedgerRelayContract {
     @Override
     protected StorageUnderTest createStorage() {
         return PostgresStorage.withJpaTransactions();
+    }
+
+    /** 어느 장이 끝나도 맨 앞 표시와 미완료 개수가 행과 맞다(02e P2e-4). */
+    @AfterEach
+    void theHeadsStayConsistent() {
+        ((PostgresStorage) storage).assertHeadsConsistent();
     }
 
     @Nested

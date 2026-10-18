@@ -136,6 +136,7 @@ final class PostgresStorage implements StorageUnderTest {
         if (deleted != 1) {
             throw new IllegalStateException("given 준비 실패: 지울 " + commandId + "가 없다");
         }
+        rebuildHeads();
     }
 
     @Override
@@ -173,6 +174,39 @@ final class PostgresStorage implements StorageUnderTest {
 
     JdbcClient sql() {
         return JdbcClient.create(dataSource);
+    }
+
+    /** 맨 앞 표시와 미완료 개수를 행에서 다시 계산한다(02e P2e-5). 직접 SQL로 행을 바꾼 준비 뒤에 부른다. */
+    void rebuildHeads() {
+        sql().sql(resource("rebuild-heads.sql")).update();
+    }
+
+    /**
+     * 키마다 표시가 행과 맞는지 본다: 미완료 개수가 실제와 같고, 맨 앞 표시가 미완료가 있을 때만 정확히 하나이며, 그것이
+     * 가장 앞 순번의 미완료다. 어긋난 키를 모두 담아 던진다.
+     */
+    void assertHeadsConsistent() {
+        java.util.List<String> broken = sql().sql("""
+                WITH actual AS (
+                    SELECT ordering_key,
+                           count(*) FILTER (WHERE state IN ('PENDING','CLAIMED','HALTED')) AS unfinished,
+                           min(seq) FILTER (WHERE state IN ('PENDING','CLAIMED','HALTED')) AS first_unfinished,
+                           count(*) FILTER (WHERE is_head) AS heads,
+                           min(seq) FILTER (WHERE is_head) AS head_seq
+                    FROM ledger_command GROUP BY ordering_key)
+                SELECT coalesce(a.ordering_key, k.ordering_key) || ': 미완료 ' || coalesce(a.unfinished, 0)
+                       || ', 기록된 개수 ' || coalesce(k.unfinished_count::text, '키 행 없음')
+                       || ', 맨 앞 표시 ' || coalesce(a.heads, 0) || '개(seq ' || coalesce(a.head_seq::text, '-')
+                       || ', 가장 앞 미완료 seq ' || coalesce(a.first_unfinished::text, '-') || ')'
+                FROM actual a FULL JOIN ledger_ordering_key k ON k.ordering_key = a.ordering_key
+                WHERE coalesce(a.unfinished, 0) <> coalesce(k.unfinished_count, -1)
+                   OR coalesce(a.heads, 0) <> least(coalesce(a.unfinished, 0), 1)
+                   OR a.head_seq IS DISTINCT FROM a.first_unfinished
+                ORDER BY 1
+                """).query(String.class).list();
+        if (!broken.isEmpty()) {
+            throw new AssertionError("맨 앞 표시가 행과 어긋난 키: " + broken);
+        }
     }
 
     void clear() {
@@ -215,15 +249,15 @@ final class PostgresStorage implements StorageUnderTest {
             once.setJdbcUrl(container.getJdbcUrl());
             once.setUsername(container.getUsername());
             once.setPassword(container.getPassword());
-            JdbcClient.create(once).sql(schema()).update();
+            JdbcClient.create(once).sql(resource("schema.sql")).update();
         }
         return container;
     }
 
-    private static String schema() {
-        try (InputStream in = JdbcCommandStore.class.getResourceAsStream("schema.sql")) {
+    private static String resource(String name) {
+        try (InputStream in = JdbcCommandStore.class.getResourceAsStream(name)) {
             if (in == null) {
-                throw new IllegalStateException("schema.sql을 찾지 못했다");
+                throw new IllegalStateException(name + "을 찾지 못했다");
             }
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {

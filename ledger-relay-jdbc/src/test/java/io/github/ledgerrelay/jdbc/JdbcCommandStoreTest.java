@@ -13,6 +13,7 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
@@ -28,6 +29,12 @@ class JdbcCommandStoreTest extends CommandStoreContract {
     @Override
     protected StorageUnderTest createStorage() {
         return PostgresStorage.withDataSourceTransactions();
+    }
+
+    /** 어느 장이 끝나도 맨 앞 표시와 미완료 개수가 행과 맞다(02e P2e-4). */
+    @AfterEach
+    void theHeadsStayConsistent() {
+        ((PostgresStorage) storage).assertHeadsConsistent();
     }
 
     @Nested
@@ -162,6 +169,7 @@ class JdbcCommandStoreTest extends CommandStoreContract {
                     UPDATE ledger_command SET command_id = 'pay-2', ordering_key = 'order-2'
                     WHERE command_id = 'pay-1'
                     """).update());
+            storage.rebuildHeads();
             Throwable duplicate = catchThrowable(() -> storage.transactions().inTransaction(() -> storage.store()
                     .insertIfAbsent(new NewCommand("pay-3", "order-3", 1, Optional.empty(),
                             record("pay-2").transferId(), "hash-of-pay-3", newTransfer("pay-3", "order-3", 1).body()))));

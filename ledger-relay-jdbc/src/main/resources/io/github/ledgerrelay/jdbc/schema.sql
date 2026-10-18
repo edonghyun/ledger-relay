@@ -5,9 +5,12 @@
 -- 유일 인덱스가 어긋나지 않는다(F31). 순서 키 행은 지우지 않는다: 지우면 경쟁 중에 순번이 1로 돌아간다(02d P2d-11).
 
 -- 순서 키마다 다음에 낼 순번. 접수가 이 행을 잠그고 커밋까지 놓지 않으므로 seq 순서가 커밋 순서와 같다(R12, P2b-8).
+-- 미완료 개수는 접수와 완료가 이 행을 함께 고치게 하려고 둔다. 이 갱신이 같은 키의 접수·완료를 줄 세우므로 맨 앞 표시가
+-- 사라지지 않는다(02e P2e-4).
 CREATE TABLE ledger_ordering_key (
-    ordering_key text COLLATE "C" PRIMARY KEY,
-    next_seq     bigint NOT NULL CHECK (next_seq >= 1)
+    ordering_key     text COLLATE "C" PRIMARY KEY,
+    next_seq         bigint NOT NULL CHECK (next_seq >= 1),
+    unfinished_count bigint NOT NULL DEFAULT 0 CHECK (unfinished_count >= 0)
 );
 
 CREATE TABLE ledger_command (
@@ -43,6 +46,12 @@ CREATE TABLE ledger_command (
     accepted_xact          xid8 NOT NULL DEFAULT pg_current_xact_id(),
     accepted_at            timestamptz NOT NULL DEFAULT now(),
     completed_at           timestamptz,
+    -- 그 키에서 가장 앞 순번의 미완료 명령인가. 저장소가 넣기와 완료 때 고친다(02e P2e-4). DB를 직접 고친 뒤에는
+    -- rebuild-heads.sql로 다시 계산한다(P2e-5)
+    is_head                boolean NOT NULL DEFAULT false,
+    -- 보낼 수 있게 되는 시각: 접수 명령은 다음 시도 시각, 처리 중 명령은 lease 만료 시각(02e P2e-1)
+    ready_at               timestamptz GENERATED ALWAYS AS (
+        CASE WHEN state = 'CLAIMED' THEN lease_expires_at ELSE next_attempt_at END) STORED,
     UNIQUE (ordering_key, seq),
     -- 이체 ID가 겹치면 TB의 exists가 남의 명령을 적용됨으로 만든다(F31)
     CONSTRAINT ledger_command_transfer_id_key UNIQUE (transfer_id),
@@ -112,6 +121,9 @@ CREATE TABLE ledger_command (
 -- 미완료 명령의 키별 맨 앞 판정(§5.2, R7). HALTED도 키를 막으므로 넣는다(F9).
 CREATE INDEX ledger_command_unfinished ON ledger_command (ordering_key, seq)
     WHERE state IN ('PENDING','CLAIMED','HALTED');
+
+-- 키마다 맨 앞은 하나다. 표시를 고치는 쪽에 버그가 있어도 둘이 되지 않게 DB가 막는다(02e P2e-3).
+CREATE UNIQUE INDEX ledger_command_one_head ON ledger_command (ordering_key) WHERE is_head;
 
 -- claim 후보를 접수 순서(id)로 고르는 질의(§5.2, lockDue)가 끝난 이력을 훑지 않게 한다. 없으면 플래너가 기본 키 순서로
 -- 끝난 행을 하나씩 걸러 내며 읽어, 폴링 비용이 이력 크기에 비례한다(F19).

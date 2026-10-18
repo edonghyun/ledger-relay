@@ -58,6 +58,7 @@ public final class JdbcCommandStore implements CommandStore {
     /**
      * 넣는다. 같은 commandId가 이미 있으면 {@code ON CONFLICT DO NOTHING}으로 넘기고 있던 행을 읽는다(P2b-9).
      * 유일성 위반 예외를 잡는 방식은 PostgreSQL 트랜잭션 전체를 중단시켜 앱 트랜잭션을 깨뜨린다(G7).
+     * 넣었으면 그 키의 미완료 개수를 올리고 맨 앞을 다시 정한다(02e P2e-4).
      */
     @Override
     public Optional<CommandRecord> insertIfAbsent(NewCommand command) {
@@ -71,7 +72,53 @@ public final class JdbcCommandStore implements CommandStore {
                 ON CONFLICT (command_id) DO NOTHING
                 RETURNING id
                 """).params(CommandRows.parameters(command)).query(Long.class).optional().isPresent();
-        return inserted ? Optional.empty() : find(command.commandId());
+        if (!inserted) {
+            return find(command.commandId());
+        }
+        countUnfinished(command.orderingKey(), command.seq());
+        settleHead(command.orderingKey());
+        return Optional.empty();
+    }
+
+    /**
+     * 키 행의 미완료 개수를 하나 올린다. 순번을 거치지 않고 넣은 행(저장소 계약의 준비)이면 키 행을 여기서 만든다.
+     * 정상 경로에서는 {@link #nextSeq}가 이미 잠근 행이다.
+     */
+    private void countUnfinished(String orderingKey, long seq) {
+        sql.sql("""
+                INSERT INTO ledger_ordering_key (ordering_key, next_seq, unfinished_count) VALUES (:key, :seq + 1, 1)
+                ON CONFLICT (ordering_key) DO UPDATE
+                    SET unfinished_count = ledger_ordering_key.unfinished_count + 1,
+                        next_seq = greatest(ledger_ordering_key.next_seq, excluded.next_seq)
+                """).param("key", orderingKey).param("seq", seq).update();
+    }
+
+    /**
+     * 키 행의 미완료 개수를 하나 내린다. 같은 키의 접수도 이 행을 고치므로, 이 갱신이 둘을 줄 세운다. READ COMMITTED면 늦은
+     * 쪽이 기다렸다가 새 스냅숏에서 맨 앞을 정하고, 더 높은 격리 수준이면 늦은 쪽이 직렬화 실패(40001)로 끝난다(P2e-4).
+     */
+    private void countFinished(String orderingKey) {
+        sql.sql("UPDATE ledger_ordering_key SET unfinished_count = unfinished_count - 1 WHERE ordering_key = :key")
+                .param("key", orderingKey).update();
+    }
+
+    /**
+     * 맨 앞을 다시 정한다: 가장 앞 순번의 미완료가 아닌 표시를 끄고, 그 미완료를 켠다. 끄기를 먼저 해야 키당 하나뿐인 유일
+     * 인덱스({@code ledger_command_one_head})에 걸리지 않는다.
+     */
+    private void settleHead(String orderingKey) {
+        sql.sql("""
+                UPDATE ledger_command SET is_head = false
+                WHERE ordering_key = :key AND is_head
+                  AND seq IS DISTINCT FROM (SELECT min(seq) FROM ledger_command
+                                            WHERE ordering_key = :key AND state IN ('PENDING','CLAIMED','HALTED'))
+                """).param("key", orderingKey).update();
+        sql.sql("""
+                UPDATE ledger_command SET is_head = true
+                WHERE ordering_key = :key AND NOT is_head
+                  AND seq = (SELECT min(seq) FROM ledger_command
+                             WHERE ordering_key = :key AND state IN ('PENDING','CLAIMED','HALTED'))
+                """).param("key", orderingKey).update();
     }
 
     @Override
@@ -111,16 +158,20 @@ public final class JdbcCommandStore implements CommandStore {
                 .list();
     }
 
-    /** 상태와 토큰이 기대와 같을 때만 바꾼다(G5). 시각은 PG {@code now()} 하나로 찍는다(§5.2). */
+    /**
+     * 상태와 토큰이 기대와 같을 때만 바꾼다(G5). 시각은 PG {@code now()} 하나로 찍는다(§5.2). 미완료 명령을 최종 상태로
+     * 바꿨으면 같은 트랜잭션에서 그 키의 미완료 개수를 내리고 맨 앞을 넘긴다(02e P2e-4).
+     */
     @Override
     public boolean compareAndSet(RowChange change) {
         CommandRow next = change.next();
-        return sql.sql("""
+        Optional<String> orderingKey = sql.sql("""
                 UPDATE ledger_command
                 SET state = :state, lease_token = :lease_token, submit_count = :submit_count,
                     known_result = :known_result, result_code = :result_code,
                     handler_failures = :handler_failures, skip_reason = :skip_reason%s
                 WHERE id = :id AND state = :expected_state AND lease_token = :expected_token
+                RETURNING ordering_key
                 """.formatted(stampColumns(change.stamp())))
                 .param("state", next.state().name())
                 .param("lease_token", next.leaseToken())
@@ -133,7 +184,12 @@ public final class JdbcCommandStore implements CommandStore {
                 .param("id", change.rowId())
                 .param("expected_state", change.expectedState().name())
                 .param("expected_token", change.expectedToken())
-                .update() == 1;
+                .query(String.class).optional();
+        if (orderingKey.isPresent() && next.state().isFinal() && !change.expectedState().isFinal()) {
+            countFinished(orderingKey.get());
+            settleHead(orderingKey.get());
+        }
+        return orderingKey.isPresent();
     }
 
     private static Optional<QueuedCommand> reservation(ResultSet rs) throws SQLException {
