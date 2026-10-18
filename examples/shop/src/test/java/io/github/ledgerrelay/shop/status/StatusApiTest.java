@@ -88,9 +88,9 @@ class StatusApiTest extends ShopSpringTest {
         // given
         ShopOrder order = paidOrder();
 
-        // when
+        // when: 잔액은 1초마다 모으는 값이라 결제 완료가 반영될 때까지 기다린다
         String timeline = await("/api/orders/" + order.id() + "/timeline",
-                json -> JsonPath.read(json, "$.merchant") != null);
+                json -> JsonPath.read(json, "$.buyer") != null && number(json, "$.buyer.paidSatang") >= 89_000);
 
         // then
         assertThat((List<String>) JsonPath.read(timeline, "$.steps[*].kind")).as("단계").containsExactly("RESERVE", "POST");
