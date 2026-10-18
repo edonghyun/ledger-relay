@@ -176,9 +176,12 @@ final class PostgresStorage implements StorageUnderTest {
         return JdbcClient.create(dataSource);
     }
 
-    /** 맨 앞 표시와 미완료 개수를 행에서 다시 계산한다(02e P2e-5). 직접 SQL로 행을 바꾼 준비 뒤에 부른다. */
+    /**
+     * 맨 앞 표시와 미완료 개수를 행에서 다시 계산한다(02e P2e-5). 직접 SQL로 행을 바꾼 준비 뒤에 부른다. 스크립트의 표 잠금은
+     * 트랜잭션 안에서만 되므로 트랜잭션을 열거나, 열린 것에 합류한다.
+     */
     void rebuildHeads() {
-        sql().sql(resource("rebuild-heads.sql")).update();
+        transactions.inTransaction(() -> sql().sql(resource("rebuild-heads.sql")).update());
     }
 
     /**

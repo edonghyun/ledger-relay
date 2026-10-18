@@ -5,12 +5,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ledgerrelay.core.CommandKind;
+import io.github.ledgerrelay.core.CommandReceipt;
 import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.application.Backoff;
 import io.github.ledgerrelay.core.application.ClaimedCommand;
 import io.github.ledgerrelay.core.application.CommandLifecycle;
 import io.github.ledgerrelay.core.spi.NewCommand;
 import io.github.ledgerrelay.core.spi.TransferBody;
+import io.github.ledgerrelay.core.testing.OtherTransaction;
 import io.github.ledgerrelay.core.testing.RecordingHandler;
 import io.github.ledgerrelay.core.testing.SequentialTransferIds;
 import io.github.ledgerrelay.core.testing.TestTransferIds;
@@ -31,6 +33,7 @@ import org.junit.jupiter.api.Test;
 class HeadBookkeepingTest {
 
     static final Duration LEASE = Duration.ofSeconds(30);
+    static final Duration BLOCKED = Duration.ofMillis(300);
 
     PostgresStorage storage;
     CommandLifecycle relay;
@@ -170,9 +173,38 @@ class HeadBookkeepingTest {
             assertHeadOf("order-1", "pay-1");
             assertUnfinishedCount("order-1", 2);
         }
+
+        @Test
+        @DisplayName("다시 계산하는 동안 들어온 접수도 센다 — 옛 스냅숏의 개수로 덮어쓰지 않는다")
+        void rebuildWaitsForAnOpenSubmit() {
+            // given: pay-2 접수가 열려 있다
+            submit(transfer("pay-1"));
+            try (OtherTransaction<CommandReceipt> open = OtherTransaction.start(storage.transactions(),
+                    () -> relay.submit(transfer("pay-2")));
+                 OtherTransaction<Boolean> rebuild = startAfter(open, () -> {
+                     storage.rebuildHeads();
+                     return true;
+                 })) {
+                rebuild.assertStillWorkingAfter(BLOCKED);
+
+                // when
+                open.commit();
+                rebuild.awaitWork();
+                rebuild.commit();
+            }
+
+            // then
+            assertHeadOf("order-1", "pay-1");
+            assertUnfinishedCount("order-1", 2);
+        }
     }
 
     // ── 이 파일에서만 쓰는 말 ──────────────────────────────────────────
+
+    private <T> OtherTransaction<T> startAfter(OtherTransaction<?> earlier, java.util.function.Supplier<T> work) {
+        earlier.awaitWork();
+        return OtherTransaction.start(storage.transactions(), work);
+    }
 
     private void submit(LedgerCommand command) {
         storage.transactions().inTransaction(() -> relay.submit(command));
