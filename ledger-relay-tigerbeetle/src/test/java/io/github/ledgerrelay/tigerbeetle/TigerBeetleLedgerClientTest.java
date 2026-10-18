@@ -14,6 +14,7 @@ import com.tigerbeetle.UInt128;
 import io.github.ledgerrelay.core.CommandKind;
 import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.LedgerResultCode;
+import io.github.ledgerrelay.core.spi.LedgerTransfer;
 import io.github.ledgerrelay.core.spi.LedgerUnavailableException;
 import io.github.ledgerrelay.core.spi.Submission;
 import io.github.ledgerrelay.core.spi.TransferBody;
@@ -23,6 +24,7 @@ import io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleContainer;
 import io.github.ledgerrelay.tigerbeetle.testing.TigerBeetleTestLedger;
 import java.math.BigInteger;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -209,6 +211,68 @@ class TigerBeetleLedgerClientTest {
             assertThat(stored.code()).as("저장된 code").isEqualTo(65_535);
             assertThat(stored.userData64()).as("저장된 user_data_64").isEqualTo(-1L);
             assertThat(stored.userData32()).as("저장된 user_data_32").isEqualTo(-1);
+        }
+    }
+
+    @Nested
+    @Order(5)
+    @DisplayName("이체를 ID로 조회하면 — 대사 (03b)")
+    class Lookup {
+
+        @Test
+        @DisplayName("저장된 이체를 계좌·금액과 함께, 종류는 flags에서 정해 돌려준다")
+        void lookupReturnsStoredTransfersWithTheirKind() {
+            // given
+            Submission payment = transfer(500);
+            Submission hold = reserve(500, 30);
+            submitted(payment, hold);
+            Submission capture = post(hold.transferId());
+            Submission otherHold = reserve(300, 30);
+            submitted(capture, otherHold);
+            Submission release = voidOf(otherHold.transferId());
+            submitted(release);
+
+            // when
+            Map<BigInteger, LedgerTransfer> found = lookedUp(payment, hold, capture, otherHold, release);
+
+            // then
+            assertThat(found.get(payment.transferId()).kind()).as("이체의 종류").isEqualTo(CommandKind.TRANSFER);
+            assertThat(found.get(hold.transferId()).kind()).as("예약의 종류").isEqualTo(CommandKind.RESERVE);
+            assertThat(found.get(capture.transferId()).kind()).as("확정의 종류").isEqualTo(CommandKind.POST);
+            assertThat(found.get(otherHold.transferId()).kind()).as("둘째 예약의 종류").isEqualTo(CommandKind.RESERVE);
+            assertThat(found.get(release.transferId()).kind()).as("해제의 종류").isEqualTo(CommandKind.VOID);
+            assertThat(found.get(payment.transferId()).amount()).as("이체 금액").isEqualTo(BigInteger.valueOf(500));
+            assertThat(found.get(payment.transferId()).debitAccountId()).as("이체의 출금 계좌")
+                    .isEqualTo(accountIdOf(payer));
+            assertThat(found.get(capture.transferId()).amount()).as("전액 확정된 금액").isEqualTo(BigInteger.valueOf(500));
+        }
+
+        @Test
+        @DisplayName("TB에 없는 ID는 결과에서 빠진다")
+        void lookupOmitsUnknownIds() {
+            // given
+            Submission payment = transfer(500);
+            submitted(payment);
+            BigInteger unknown = nextTransferId();
+
+            // when
+            Map<BigInteger, LedgerTransfer> found = lookedUpIds(List.of(payment.transferId(), unknown));
+
+            // then
+            assertThat(found).as("찾은 이체").containsOnlyKeys(payment.transferId());
+        }
+
+        private Map<BigInteger, LedgerTransfer> lookedUp(Submission... submissions) {
+            return lookedUpIds(java.util.Arrays.stream(submissions).map(Submission::transferId).toList());
+        }
+
+        private Map<BigInteger, LedgerTransfer> lookedUpIds(List<BigInteger> ids) {
+            try {
+                return adapter.lookup(ids).get(30, TimeUnit.SECONDS).stream()
+                        .collect(java.util.stream.Collectors.toMap(LedgerTransfer::transferId, t -> t));
+            } catch (Exception e) {
+                throw new AssertionError("TB 조회 응답을 받지 못했다", e);
+            }
         }
     }
 

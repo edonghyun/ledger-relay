@@ -116,6 +116,16 @@ public final class InMemoryCommandStore implements OrderingKeys, CommandStore, T
     }
 
     @Override
+    public List<CommandRecord> findFinished(long afterRowId, int limit) {
+        requireTransaction();
+        return rows.values().stream()
+                .filter(row -> row.record().rowId() > afterRowId)
+                .filter(row -> row.record().row().state().isFinal())
+                .sorted(Comparator.comparingLong(row -> row.record().rowId()))
+                .limit(limit).map(this::recordOf).toList();
+    }
+
+    @Override
     public List<CommandRecord> findHalted(long afterRowId, int limit) {
         requireTransaction();
         return rows.values().stream()

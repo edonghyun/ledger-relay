@@ -11,6 +11,7 @@ import io.github.ledgerrelay.core.spi.CommandRecord;
 import io.github.ledgerrelay.core.spi.CommandStore;
 import io.github.ledgerrelay.core.spi.DueCommand;
 import io.github.ledgerrelay.core.spi.LedgerUnavailableException;
+import io.github.ledgerrelay.core.spi.LedgerClient;
 import io.github.ledgerrelay.core.spi.NewCommand;
 import io.github.ledgerrelay.core.spi.RowChange;
 import io.github.ledgerrelay.core.spi.Submission;
@@ -402,11 +403,22 @@ class RelayWorkerTest {
         void aFencedWriteIsReported() {
             // given: TB에 보내는 사이 lease가 끝나 다른 워커가 같은 명령을 잡았다
             accepted(transfer("pay-1", "order-1"));
-            RelayWorker overtaken = new RelayWorker(relay, batch -> {
-                storage.elapse(SETTINGS.lease().plusSeconds(1));
-                relay.claim(10, SETTINGS.lease());
-                return fake.submit(batch);
-            }, slots, SETTINGS, events);
+            LedgerClient overtakingLedger = new LedgerClient() {
+                @Override
+                public java.util.concurrent.CompletableFuture<List<io.github.ledgerrelay.core.LedgerResultCode>> submit(
+                        List<io.github.ledgerrelay.core.spi.Submission> batch) {
+                    storage.elapse(SETTINGS.lease().plusSeconds(1));
+                    relay.claim(10, SETTINGS.lease());
+                    return fake.submit(batch);
+                }
+
+                @Override
+                public java.util.concurrent.CompletableFuture<List<io.github.ledgerrelay.core.spi.LedgerTransfer>> lookup(
+                        List<java.math.BigInteger> transferIds) {
+                    return fake.lookup(transferIds);
+                }
+            };
+            RelayWorker overtaken = new RelayWorker(relay, overtakingLedger, slots, SETTINGS, events);
 
             // when
             CycleReport report = overtaken.runOnce();
@@ -569,6 +581,11 @@ class RelayWorkerTest {
                 throw new IllegalStateException("DB 연결이 잠깐 끊겼다");
             }
             return real.find(id);
+        }
+
+        @Override
+        public List<CommandRecord> findFinished(long afterRowId, int limit) {
+            return real.findFinished(afterRowId, limit);
         }
 
         @Override

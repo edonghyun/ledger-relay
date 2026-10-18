@@ -13,6 +13,7 @@ import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.SkipReason;
 import io.github.ledgerrelay.core.spi.NewCommand;
 import io.github.ledgerrelay.core.spi.TransferBody;
+import io.github.ledgerrelay.core.testing.FakeLedger;
 import io.github.ledgerrelay.core.testing.InMemoryStorage;
 import io.github.ledgerrelay.core.testing.RecordingHandler;
 import io.github.ledgerrelay.core.testing.SequentialTransferIds;
@@ -43,7 +44,7 @@ class RelayOperatorTest {
         handler = new RecordingHandler();
         relay = new CommandLifecycle(storage.keys(), storage.store(), storage.transactions(), new SequentialTransferIds(),
                 handler, new Backoff(Duration.ofSeconds(5), Duration.ofSeconds(20)));
-        operator = new RelayOperator(storage.store(), storage.transactions(), relay);
+        operator = new RelayOperator(storage.store(), storage.transactions(), relay, new FakeLedger(), Duration.ofSeconds(1));
         insertedPastTheChecks(reserveRow("hold-1", 2));
         insertedPastTheChecks(postRow("capture-1", 1, "hold-1"));
         relay.claim(10, LEASE);

@@ -5,15 +5,18 @@ import com.tigerbeetle.ClientClosedException;
 import com.tigerbeetle.ClientEvictedException;
 import com.tigerbeetle.ClientReleaseException;
 import com.tigerbeetle.CreateTransferResultBatch;
+import com.tigerbeetle.IdBatch;
 import com.tigerbeetle.TransferBatch;
 import com.tigerbeetle.TransferFlags;
 import com.tigerbeetle.UInt128;
 import io.github.ledgerrelay.core.CommandKind;
 import io.github.ledgerrelay.core.LedgerResultCode;
 import io.github.ledgerrelay.core.spi.LedgerClient;
+import io.github.ledgerrelay.core.spi.LedgerTransfer;
 import io.github.ledgerrelay.core.spi.LedgerUnavailableException;
 import io.github.ledgerrelay.core.spi.Submission;
 import io.github.ledgerrelay.core.spi.TransferBody;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -61,6 +64,48 @@ public final class TigerBeetleLedgerClient implements LedgerClient {
                         ? CompletableFuture.completedFuture(codesOf(results))
                         : CompletableFuture.<List<LedgerResultCode>>failedFuture(unavailableOrAsIs(unwrap(failure))))
                 .thenCompose(codes -> codes);
+    }
+
+    /** 대사용 조회. TB에 없는 ID는 결과에 없다. 종류는 flags에서 정한다(보류 → RESERVE, 보류 확정 → POST, 보류 해제 → VOID). */
+    @Override
+    public CompletableFuture<List<LedgerTransfer>> lookup(List<BigInteger> transferIds) {
+        IdBatch ids = new IdBatch(transferIds.size());
+        transferIds.forEach(id -> ids.add(UInt128.asBytes(id)));
+        CompletableFuture<TransferBatch> reply;
+        try {
+            reply = client.lookupTransfersAsync(ids);
+        } catch (RuntimeException e) {
+            throw unavailableOrAsIs(e);
+        }
+        return reply.handle((found, failure) -> failure == null
+                        ? CompletableFuture.completedFuture(transfersOf(found))
+                        : CompletableFuture.<List<LedgerTransfer>>failedFuture(unavailableOrAsIs(unwrap(failure))))
+                .thenCompose(transfers -> transfers);
+    }
+
+    private static List<LedgerTransfer> transfersOf(TransferBatch found) {
+        List<LedgerTransfer> transfers = new ArrayList<>(found.getLength());
+        found.beforeFirst();
+        while (found.next()) {
+            transfers.add(new LedgerTransfer(UInt128.asBigInteger(found.getId()),
+                    UInt128.asBigInteger(found.getDebitAccountId()), UInt128.asBigInteger(found.getCreditAccountId()),
+                    found.getAmount(), Integer.toUnsignedLong(found.getLedger()), found.getCode(),
+                    kindOf(found.getFlags())));
+        }
+        return transfers;
+    }
+
+    private static CommandKind kindOf(int flags) {
+        if ((flags & TransferFlags.PENDING) != 0) {
+            return CommandKind.RESERVE;
+        }
+        if ((flags & TransferFlags.POST_PENDING_TRANSFER) != 0) {
+            return CommandKind.POST;
+        }
+        if ((flags & TransferFlags.VOID_PENDING_TRANSFER) != 0) {
+            return CommandKind.VOID;
+        }
+        return CommandKind.TRANSFER;
     }
 
     /**

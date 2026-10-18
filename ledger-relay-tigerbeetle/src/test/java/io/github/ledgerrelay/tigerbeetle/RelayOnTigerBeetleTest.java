@@ -11,12 +11,15 @@ import com.tigerbeetle.UInt128;
 import io.github.ledgerrelay.core.CommandStatus.State;
 import io.github.ledgerrelay.core.LedgerCommand;
 import io.github.ledgerrelay.core.LedgerResultCode;
+import io.github.ledgerrelay.core.ReconciliationReport;
 import io.github.ledgerrelay.core.application.Backoff;
 import io.github.ledgerrelay.core.application.CommandLifecycle;
 import io.github.ledgerrelay.core.application.InFlightLimit;
+import io.github.ledgerrelay.core.application.RelayOperator;
 import io.github.ledgerrelay.core.application.RelayWorker;
 import io.github.ledgerrelay.core.application.WorkerSettings;
 import io.github.ledgerrelay.core.spi.LedgerClient;
+import io.github.ledgerrelay.core.spi.LedgerTransfer;
 import io.github.ledgerrelay.core.spi.Submission;
 import io.github.ledgerrelay.core.spi.WorkerEvents;
 import io.github.ledgerrelay.core.testing.InMemoryStorage;
@@ -147,6 +150,31 @@ class RelayOnTigerBeetleTest {
                     .as("pay-1의 거절 코드").isEqualTo(ExceedsCredits);
             assertNothingMoved(ledger, wallet);
         }
+
+        @Test
+        @DisplayName("이체·예약·확정·거절이 섞여 처리된 뒤 대사하면 어긋남이 없다 (03b)")
+        void reconcilingAfterRealTrafficFindsNoMismatch() {
+            // given
+            Account wallet = ledger.openAccountThatCannotOverdraw("지갑");
+            accepted(transfer("pay-1", payer, payee, 500));
+            accepted(LedgerCommand.reserve("hold-1").orderingKey("order-2").debit(accountIdOf(payer))
+                    .credit(accountIdOf(payee)).amount(300).ledger(1).code(1).timeoutSeconds(60).build());
+            accepted(LedgerCommand.transfer("pay-2").orderingKey("order-3").debit(accountIdOf(wallet))
+                    .credit(accountIdOf(payee)).amount(100).ledger(1).code(1).build());
+            worker.runOnce();
+            accepted(LedgerCommand.post("capture-1").orderingKey("order-2").reservation("hold-1").build());
+            worker.runOnce();
+            RelayOperator operator = new RelayOperator(storage.store(), storage.transactions(), relay,
+                    new TigerBeetleLedgerClient(workerClient), Duration.ofSeconds(10));
+
+            // when
+            ReconciliationReport report = operator.reconcile(0, 100);
+
+            // then
+            assertThat(report.mismatches()).as("어긋남").isEmpty();
+            assertThat(report.checked()).as("확인한 명령").isEqualTo(4);
+            assertThat(report.matched()).as("일치").isEqualTo(4);
+        }
     }
 
     @Nested
@@ -273,6 +301,11 @@ class RelayOnTigerBeetleTest {
                 }
                 return results;
             });
+        }
+
+        @Override
+        public CompletableFuture<List<LedgerTransfer>> lookup(List<BigInteger> transferIds) {
+            return real.lookup(transferIds);
         }
 
         synchronized List<BigInteger> transferIdsSent() {

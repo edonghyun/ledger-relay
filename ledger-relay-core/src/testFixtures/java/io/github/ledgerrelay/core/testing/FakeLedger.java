@@ -1,5 +1,8 @@
 package io.github.ledgerrelay.core.testing;
 
+import java.util.Objects;
+import io.github.ledgerrelay.core.spi.TransferBody;
+import io.github.ledgerrelay.core.spi.LedgerTransfer;
 import io.github.ledgerrelay.core.LedgerResultCode;
 import io.github.ledgerrelay.core.spi.LedgerClient;
 import io.github.ledgerrelay.core.spi.Submission;
@@ -26,6 +29,9 @@ public final class FakeLedger implements LedgerClient {
     private Integer nextCount;
     private RuntimeException nextThrow;
     private boolean nextNull;
+    private boolean holdingLookups;
+    /** TB가 기록한 이체(Created·Exists로 답한 것). 대사가 조회한다. */
+    private final Map<BigInteger, LedgerTransfer> stored = new HashMap<>();
 
     /** 이 이체 ID에는 이 결과를 낸다. */
     public synchronized void answer(BigInteger transferId, LedgerResultCode code) {
@@ -63,6 +69,36 @@ public final class FakeLedger implements LedgerClient {
         nextNull = true;
     }
 
+    /** 이 이체를 TB가 잃은 것처럼 지운다(대사가 어긋남을 찾는지 볼 때). */
+    public synchronized void forget(BigInteger transferId) {
+        stored.remove(transferId);
+    }
+
+    /** TB에 이 이체가 있는 것처럼 심는다. */
+    public synchronized void plant(LedgerTransfer transfer) {
+        stored.put(transfer.transferId(), transfer);
+    }
+
+    /** 기록된 이체의 금액을 바꾼다. */
+    public synchronized void alterAmount(BigInteger transferId, BigInteger amount) {
+        LedgerTransfer t = stored.get(transferId);
+        stored.put(transferId, new LedgerTransfer(t.transferId(), t.debitAccountId(), t.creditAccountId(), amount,
+                t.ledger(), t.code(), t.kind()));
+    }
+
+    /** 이후 조회에 답하지 않는다. */
+    public synchronized void holdLookups() {
+        holdingLookups = true;
+    }
+
+    @Override
+    public synchronized CompletableFuture<List<LedgerTransfer>> lookup(List<BigInteger> transferIds) {
+        if (holdingLookups) {
+            return new CompletableFuture<>();
+        }
+        return CompletableFuture.completedFuture(transferIds.stream().map(stored::get).filter(Objects::nonNull).toList());
+    }
+
     /** 다음 요청 하나에 결과를 n개만 낸다. 요청보다 많으면 남는 몫은 Created다. */
     public synchronized void replyWithCount(int n) {
         nextCount = n;
@@ -91,7 +127,14 @@ public final class FakeLedger implements LedgerClient {
         }
         List<LedgerResultCode> results = new ArrayList<>();
         for (Submission submission : batch) {
-            results.add(answers.getOrDefault(submission.transferId(), LedgerResultCode.Created));
+            LedgerResultCode code = answers.getOrDefault(submission.transferId(), LedgerResultCode.Created);
+            results.add(code);
+            if (code == LedgerResultCode.Created || code == LedgerResultCode.Exists) {
+                TransferBody body = submission.body();
+                stored.putIfAbsent(submission.transferId(), new LedgerTransfer(submission.transferId(),
+                        body.debitAccountId(), body.creditAccountId(), body.amount(), body.ledger(), body.code(),
+                        body.kind()));
+            }
         }
         if (nextCount != null) {
             results = new ArrayList<>(results.subList(0, Math.min(nextCount, results.size())));

@@ -116,6 +116,16 @@ public final class JdbcCommandStore implements CommandStore {
                 .optional();
     }
 
+    /** 최종 상태로 끝난 명령을 행 순서로 읽는다(대사). 기본 키 순서로 읽으며 최종 상태가 아닌 행은 걸러 낸다. */
+    @Override
+    public List<CommandRecord> findFinished(long afterRowId, int limit) {
+        return sql.sql("SELECT " + COLUMNS + ", " + ACCEPTED_HERE + " FROM ledger_command c"
+                        + " WHERE c.state IN ('APPLIED','REJECTED','CONFLICT','SKIPPED') AND c.id > :after"
+                        + " ORDER BY c.id LIMIT :limit")
+                .param("after", afterRowId).param("limit", limit)
+                .query((rs, rowNum) -> CommandRows.read(rs)).list();
+    }
+
     /** 멈춘 명령을 행 순서로 읽는다. {@code ledger_command_halted} 인덱스만 읽는다(03b). */
     @Override
     public List<CommandRecord> findHalted(long afterRowId, int limit) {

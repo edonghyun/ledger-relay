@@ -26,4 +26,14 @@ public interface LedgerRelayOperator {
      *                                  ({@code ALREADY_SUBMITTED})
      */
     AbandonOutcome abandonHalted(String commandId);
+
+    /**
+     * 최종 상태로 끝난 명령을 행 순서로 한 페이지 읽어, TB에 실제로 있는 이체와 맞춘다. 읽기만 하고 고치지 않는다.
+     * 다음 페이지는 {@link ReconciliationReport#lastPosition()}을 넘겨 읽는다. 첫 페이지는 0이다.
+     *
+     * @param limit 1 이상 1000 이하
+     * @throws IllegalArgumentException limit이 범위 밖
+     * @throws io.github.ledgerrelay.core.spi.LedgerUnavailableException TB가 정해진 시간 안에 조회에 답하지 않았다
+     */
+    ReconciliationReport reconcile(long afterPosition, int limit);
 }

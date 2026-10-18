@@ -30,7 +30,8 @@ class PublicApiBoundaryTest {
             "HaltedCommand",
             "AbandonOutcome",
             "CommandNotFoundException",
-            "CannotAbandonException");
+            "CannotAbandonException",
+            "ReconciliationReport");
 
     static final String PACKAGE = "io.github.ledgerrelay.core";
 

@@ -113,6 +113,11 @@ class CommandLifecycleRaceTest {
         }
 
         @Override
+        public List<CommandRecord> findFinished(long afterRowId, int limit) {
+            return real.findFinished(afterRowId, limit);
+        }
+
+        @Override
         public List<CommandRecord> findHalted(long afterRowId, int limit) {
             return real.findHalted(afterRowId, limit);
         }
