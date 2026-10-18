@@ -27,7 +27,7 @@ PG와 TB는 한 트랜잭션으로 묶을 수 없다. TB 응답은 유실될 수
 docker compose up --build        # 처음에는 이미지 빌드로 몇 분 걸린다
 ```
 
-브라우저로 <http://localhost:8090>을 연다(포트를 바꾸려면 `SHOP_PORT=9000 docker compose up --build`). 끌 때는 `docker compose down -v`. 데모는 매번 빈 DB와 빈 원장에서 시작한다.
+브라우저로 <http://localhost:8090>을 연다(포트를 바꾸려면 `SHOP_PORT=9000 docker compose up --build`). 끌 때는 `docker compose down`. 데모는 매번 빈 DB와 빈 원장에서 시작한다(Ctrl-C로 멈췄다 `up`하면 그대로 이어진다).
 
 구성은 PostgreSQL, TigerBeetle, 둘 사이의 Toxiproxy(끊기 스위치), 같은 이미지로 띄운 앱 둘(`shop-a`는 화면과 워커, `shop-b`는 워커)이다. 화면의 숫자는 모두 PG와 TB의 실제 상태에서 나온다. 통화는 태국 바트(฿)이고, 결제는 카드처럼 **승인(예약) → 출고 때 매입(확정)** 이다.
 
