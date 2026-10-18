@@ -8,7 +8,7 @@ This document lists, one by one, the failures ledger-relay has to prevent. For e
 
 ## 1. Prevented failures
 
-F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F26 the test environment, F27–F36 defects in core, the store and the Spring module found in reviews, and F37–F45 were found while building the sample shop (F40 is a library defect found at that time).
+F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F26 the test environment, F27–F36 defects in core, the store and the Spring module found in reviews, F37–F45 were found while building the sample shop (F40 is a library defect found at that time), and F46 was found while adding metrics.
 
 ### F1. Waiting commands of a blocked key use up the claim limit and starve other keys
 
@@ -378,6 +378,13 @@ F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F
 - **Reproduction**: `DemoRestartTest` › `startupRestoresACutConnection`. Cut the connection, then start the app with the demo profile.
 - **Structure**: in the demo profile, `LedgerLink` restores the connection when it is created, before `ShopBootstrap` waits for TB. A restart of either instance therefore ends an outage scene for both, since they share the one proxy. If Toxiproxy does not answer within about 10 seconds (it has only just started), the app logs a warning and continues; a fresh proxy is connected anyway.
 - **Verification**: the test above failed before the fix with "did not finish starting within 60 s", and passes after the fix.
+
+### F46. A bug in a metrics listener breaks the worker cycle
+
+- **What breaks**: the worker reports events from inside its cycle (after each write, after each TB request). With logging, metrics and the app's own listener all attached, a listener that throws (a metrics bug, a full registry, an app listener with a bug) would end the cycle in the middle: the commands already sent stay in flight until their lease runs out, and the results already received in that cycle are not written. The same bug would repeat on every cycle, so metrics would stop the money from moving.
+- **Reproduction**: `WorkerEventsFanOutTest` › `aThrowingListenerDoesNotStopTheOthers`. The first listener throws on every event; the second must still receive them and the caller must see no exception.
+- **Structure**: the worker receives one `WorkerEventsFanOut` that calls every listener in turn. A listener that throws is logged (at most once a minute for the same listener and event) and skipped; the others still receive the event. Gauges that need the DB do not run on the worker or on a scrape: `BacklogSampler` reads the backlog on its own thread and the gauges read its last sample, so a slow DB makes the numbers stale, not the workers slow.
+- **Verification**: control experiment — with the `try`/`catch` in `WorkerEventsFanOut` removed, the test fails with the listener's `IllegalStateException`; with it, the test passes. `BacklogSamplerTest` › `aSlowSourceDoesNotBlockReaders` checks that a 5-second DB read does not hold up a gauge read.
 
 ## 2. Open failures
 

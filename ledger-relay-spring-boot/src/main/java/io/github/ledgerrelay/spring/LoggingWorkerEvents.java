@@ -6,7 +6,7 @@ import org.apache.commons.logging.LogFactory;
 
 /**
  * Logs worker events. Events a person must look at (halt, malformed candidate, write failure, handler failure, TB
- * unusable) are WARN; the rest are DEBUG. There are no metrics yet.
+ * unusable) are WARN; the rest are DEBUG. Metrics are a separate listener ({@link MicrometerWorkerEvents}).
  */
 public final class LoggingWorkerEvents implements WorkerEvents {
 

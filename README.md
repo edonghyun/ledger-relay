@@ -48,7 +48,7 @@ It runs PostgreSQL, TigerBeetle, Toxiproxy between them (the cut-off switch), an
 | `ledger-relay-core` | Command model and validation, content hash, state transition table and result classification table, ordering gate, services (acceptance, claim, writing the result, halt and abandon), one worker cycle (`RelayWorker`: batched submission, in-flight limit, submit-timeout). Uses only the JDK |
 | `ledger-relay-jdbc` | PostgreSQL store (`JdbcCommandStore`), Spring transaction adapter (`JdbcTransactions`), schema `schema.sql`. Joins the app transaction from a DataSource or JPA transaction manager |
 | `ledger-relay-tigerbeetle` | Adapter for the TB 0.17.9 Java client (`TigerBeetleLedgerClient`: submission, lookups for reconciliation), time-ordered transfer id generator (`TigerBeetleTransferIds`), Testcontainers fixture |
-| `ledger-relay-spring-boot` | Spring Boot 4.0 auto-configuration, worker loop and graceful shutdown, health (UP even when TB is unreachable), operator port bean |
+| `ledger-relay-spring-boot` | Spring Boot 4.0 auto-configuration, worker loop and graceful shutdown, health (UP even when TB is unreachable), Micrometer metrics, operator port bean |
 
 Operator port `LedgerRelayOperator`: list of halted commands (reason and time), abandon, reconciliation between PG and TB.
 
@@ -69,6 +69,8 @@ ledger-relay:
 
 4. Register one `LedgerOutcomeHandler` bean that applies the result to the app's data when a command finishes. The handler runs in the same transaction as writing the result. When the handler submits again, **update the app's rows first, then submit** (`docs/development.md`, "Transactions and locks").
 5. Submit with `LedgerRelay.submit(...)` inside an app transaction. The command commits or rolls back together with the business data.
+
+6. Metrics turn on by themselves when the app has a Micrometer `MeterRegistry` (for example through actuator): `ledger.commands.finished`, `ledger.command.duration`, `ledger.commands.waiting`, `ledger.commands.oldest.age`, `ledger.submit.latency` and others (`MicrometerWorkerEvents`, `LedgerRelayMeters`). The backlog gauges are refreshed every `ledger-relay.metrics.backlog-interval` (5 s). To receive worker events yourself, register a `WorkerEvents` bean: it is added next to logging and metrics, not substituted for them.
 
 When you run the app in a container, seccomp must allow io_uring, because the TB Java client uses it (F41, `docs/development.md`).
 

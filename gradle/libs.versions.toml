@@ -11,6 +11,8 @@ postgresql = "42.7.14"
 hikaricp = "7.1.0"
 hibernate = "7.4.13.Final"
 spring-boot = "4.0.8"
+# The version Spring Boot 4.0.8 manages (spring-boot-dependencies micrometer.version)
+micrometer = "1.16.7"
 
 [libraries]
 tigerbeetle-java = { module = "com.tigerbeetle:tigerbeetle-java", version.ref = "tigerbeetle" }
@@ -38,6 +40,8 @@ spring-boot-starter-jdbc = { module = "org.springframework.boot:spring-boot-star
 spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator", version.ref = "spring-boot" }
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test", version.ref = "spring-boot" }
 spring-boot-starter-webmvc-test = { module = "org.springframework.boot:spring-boot-starter-webmvc-test", version.ref = "spring-boot" }
+micrometer-core = { module = "io.micrometer:micrometer-core", version.ref = "micrometer" }
+micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus", version.ref = "micrometer" }
 
 [plugins]
 spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }

@@ -21,11 +21,14 @@ import io.github.ledgerrelay.jdbc.JdbcOrderingKeys;
 import io.github.ledgerrelay.jdbc.JdbcTransactions;
 import io.github.ledgerrelay.tigerbeetle.TigerBeetleLedgerClient;
 import io.github.ledgerrelay.tigerbeetle.TigerBeetleTransferIds;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Optional;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -43,6 +46,7 @@ import org.springframework.transaction.PlatformTransactionManager;
  */
 @AutoConfiguration(afterName = {
         "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",
+        "org.springframework.boot.micrometer.metrics.autoconfigure.CompositeMeterRegistryAutoConfiguration",
         "org.springframework.boot.jdbc.autoconfigure.DataSourceTransactionManagerAutoConfiguration",
         "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration"})
 @EnableConfigurationProperties(LedgerRelayProperties.class)
@@ -120,10 +124,41 @@ public class LedgerRelayAutoConfiguration {
         return new RelayOperator(store, transactions, lifecycle, ledger, settings.submitTimeout());
     }
 
+    /**
+     * Logging is one listener among the others. An app's own {@link WorkerEvents} beans are added next to it, not
+     * substituted for it.
+     */
     @Bean
-    @ConditionalOnMissingBean
-    WorkerEvents ledgerRelayWorkerEvents() {
+    @ConditionalOnMissingBean(LoggingWorkerEvents.class)
+    LoggingWorkerEvents ledgerRelayLoggingEvents() {
         return new LoggingWorkerEvents();
+    }
+
+    /** Turns on only when the app has a Micrometer registry (for example through actuator). */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "io.micrometer.core.instrument.MeterRegistry")
+    @ConditionalOnBean(type = "io.micrometer.core.instrument.MeterRegistry")
+    static class Metrics {
+
+        @Bean
+        @ConditionalOnMissingBean
+        MicrometerWorkerEvents ledgerRelayMetricsEvents(MeterRegistry registry) {
+            return new MicrometerWorkerEvents(registry);
+        }
+
+        @Bean(initMethod = "start", destroyMethod = "close")
+        @ConditionalOnMissingBean
+        BacklogSampler ledgerRelayBacklogSampler(LedgerRelayOperator operator, LedgerRelayProperties properties) {
+            return new BacklogSampler(operator::backlog, properties.metrics().backlogInterval());
+        }
+
+        @Bean
+        LedgerRelayMeters ledgerRelayMeters(BacklogSampler sampler, ObjectProvider<InFlightLimit> slots,
+                MeterRegistry registry) {
+            LedgerRelayMeters meters = new LedgerRelayMeters(sampler, Optional.ofNullable(slots.getIfAvailable()));
+            meters.bindTo(registry);
+            return meters;
+        }
     }
 
     /** Turns on only when the app uses health (actuator). */
@@ -153,8 +188,9 @@ public class LedgerRelayAutoConfiguration {
         @Bean
         @ConditionalOnMissingBean
         RelayWorker ledgerRelayWorker(CommandLifecycle lifecycle, LedgerClient ledger, InFlightLimit slots,
-                WorkerSettings settings, WorkerEvents events) {
-            return new RelayWorker(lifecycle, ledger, slots, settings, events);
+                WorkerSettings settings, ObjectProvider<WorkerEvents> listeners) {
+            return new RelayWorker(lifecycle, ledger, slots, settings,
+                    new WorkerEventsFanOut(listeners.orderedStream().toList()));
         }
 
         @Bean

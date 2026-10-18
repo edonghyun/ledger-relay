@@ -10,7 +10,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record LedgerRelayProperties(
         @DefaultValue Tigerbeetle tigerbeetle,
         @DefaultValue Worker worker,
-        @DefaultValue Backoff backoff) {
+        @DefaultValue Backoff backoff,
+        @DefaultValue Metrics metrics) {
 
     /**
      * @param clusterId TB cluster id
@@ -37,5 +38,12 @@ public record LedgerRelayProperties(
     }
 
     public record Backoff(@DefaultValue("200ms") Duration initial, @DefaultValue("30s") Duration max) {
+    }
+
+    /**
+     * @param backlogInterval how often the backlog gauges are refreshed from the DB. Only used when the app has a
+     *                        Micrometer {@code MeterRegistry}
+     */
+    public record Metrics(@DefaultValue("5s") Duration backlogInterval) {
     }
 }

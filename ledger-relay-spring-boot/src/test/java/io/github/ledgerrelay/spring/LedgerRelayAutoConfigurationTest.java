@@ -8,7 +8,11 @@ import io.github.ledgerrelay.core.LedgerOutcomeHandler;
 import io.github.ledgerrelay.core.LedgerRelay;
 import io.github.ledgerrelay.core.LedgerRelayOperator;
 import io.github.ledgerrelay.core.application.InFlightLimit;
+import io.github.ledgerrelay.core.spi.WorkerEvents;
 import io.github.ledgerrelay.core.testing.RecordingHandler;
+import io.github.ledgerrelay.core.testing.RecordingWorkerEvents;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -106,6 +110,45 @@ class LedgerRelayAutoConfigurationTest {
                 assertThat(context.getStartupFailure()).as("startup failure").rootCause()
                         .hasMessageContaining(offendingValue);
             });
+        }
+    }
+
+    @Nested
+    @Order(3)
+    @DisplayName("Metrics and worker events")
+    class MetricsAndEvents {
+
+        @Test
+        @DisplayName("When the app has a MeterRegistry, metrics and the backlog sampler are created")
+        void withARegistryMetricsAreRegistered() {
+            app.withBean(LedgerOutcomeHandler.class, RecordingHandler::new)
+                    .withBean(MeterRegistry.class, SimpleMeterRegistry::new)
+                    .run(context -> {
+                        assertThat(context).hasSingleBean(MicrometerWorkerEvents.class);
+                        assertThat(context).hasSingleBean(BacklogSampler.class);
+                    });
+        }
+
+        @Test
+        @DisplayName("Without a MeterRegistry only logging is wired, and the app still starts")
+        void withoutARegistryOnlyLoggingIsWired() {
+            app.withBean(LedgerOutcomeHandler.class, RecordingHandler::new).run(context -> {
+                assertThat(context).hasNotFailed();
+                assertThat(context).hasSingleBean(LoggingWorkerEvents.class);
+                assertThat(context).doesNotHaveBean(MicrometerWorkerEvents.class);
+                assertThat(context).doesNotHaveBean(BacklogSampler.class);
+            });
+        }
+
+        @Test
+        @DisplayName("An app's own WorkerEvents bean is added next to logging, not substituted for it")
+        void anAppListenerIsAddedNotSubstituted() {
+            RecordingWorkerEvents appEvents = new RecordingWorkerEvents();
+            app.withBean(LedgerOutcomeHandler.class, RecordingHandler::new)
+                    .withBean(RecordingWorkerEvents.class, () -> appEvents)
+                    .run(context -> assertThat(context.getBeansOfType(WorkerEvents.class).values())
+                            .as("worker event listeners").hasSize(2).contains(appEvents)
+                            .hasAtLeastOneElementOfType(LoggingWorkerEvents.class));
         }
     }
 }
