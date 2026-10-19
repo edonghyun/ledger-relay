@@ -27,6 +27,8 @@ code { font-family: var(--mono); color: var(--yellow) }
 .nav button.on { color: var(--text); border-color: var(--line2); background: var(--card) }
 .badge { display: inline-block; min-width: 16px; padding: 0 4px; margin-left: 4px; border-radius: 8px; background: var(--red); color: #000; font-size: 10px; font-weight: 700; text-align: center }
 .status { font-family: var(--mono); font-size: 12px; display: flex; gap: 14px; align-items: center; white-space: nowrap }
+.dash-link { color: var(--cyan); text-decoration: none; border: 1px solid currentColor; border-radius: 4px; padding: 1px 6px }
+.dash-link:hover { text-decoration: underline }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; background: var(--mute); transition: background .3s, box-shadow .3s }
 .dot.up { background: var(--green); box-shadow: 0 0 10px var(--green) }
 .dot.down { background: var(--red); box-shadow: 0 0 10px var(--red) }

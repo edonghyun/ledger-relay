@@ -2,6 +2,7 @@ package io.github.ledgerrelay.shop;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jayway.jsonpath.JsonPath;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test;
 class ComposeFileTest {
 
     static final Path COMPOSE = Path.of("../../compose.yaml");
+    static final Path DASHBOARD = Path.of("compose/grafana/dashboards/ledger-relay.json");
 
     @Test
     @DisplayName("Neither PostgreSQL nor TigerBeetle keeps data in a named volume — so that one store never outlives down without the other and shows orders charged twice")
@@ -34,6 +36,32 @@ class ComposeFileTest {
         // then
         assertUsesImage(compose, "postgres:" + System.getProperty("ledgerrelay.postgres.version"));
         assertUsesImage(compose, "ghcr.io/tigerbeetle/tigerbeetle:" + System.getProperty("ledgerrelay.tigerbeetle.version"));
+    }
+
+    @Test
+    @DisplayName("Prometheus and Grafana are pinned to exact versions — so the demo looks the same on every machine")
+    void monitoringImagesArePinned() throws IOException {
+        // given
+        String compose = Files.readString(COMPOSE);
+
+        // then
+        assertUsesImage(compose, "prom/prometheus:v3.5.0");
+        assertUsesImage(compose, "grafana/grafana:12.2.0");
+    }
+
+    @Test
+    @DisplayName("The dashboard file is valid JSON with the uid the shop links to and at least four panels")
+    void theDashboardFileIsValid() throws IOException {
+        // given
+        String dashboard = Files.readString(DASHBOARD);
+
+        // when
+        String uid = JsonPath.read(dashboard, "$.uid");
+        List<Object> panels = JsonPath.read(dashboard, "$.panels[?(@.type != 'row')]");
+
+        // then
+        assertThat(uid).as("dashboard uid").isEqualTo("ledger-relay");
+        assertThat(panels).as("dashboard panels").hasSizeGreaterThanOrEqualTo(4);
     }
 
     // ── Effects checked only in this file ────────────────────────────────

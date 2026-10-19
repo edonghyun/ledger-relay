@@ -26,10 +26,12 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,prometheus
   endpoint:
     health:
       show-details: always
 
 shop:
   instance-name: ${HOSTNAME:shop}
+  # The Grafana dashboard of the compose demo. The screen links to it
+  dashboard-url: http://localhost:3300/d/ledger-relay

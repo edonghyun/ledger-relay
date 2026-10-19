@@ -8,7 +8,7 @@ This document lists, one by one, the failures ledger-relay has to prevent. For e
 
 ## 1. Prevented failures
 
-F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F26 the test environment, F27–F36 defects in core, the store and the Spring module found in reviews, F37–F45 were found while building the sample shop (F40 is a library defect found at that time), and F46 was found while adding metrics.
+F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F26 the test environment, F27–F36 defects in core, the store and the Spring module found in reviews, F37–F45 were found while building the sample shop (F40 is a library defect found at that time), and F46–F47 were found while adding metrics.
 
 ### F1. Waiting commands of a blocked key use up the claim limit and starve other keys
 
@@ -385,6 +385,13 @@ F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F
 - **Reproduction**: `WorkerEventsFanOutTest` › `aThrowingListenerDoesNotStopTheOthers`. The first listener throws on every event; the second must still receive them and the caller must see no exception.
 - **Structure**: the worker receives one `WorkerEventsFanOut` that calls every listener in turn. A listener that throws is logged (at most once a minute for the same listener and event) and skipped; the others still receive the event. Gauges that need the DB do not run on the worker or on a scrape: `BacklogSampler` reads the backlog on its own thread and the gauges read its last sample, so a slow DB makes the numbers stale, not the workers slow.
 - **Verification**: control experiment — with the `try`/`catch` in `WorkerEventsFanOut` removed, the test fails with the listener's `IllegalStateException`; with it, the test passes. `BacklogSamplerTest` › `aSlowSourceDoesNotBlockReaders` checks that a 5-second DB read does not hold up a gauge read.
+
+### F47. Starting a newer shop on a database an older version created makes every result fail forever (sample shop)
+
+- **What breaks**: `docker compose up --build` after pulling a newer version keeps the existing PostgreSQL container, and the shop applies its schema only when the tables are missing. The 03c shop writes each command's final state into new columns of `shop_order_command`. On the old table every outcome handler call fails with "bad SQL grammar", so the result write rolls back and is retried after the backoff, forever: orders stay `accepted`, the backlog never drains, and nothing on the screen says why. Found by rebuilding the 8090 demo over the 03b database.
+- **Reproduction**: `ShopBootstrapTest` › `anOlderSchemaStopsStartupWithTheFix`. Apply the schema, drop the newest column as the older version had it, apply again.
+- **Structure**: when the tables exist, `ShopSchema` checks for the newest column and, if it is missing, stops startup with "The database was created by an older version of the sample shop. Start the demo from empty: docker compose down, then docker compose up --build". The demo is meant to start from an empty DB and ledger, so there are no migrations; the README says to run `down` after pulling.
+- **Verification**: the test failed before the check ("Expecting code to raise a throwable") and passes after it. On the real demo, rebuilding over the 03b database now logs that message and the app does not start; after `down` and `up` it starts and processes orders.
 
 ## 2. Open failures
 

@@ -20,6 +20,8 @@ dependencies {
     implementation(libs.spring.boot.starter.jdbc)
     implementation(libs.spring.boot.starter.actuator)
     runtimeOnly(libs.postgresql)
+    // /actuator/prometheus for the demo dashboard
+    runtimeOnly(libs.micrometer.registry.prometheus)
 
     testImplementation(testFixtures(project(":ledger-relay-jdbc")))
     testImplementation(testFixtures(project(":ledger-relay-tigerbeetle")))

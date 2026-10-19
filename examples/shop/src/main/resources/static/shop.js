@@ -366,6 +366,9 @@ async function start() {
 
   state.catalog = (await call('GET', API.getCatalog)).body;
   renderCatalog();
+  const dashboard = document.getElementById('dashboard-link');
+  dashboard.href = state.catalog.dashboardUrl;
+  dashboard.hidden = false;
   // #operator or #scenarios in the URL opens that tab directly (the links in the README)
   const tab = location.hash.slice(1);
   if (['store', 'operator', 'scenarios'].includes(tab)) showTab(tab);

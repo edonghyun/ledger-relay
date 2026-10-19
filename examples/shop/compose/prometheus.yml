@@ -1,0 +1,13 @@
+# Scrapes the library's metrics from both shop instances (compose.yaml).
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: shop
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["shop-a:8080"]
+        labels: { instance: shop-a }
+      - targets: ["shop-b:8080"]
+        labels: { instance: shop-b }

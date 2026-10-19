@@ -49,6 +49,30 @@ class StaticPageTest extends ShopSpringTest {
     }
 
     @Test
+    @DisplayName("The catalog carries the dashboard address, and the page has a place for the link")
+    void theCatalogLinksTheDashboard() {
+        // when
+        MvcTestResult catalog = http.get().uri("/api/catalog").exchange();
+        MvcTestResult index = http.get().uri("/index.html").exchange();
+
+        // then
+        assertThat(catalog).bodyJson().extractingPath("$.dashboardUrl").asString().as("dashboard address")
+                .isEqualTo("http://localhost:3300/d/ledger-relay");
+        assertThat(index).bodyText().as("index.html").contains("id=\"dashboard-link\"");
+    }
+
+    @Test
+    @DisplayName("The library's metrics are exposed for Prometheus to scrape")
+    void metricsAreExposedForPrometheus() {
+        // when
+        MvcTestResult scrape = http.get().uri("/actuator/prometheus").exchange();
+
+        // then
+        assertThat(scrape).hasStatusOk();
+        assertThat(scrape).bodyText().as("scraped metrics").contains("ledger_commands_waiting");
+    }
+
+    @Test
     @DisplayName("Every API path shop.js calls is mapped on the server — so that a rename never silently breaks the UI")
     void everyApiPathTheUiCallsIsMapped() throws Exception {
         // given

@@ -27,9 +27,11 @@ You only need Docker (no JDK, no Node). Give Docker at least 3 GB of memory (Tig
 docker compose up --build        # the first run takes a few minutes to build the images
 ```
 
-Open <http://localhost:8090> in a browser (to change the port: `SHOP_PORT=9000 docker compose up --build`). To shut it down: `docker compose down`. The demo starts from an empty DB and an empty ledger each time (if you stop it with Ctrl-C and run `up` again, it continues where it was).
+Open <http://localhost:8090> in a browser (to change the port: `SHOP_PORT=9000 docker compose up --build`). To shut it down: `docker compose down`. The demo starts from an empty DB and an empty ledger each time (if you stop it with Ctrl-C and run `up` again, it continues where it was). After pulling a newer version, run `docker compose down` first: the app refuses to start on a database an older version created (F47).
 
-It runs PostgreSQL, TigerBeetle, Toxiproxy between them (the cut-off switch), and two apps from the same image (`shop-a` serves the UI and runs a worker, `shop-b` runs a worker). Every number on the screen comes from the real state of PG and TB. The currency is the Thai baht (฿), and payment works like a card: **authorize (reserve) → capture on shipping (post)**.
+The dashboard is at <http://localhost:3300> (Grafana, no login; `GRAFANA_PORT` changes the port). Prometheus scrapes the library's metrics from both apps every 5 seconds. Keep it open next to the shop during scene ②: the waiting line rises while TB is cut, the longest wait grows, and both drop back as the finished-per-second line spikes after you turn TB back on.
+
+It runs PostgreSQL, TigerBeetle, Toxiproxy between them (the cut-off switch), Prometheus and Grafana, and two apps from the same image (`shop-a` serves the UI and runs a worker, `shop-b` runs a worker). Every number on the screen comes from the real state of PG and TB. The currency is the Thai baht (฿), and payment works like a card: **authorize (reserve) → capture on shipping (post)**.
 
 | Scene | What you do | What you see |
 |---|---|---|
@@ -76,7 +78,6 @@ When you run the app in a container, seccomp must allow io_uring, because the TB
 
 ## Not done yet
 
-- Micrometer metrics and dashboards
 - Failure experiments that kill a worker in the middle of processing (open failure O2)
 - Archiving and cleanup of finished commands
 - Publishing to Maven Central

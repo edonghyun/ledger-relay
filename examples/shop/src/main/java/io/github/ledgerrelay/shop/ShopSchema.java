@@ -17,6 +17,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  * them fails and does not start (docs/failure-modes.md F37). So the schema is applied in one transaction that holds an
  * advisory lock, and only when the tables are missing. The later app waits on the lock until the first one commits,
  * then sees the tables and moves on.
+ *
+ * <p>When the tables exist but were created by an older version of the sample app, startup stops with what to do
+ * (F47). Starting on them would make every result write fail and retry forever. The demo is meant to start from an
+ * empty DB and ledger, so there are no migrations.
  */
 public final class ShopSchema {
 
@@ -36,8 +40,20 @@ public final class ShopSchema {
             if (!present) {
                 sql.sql(read(LIBRARY_SCHEMA)).update();
                 sql.sql(read(SHOP_SCHEMA)).update();
+            } else if (!current(sql)) {
+                throw new IllegalStateException("The database was created by an older version of the sample shop. "
+                        + "Start the demo from empty: docker compose down, then docker compose up --build");
             }
         });
+    }
+
+    /** The newest column the shop schema added (03c). An older database does not have it. */
+    private static boolean current(JdbcClient sql) {
+        return sql.sql("""
+                SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'shop_order_command' AND column_name = 'final_state'
+                                 AND table_schema = current_schema())
+                """).query(Boolean.class).single();
     }
 
     private static String read(String resource) {

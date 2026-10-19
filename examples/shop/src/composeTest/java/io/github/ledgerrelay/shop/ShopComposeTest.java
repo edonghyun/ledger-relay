@@ -7,9 +7,11 @@ import java.io.File;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -39,18 +41,26 @@ class ShopComposeTest {
 
     static ComposeContainer compose;
     static String base;
+    static String prometheus;
+    static String grafana;
     static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
 
     @BeforeAll
     static void composeUp() throws Exception {
         int port = freePort();
+        int prometheusPort = freePort();
+        int grafanaPort = freePort();
         compose = new ComposeContainer("relayshop-e2e-" + UUID.randomUUID().toString().substring(0, 8),
                 new File("../../compose.yaml"))
                 .withBuild(true)
                 .withEnv("SHOP_PORT", String.valueOf(port))
+                .withEnv("PROMETHEUS_PORT", String.valueOf(prometheusPort))
+                .withEnv("GRAFANA_PORT", String.valueOf(grafanaPort))
                 .withRemoveVolumes(true);
         compose.start();
         base = "http://127.0.0.1:" + port;
+        prometheus = "http://127.0.0.1:" + prometheusPort;
+        grafana = "http://127.0.0.1:" + grafanaPort;
         await(Duration.ofMinutes(5), "/actuator/health", json -> "UP".equals(JsonPath.read(json, "$.status")));
     }
 
@@ -204,7 +214,33 @@ class ShopComposeTest {
         assertSentBy(after, "shop-a", "shop-b");
     }
 
+    @Test
+    @Order(7)
+    @DisplayName("The dashboard sees both instances, and Prometheus counts as many applied commands as the shop shows")
+    void dashboardSeesBothInstances() throws Exception {
+        // given: the scenes above have finished
+        long applied = number(get("/api/status"), "$.pipeline.applied");
+
+        // when
+        String scraped = awaitAt(prometheus, Duration.ofSeconds(30),
+                "/api/v1/query?query=" + encoded("sum(ledger_commands_finished_total{state=\"applied\"})"),
+                json -> applied == valueOf(json));
+        String up = awaitAt(prometheus, Duration.ofSeconds(30),
+                "/api/v1/query?query=" + encoded("count(up{job=\"shop\"} == 1)"), json -> valueOf(json) == 2);
+
+        // then
+        assertThat(valueOf(scraped)).as("applied commands counted by Prometheus").isEqualTo(applied);
+        assertThat(valueOf(up)).as("shop instances Prometheus scrapes").isEqualTo(2);
+        assertDashboardLoaded();
+    }
+
     // ── Effects checked only in this file ────────────────────────────────
+
+    private static void assertDashboardLoaded() throws Exception {
+        String dashboard = send(HttpRequest.newBuilder(URI.create(grafana + "/api/dashboards/uid/ledger-relay")).GET());
+        assertThat((String) JsonPath.read(dashboard, "$.dashboard.uid")).as("dashboard Grafana serves")
+                .isEqualTo("ledger-relay");
+    }
 
     private static void assertPaidOrdersAddUpTo(String consistency, long amount) {
         assertThat(number(consistency, "$.paidOrdersSatang")).as("sum of paid orders").isEqualTo(amount);
@@ -311,11 +347,15 @@ class ShopComposeTest {
     }
 
     private static String await(Duration limit, String path, Predicate<String> ready) throws Exception {
+        return awaitAt(base, limit, path, ready);
+    }
+
+    private static String awaitAt(String host, Duration limit, String path, Predicate<String> ready) throws Exception {
         long deadline = System.nanoTime() + limit.toNanos();
         String last = null;
         while (System.nanoTime() < deadline) {
             try {
-                last = get(path);
+                last = send(HttpRequest.newBuilder(URI.create(host + path)).GET());
                 if (ready.test(last)) {
                     return last;
                 }
@@ -325,6 +365,16 @@ class ShopComposeTest {
             Thread.sleep(250);
         }
         throw new AssertionError(path + " did not reach the expected value within " + limit + ". Last response: " + last);
+    }
+
+    /** The single value of a Prometheus instant query, or -1 when it has no result yet. */
+    private static long valueOf(String json) {
+        List<List<Object>> values = JsonPath.read(json, "$.data.result[*].value");
+        return values.isEmpty() ? -1 : Math.round(Double.parseDouble((String) values.get(0).get(1)));
+    }
+
+    private static String encoded(String query) {
+        return URLEncoder.encode(query, StandardCharsets.UTF_8);
     }
 
     private static long number(String json, String path) {

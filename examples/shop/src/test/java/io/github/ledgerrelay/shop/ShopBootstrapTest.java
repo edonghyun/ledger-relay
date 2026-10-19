@@ -68,6 +68,22 @@ class ShopBootstrapTest {
                 assertInstanceRowKept(database, "kept", 7);
             }
         }
+
+        @Test
+        @DisplayName("A database left by an older version stops startup with what to do — otherwise every result write fails and retries forever (F47)")
+        void anOlderSchemaStopsStartupWithTheFix() {
+            try (HikariDataSource database = environment.newEmptyDatabase()) {
+                // given: the command table as the previous version created it
+                ShopSchema.apply(database);
+                JdbcClient.create(database).sql("ALTER TABLE shop_order_command DROP COLUMN final_state").update();
+
+                // when
+                ThrowingCallable starting = () -> ShopSchema.apply(database);
+
+                // then
+                assertRefusedAsOutdatedSchema(starting);
+            }
+        }
     }
 
     @Nested
@@ -125,6 +141,11 @@ class ShopBootstrapTest {
             // then
             assertThat(address).isEqualTo("10.0.0.7:3000");
         }
+    }
+
+    private static void assertRefusedAsOutdatedSchema(ThrowingCallable starting) {
+        assertThatThrownBy(starting).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("docker compose down");
     }
 
     private static void assertRefusedAsInvalidAddress(ThrowingCallable construction) {

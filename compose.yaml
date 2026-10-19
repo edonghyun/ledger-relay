@@ -3,12 +3,13 @@
 # Shut down: docker compose down   (the demo starts from an empty DB and an empty ledger each time)
 # Stopping and starting again (up after Ctrl-C, stop/start) continues both as they were. PG and TB always stay
 # together and go away together.
-# Putting only one of them in a named volume leaves only the ledger after down, and the screen shows false
-# duplicate transfers (docs/failure-modes.md F44)
+# Putting only one of them in a named volume leaves only the ledger after down, and the screen shows orders charged
+# twice that never were (docs/failure-modes.md F44)
 #
 #   browser → shop-a (UI, API, worker) ┐
 #             shop-b (worker)          ┴→ PostgreSQL
 #                                      → Toxiproxy (cut-off switch of scene 2) → TigerBeetle
+#   browser → Grafana (http://localhost:3300) → Prometheus → /actuator/prometheus of shop-a and shop-b
 #
 # PG, TB and Toxiproxy open no host ports. With the TB port closed, the cause of the panic right after startup
 # (docs/failure-modes.md F26) has no path either.
@@ -35,6 +36,7 @@ x-shop: &shop
     SPRING_DATASOURCE_PASSWORD: shop
     SHOP_TIGERBEETLE_ADDRESS: toxiproxy:3001
     SHOP_DEMO_TOXIPROXY_URL: http://toxiproxy:8474
+    SHOP_DASHBOARD_URL: http://localhost:${GRAFANA_PORT:-3300}/d/ledger-relay
     LEDGER_RELAY_WORKER_CONCURRENCY: "2"
     LEDGER_RELAY_WORKER_BATCH_SIZE: "4"
     LEDGER_RELAY_WORKER_MAX_IN_FLIGHT: "64"
@@ -92,3 +94,30 @@ services:
     environment:
       <<: *shop-env
       SHOP_INSTANCE_NAME: shop-b
+
+  # The library's metrics, scraped from both instances every 5 s. Nothing is kept after down
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=1d"]
+    volumes:
+      - ./examples/shop/compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "${PROMETHEUS_PORT:-9391}:9090"
+
+  # The dashboard opens without logging in (read only). The data source and the dashboard come from files
+  grafana:
+    image: grafana/grafana:12.2.0
+    depends_on:
+      - prometheus
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/ledger-relay.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./examples/shop/compose/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./examples/shop/compose/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3300}:3000"
