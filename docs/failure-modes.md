@@ -8,7 +8,7 @@ This document lists, one by one, the failures ledger-relay has to prevent. For e
 
 ## 1. Prevented failures
 
-F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F26 the test environment, F27–F36 defects in core, the store and the Spring module found in reviews, F37–F45 were found while building the sample shop (F40 is a library defect found at that time), and F46–F47 were found while adding metrics.
+F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F26 the test environment, F27–F36 defects in core, the store and the Spring module found in reviews, F37–F45 were found while building the sample shop (F40 is a library defect found at that time), F46–F47 were found while adding metrics, and F48 while measuring load (a library defect).
 
 ### F1. Waiting commands of a blocked key use up the claim limit and starve other keys
 
@@ -392,6 +392,13 @@ F1–F10 are core rules, F11–F19 the PostgreSQL store, F21–F25 the worker, F
 - **Reproduction**: `ShopBootstrapTest` › `anOlderSchemaStopsStartupWithTheFix`. Apply the schema, drop the newest column as the older version had it, apply again.
 - **Structure**: when the tables exist, `ShopSchema` checks for the newest column and, if it is missing, stops startup with "The database was created by an older version of the sample shop. Start the demo from empty: docker compose down, then docker compose up --build". The demo is meant to start from an empty DB and ledger, so there are no migrations; the README says to run `down` after pulling.
 - **Verification**: the test failed before the check ("Expecting code to raise a throwable") and passes after it. On the real demo, rebuilding over the 03b database now logs that message and the app does not start; after `down` and `up` it starts and processes orders.
+
+### F48. A batch larger than the TB cluster takes in one request is resent forever and nothing finishes (library)
+
+- **What breaks**: the startup check allows `batch-size` up to 8189, the limit of a production TB replica. A replica started with `--development` takes at most 253 transfers per request. With a larger batch, the TB client refuses every request ("Too much data was sent or requested in this batch"). The worker treated that as a transient failure: it put the commands back and resent them after the backoff, the same size, forever. No command finished, nothing was halted, and the only trace was a DEBUG line per cycle. Found by the load measurement: with a batch of 512, all 20,000 commands had been sent 32 times after 8 minutes and none had finished.
+- **Reproduction**: `TigerBeetleLedgerClientTest` › `aBatchOverTheLimitIsReportedAsUnavailable`. The test container is a development replica; one request of 254 transfers.
+- **Structure**: the adapter wraps TB's `TooMuchDataException` in `LedgerUnavailableException` with a message that says to lower `batch-size`, like a closed or evicted client: resending cannot fix it. The worker still puts the commands back (money does not move), but it is now reported as `ledgerUnavailable`: a WARN log, the `ledger_unavailable` problem counter. Splitting the request automatically was not chosen: the batch size is a setting, and a wrong setting should be visible, not quietly worked around.
+- **Verification**: control experiment — without the `TooMuchDataException` branch the test fails with TB's own exception ("Expecting actual throwable to be an instance of LedgerUnavailableException but was: Too much data…"); with it, the test passes. A development replica has a second limit with no error at all: a ninth client gets no reply to any request (`docs/development.md`, "Known issues").
 
 ## 2. Open failures
 

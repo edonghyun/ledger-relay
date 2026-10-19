@@ -6,6 +6,7 @@ import com.tigerbeetle.ClientEvictedException;
 import com.tigerbeetle.ClientReleaseException;
 import com.tigerbeetle.CreateTransferResultBatch;
 import com.tigerbeetle.IdBatch;
+import com.tigerbeetle.TooMuchDataException;
 import com.tigerbeetle.TransferBatch;
 import com.tigerbeetle.TransferFlags;
 import com.tigerbeetle.UInt128;
@@ -115,13 +116,18 @@ public final class TigerBeetleLedgerClient implements LedgerClient {
 
     /**
      * A closed client, session eviction (more than clients_max) and a client/server version mismatch do not recover on
-     * resend. They are wrapped in {@link LedgerUnavailableException} so they can be told apart from transient failures.
+     * resend. Neither does a batch larger than the cluster takes in one request: the resend is the same size (F48).
+     * They are wrapped in {@link LedgerUnavailableException} so they can be told apart from transient failures.
      * Everything else is left as is.
      */
     private static RuntimeException unavailableOrAsIs(Throwable failure) {
         if (failure instanceof ClientClosedException || failure instanceof ClientEvictedException
                 || failure instanceof ClientReleaseException) {
             return new LedgerUnavailableException("The TB client can no longer be used: " + failure, failure);
+        }
+        if (failure instanceof TooMuchDataException) {
+            return new LedgerUnavailableException("The cluster refuses a request this large; lower batch-size"
+                    + " (a replica started with --development takes at most 253 transfers): " + failure, failure);
         }
         return failure instanceof RuntimeException runtime ? runtime : new CompletionException(failure);
     }

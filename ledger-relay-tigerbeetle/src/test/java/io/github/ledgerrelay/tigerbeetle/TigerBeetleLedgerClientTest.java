@@ -298,6 +298,33 @@ class TigerBeetleLedgerClientTest {
         }
     }
 
+    @Nested
+    @Order(6)
+    @DisplayName("When the batch is larger than the cluster accepts in one request")
+    class BatchOverTheClusterLimit {
+
+        /** A replica started with --development, like the test container, takes at most 253 transfers per request. */
+        static final int OVER_THE_DEVELOPMENT_LIMIT = 254;
+
+        @Test
+        @DisplayName("It is reported as a failure that retrying does not fix, because every resend is refused the same way (F48)")
+        void aBatchOverTheLimitIsReportedAsUnavailable() {
+            // given
+            Submission[] batch = new Submission[OVER_THE_DEVELOPMENT_LIMIT];
+            for (int i = 0; i < batch.length; i++) {
+                batch[i] = transfer(1);
+            }
+
+            // when
+            Throwable failure = catchThrowable(() -> adapter.submit(List.of(batch)).get(30, TimeUnit.SECONDS));
+
+            // then
+            Throwable cause = failure instanceof java.util.concurrent.ExecutionException ? failure.getCause() : failure;
+            assertThat(cause).as("result of sending 254 transfers to a development replica")
+                    .isInstanceOf(LedgerUnavailableException.class).hasMessageContaining("batch-size");
+        }
+    }
+
     // ── Vocabulary used only in this file ──────────────────────────────────────────
 
     private List<LedgerResultCode> submitted(Submission... batch) {
