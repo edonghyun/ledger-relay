@@ -20,16 +20,21 @@ final class Drain {
         Recorder recorder = new Recorder();
         Instant start;
         String note = "";
+        boolean finished;
         try (WaitSampler waits = new WaitSampler(environment.admin())) {
             start = run.dbNow();
             try (Workers workers = Workers.start(run, condition.workers(), condition.batchSize(), recorder)) {
-                if (!run.awaitFinished(LIMIT)) {
+                finished = run.awaitFinished(LIMIT);
+                if (!finished) {
                     note = "not finished within " + LIMIT;
                 }
             }
             Observations observations = Observations.of(recorder, waits.samples());
-            double seconds = Duration.between(start, run.lastCompletion()).toNanos() / 1e9;
-            return new RunResult(condition, repetition, condition.commands() / seconds, null, null, null, run.check(),
+            // An unfinished run fails the check, which drops its numbers. Some runs never complete a single command
+            Double perSecond = finished
+                    ? condition.commands() / (Duration.between(start, run.lastCompletion()).toNanos() / 1e9)
+                    : null;
+            return new RunResult(condition, repetition, perSecond, null, null, null, run.check(),
                     observations, note).withoutNumbersIfFailed();
         }
     }

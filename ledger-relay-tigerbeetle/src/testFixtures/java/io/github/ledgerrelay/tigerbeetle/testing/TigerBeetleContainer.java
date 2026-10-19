@@ -16,7 +16,8 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * Single-replica TigerBeetle container in development mode.
+ * Single-replica TigerBeetle container in development mode, or in the production configuration for measurements
+ * ({@link #production()}).
  *
  * <p>TB uses io_uring, so it cannot start under Docker's default seccomp profile.
  * The entrypoint is replaced with a shell so that format and start run in one container.
@@ -48,6 +49,16 @@ public final class TigerBeetleContainer extends GenericContainer<TigerBeetleCont
 
     public TigerBeetleContainer() {
         this(true);
+    }
+
+    /**
+     * Without {@code --development}. A development replica takes at most 253 transfers per request and answers at most
+     * 8 clients; a ninth client gets no reply at all. Measurements need neither limit. Takes about 2.5 GiB of memory.
+     */
+    public static TigerBeetleContainer production() {
+        return new TigerBeetleContainer(true, "/tigerbeetle format --cluster=0 --replica=0 --replica-count=1 "
+                + DATA_FILE + " && exec /tigerbeetle start --addresses=0.0.0.0:" + PORT + " --cache-grid=512MiB "
+                + DATA_FILE);
     }
 
     TigerBeetleContainer(boolean unconfinedSeccomp) {

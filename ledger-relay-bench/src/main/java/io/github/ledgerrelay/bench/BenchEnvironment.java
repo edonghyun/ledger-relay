@@ -34,7 +34,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * and a new pair of TB accounts, so runs never see each other's commands or transfers.
  *
  * <p>PostgreSQL runs with its default durability ({@code fsync} on, unlike the test container's default), because
- * commit cost is part of what is measured. TigerBeetle runs as the tests run it ({@code --development}).
+ * commit cost is part of what is measured. TigerBeetle runs without {@code --development}, whose request size and
+ * client count limits a batch of 512 and eight workers exceed.
  */
 public final class BenchEnvironment implements AutoCloseable {
 
@@ -62,7 +63,7 @@ public final class BenchEnvironment implements AutoCloseable {
     public static BenchEnvironment start() {
         PostgreSQLContainer postgres = PostgresTestDatabase.container()
                 .withCommand("postgres", "-c", "max_connections=300", "-c", "shared_buffers=256MB");
-        TigerBeetleContainer tigerbeetle = new TigerBeetleContainer();
+        TigerBeetleContainer tigerbeetle = TigerBeetleContainer.production();
         postgres.start();
         tigerbeetle.start();
         return new BenchEnvironment(postgres, tigerbeetle);
