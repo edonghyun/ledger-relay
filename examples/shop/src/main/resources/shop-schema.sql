@@ -14,11 +14,16 @@ CREATE TABLE shop_order (
     updated_at      timestamptz NOT NULL DEFAULT now()
 );
 
--- Ledger commands accepted for an order. The outcome handler finds the order by command id
+-- Ledger commands accepted for an order. The outcome handler finds the order by command id, and records the final
+-- state and the library's acceptance and completion times. The screen counts from here, not from the library's tables
 CREATE TABLE shop_order_command (
-    command_id text COLLATE "C" PRIMARY KEY,
-    order_id   bigint NOT NULL REFERENCES shop_order (id),
-    kind       text NOT NULL CHECK (kind IN ('RESERVE','POST','VOID'))
+    command_id   text COLLATE "C" PRIMARY KEY,
+    order_id     bigint NOT NULL REFERENCES shop_order (id),
+    kind         text NOT NULL CHECK (kind IN ('RESERVE','POST','VOID')),
+    position     bigserial NOT NULL,
+    accepted_at  timestamptz NOT NULL DEFAULT now(),
+    final_state  text,
+    completed_at timestamptz
 );
 CREATE INDEX shop_order_command_order ON shop_order_command (order_id);
 

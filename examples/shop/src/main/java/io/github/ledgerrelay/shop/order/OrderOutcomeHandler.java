@@ -54,6 +54,7 @@ class OrderOutcomeHandler implements LedgerOutcomeHandler {
         }
         long orderId = command.get().orderId();
         ShopOrder order = orders.lock(orderId).orElseThrow();
+        orders.recordOutcome(outcome);
         switch (command.get().kind()) {
             case RESERVE -> onReservation(order, outcome);
             case POST -> onCapture(order, outcome);

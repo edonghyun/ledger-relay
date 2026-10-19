@@ -1,11 +1,16 @@
 package io.github.ledgerrelay.shop.order;
 
 import io.github.ledgerrelay.core.CommandKind;
+import io.github.ledgerrelay.core.CommandStatus;
+import io.github.ledgerrelay.core.LedgerRelay;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import javax.sql.DataSource;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -20,9 +25,12 @@ public class Orders {
             "id, idempotency_key, buyer_id, product_code, amount_satang, state, failure_reason, created_at";
 
     private final JdbcClient sql;
+    /** The submit port is built with the outcome handler, which uses this repository, so it is looked up lazily. */
+    private final ObjectProvider<LedgerRelay> relays;
 
-    public Orders(DataSource dataSource) {
+    public Orders(DataSource dataSource, ObjectProvider<LedgerRelay> relays) {
         this.sql = JdbcClient.create(dataSource);
+        this.relays = relays;
     }
 
     /**
@@ -77,23 +85,40 @@ public class Orders {
                 .query(Orders::command).optional();
     }
 
-    /** The commands of an order, in seq order. */
-    public List<OrderCommand> commandsOf(long orderId) {
-        return sql.sql("""
-                SELECT oc.order_id, oc.command_id, oc.kind
-                FROM shop_order_command oc JOIN ledger_command c ON c.command_id = oc.command_id
-                WHERE oc.order_id = ?
-                ORDER BY c.seq
-                """).param(orderId).query(Orders::command).list();
+    /**
+     * Records the final state of a command with the library's acceptance and completion times. Called by the outcome
+     * handler in the transaction that writes the result, so it commits or rolls back with it. The acceptance time
+     * replaces the shop's own insert time: both times then come from the library's clock.
+     */
+    void recordOutcome(CommandStatus outcome) {
+        sql.sql("""
+                UPDATE shop_order_command SET final_state = ?, accepted_at = ?, completed_at = ?
+                WHERE command_id = ?
+                """).params(outcome.state().name(), timestamp(outcome.acceptedAt()),
+                outcome.completedAt().map(Orders::timestamp).orElse(null), outcome.commandId()).update();
     }
 
-    /** Whether any command of the order is HALTED. Drives the halted chip in the UI. */
+    /** The commands of an order, in the order they were accepted (the same as their order on the key). */
+    public List<OrderCommand> commandsOf(long orderId) {
+        return sql.sql("SELECT order_id, command_id, kind FROM shop_order_command WHERE order_id = ? ORDER BY position")
+                .param(orderId).query(Orders::command).list();
+    }
+
+    /**
+     * Whether any command of the order is halted. Drives the halted chip in the UI. A halted command has not reached a
+     * final state, so only the order's unfinished commands are asked about, through the public query.
+     */
     public boolean isHalted(long orderId) {
-        return sql.sql("""
-                SELECT EXISTS (
-                    SELECT 1 FROM shop_order_command oc JOIN ledger_command c ON c.command_id = oc.command_id
-                    WHERE oc.order_id = ? AND c.state = 'HALTED')
-                """).param(orderId).query(Boolean.class).single();
+        List<String> unfinished = sql.sql(
+                        "SELECT command_id FROM shop_order_command WHERE order_id = ? AND final_state IS NULL")
+                .param(orderId).query(String.class).list();
+        LedgerRelay relay = relays.getObject();
+        return unfinished.stream().map(relay::status).flatMap(Optional::stream)
+                .anyMatch(status -> status.state() == CommandStatus.State.HALTED);
+    }
+
+    private static Timestamp timestamp(Instant instant) {
+        return Timestamp.from(instant);
     }
 
     private static ShopOrder order(ResultSet row, int rowNumber) throws SQLException {
