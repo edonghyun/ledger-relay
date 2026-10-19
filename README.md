@@ -88,6 +88,7 @@ When you run the app in a container, seccomp must allow io_uring, because the TB
 - [docs/failure-modes.md](docs/failure-modes.md): for each prevented failure, what breaks, the reproduction test, the structure, and the verification (control experiment)
 - [docs/development.md](docs/development.md): transactions and lock order, operations notes, sample app setup, known issues
 - [docs/testing.md](docs/testing.md): rules for writing tests (test tree = table of contents of the spec, given/when/then, asserts named after effects)
+- [docs/benchmarks.md](docs/benchmarks.md): throughput and latency by worker count, key spread and batch size, with a correctness check per run and where it stops scaling
 
 ## Build and test
 
